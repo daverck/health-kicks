@@ -1,0 +1,26 @@
+[project]
+name = "healthkicks-backend"
+version = "0.1.0"
+description = "HealthKicks IoT backend for AWS IoT Core and haptic footwear"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "awsiotsdk>=1.26.0",
+    "fastapi>=0.141.1",
+    "paho-mqtt>=2.1.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    "python-dotenv>=1.0.0",
+    "scikit-learn>=1.5.0",
+    "uvicorn>=0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires a real AWS IoT Core connection",
+]

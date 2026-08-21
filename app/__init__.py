@@ -1,0 +1,1 @@
+"""HealthKicks application package."""

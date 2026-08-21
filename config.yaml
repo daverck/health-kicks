@@ -1,0 +1,34 @@
+# HealthKicks runtime configuration.
+# Environment variables HEALTHKICKS_* override these values.
+mqtt:
+  broker: localhost
+  port: 1883
+  keepalive: 60
+  telemetry_topic: health_kicks/imu/telemetry
+  haptic_topic: health_kicks/haptic/cmd
+  client_id: FastAPI_Backend
+
+telemetry:
+  history_size: 100
+
+ai:
+  training_window: 100
+  min_training_samples: 30
+  retrain_interval: 25
+  contamination: 0.05
+  haptic_cooldown_seconds: 2.0
+
+aws_iot:
+  endpoint: a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com
+  connect_timeout_seconds: 15
+  thing_name: health_kicks
+  client_id: healthkicks-backend
+  cert_path: certs/health_kicks.cert.pem
+  private_key_path: certs/health_kicks.private.key
+  root_ca_path: certs/root-CA.crt
+
+  telemetry_topic: healthkicks/devices/health_kicks/telemetry/imu
+  haptic_command_topic: healthkicks/devices/health_kicks/commands/haptic
+  shadow_update_topic: "$aws/things/health_kicks/shadow/update"
+  shadow_get_topic: "$aws/things/health_kicks/shadow/get"
+
