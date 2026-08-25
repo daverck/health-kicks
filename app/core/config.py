@@ -37,9 +37,12 @@ class Settings:
     aws_iot_private_key_path: str = "certs/private.pem.key"
     aws_iot_root_ca_path: str = "certs/AmazonRootCA1.pem"
     aws_iot_telemetry_topic: str = "healthkicks/devices/healthkicks/telemetry/imu"
-    aws_iot_haptic_command_topic: str = "healthkicks/devices/healthkicks/commands/haptic"
+    aws_iot_haptic_command_topic: str = "healthkicks/v1/{device_id}/commands/haptic"
     aws_iot_shadow_update_topic: str = "$aws/things/healthkicks/shadow/update"
     aws_iot_shadow_get_topic: str = "$aws/things/healthkicks/shadow/get"
+    database_url: str = "sqlite:///./healthkicks.db"
+    auto_create_tables: bool = True
+    aws_region: str = "eu-north-1"
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -158,6 +161,9 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "aws_iot_shadow_get_topic": _nested_value(
             yaml_values, "aws_iot", "shadow_get_topic", defaults.aws_iot_shadow_get_topic
         ),
+        "database_url": yaml_values.get("database_url", defaults.database_url),
+            "auto_create_tables": yaml_values.get("auto_create_tables", defaults.auto_create_tables),
+        "aws_region": yaml_values.get("aws_region", defaults.aws_region),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -192,6 +198,9 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "aws_iot_haptic_command_topic": (("HEALTHKICKS_AWS_IOT_HAPTIC_COMMAND_TOPIC", "AWS_IOT_HAPTIC_COMMAND_TOPIC"), str),
         "aws_iot_shadow_update_topic": (("HEALTHKICKS_AWS_IOT_SHADOW_UPDATE_TOPIC", "AWS_IOT_SHADOW_UPDATE_TOPIC"), str),
         "aws_iot_shadow_get_topic": (("HEALTHKICKS_AWS_IOT_SHADOW_GET_TOPIC", "AWS_IOT_SHADOW_GET_TOPIC"), str),
+        "database_url": (("DATABASE_URL", "HEALTHKICKS_DATABASE_URL"), str),
+            "auto_create_tables": (("HEALTHKICKS_AUTO_CREATE_TABLES",), lambda value: value.lower() in {"1", "true", "yes"}),
+        "aws_region": (("AWS_REGION", "AWS_DEFAULT_REGION"), str),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:

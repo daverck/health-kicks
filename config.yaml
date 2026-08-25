@@ -28,7 +28,7 @@ aws_iot:
   root_ca_path: certs/root-CA.crt
 
   telemetry_topic: healthkicks/devices/health_kicks/telemetry/imu
-  haptic_command_topic: healthkicks/devices/health_kicks/commands/haptic
+  haptic_command_topic: healthkicks/v1/{device_id}/commands/haptic
   shadow_update_topic: "$aws/things/health_kicks/shadow/update"
   shadow_get_topic: "$aws/things/health_kicks/shadow/get"
 

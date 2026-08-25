@@ -1,0 +1,31 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://healthkicks:healthkicks@postgres:5432/healthkicks
+      AWS_REGION: ${AWS_REGION:-eu-north-1}
+      AWS_IOT_ENDPOINT: ${AWS_IOT_ENDPOINT:-}
+      AWS_IOT_HAPTIC_COMMAND_TOPIC: ${AWS_IOT_HAPTIC_COMMAND_TOPIC:-healthkicks/v1/{device_id}/commands/haptic}
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: healthkicks
+      POSTGRES_USER: healthkicks
+      POSTGRES_PASSWORD: healthkicks
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthkicks -d healthkicks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

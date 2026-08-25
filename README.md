@@ -1,13 +1,19 @@
 # HealthKicks Backend
 
-Backend FastAPI pour une chaussure connectee HealthKicks : telemetrie IMU via MQTT, detection d'anomalies et retour haptique.
+API FastAPI Cloud pour une chaussure connectee HealthKicks : commandes haptiques,
+historique des chutes et ingestion d'evenements normalises.
 
 ## Architecture
 
-- `app/main.py` assemble FastAPI, les routeurs, le stockage et les services.
+- `app/main.py` assemble l'API Cloud stateless et ses dependances.
+- `app/controllers/cloud_controller.py` expose les routes `/api/v1`.
+- `app/core/database.py` fournit les sessions SQLAlchemy synchrones.
+- `app/models/database.py` contient `Device`, `FallEvent` et `HapticLog`.
+- `app/services/aws_iot_publish_service.py` publie avec boto3 `iot-data` sans client MQTT persistant.
+- `app/services/ingestion_service.py` est la frontiere callable d'ingestion des chutes.
 - `app/core/config.py` charge `config.yaml` et applique les overrides d'environnement.
-- `app/core/aws_iot_client.py` gere AWS IoT Core, mTLS, les reconnexions et les messages.
-- `app/controllers/` expose les endpoints REST.
+- `app/services/aws_iot_publish_service.py` utilise boto3 `iot-data` sans client MQTT persistant.
+- `app/controllers/` expose uniquement le routeur Cloud v1 dans `app.main`.
 - `app/models/` contient les schemas Pydantic.
 - `app/services/` contient le stockage de telemetrie et Isolation Forest.
 - `app/services/shadow_service.py` gere le Device Shadow AWS.
@@ -15,10 +21,33 @@ Backend FastAPI pour une chaussure connectee HealthKicks : telemetrie IMU via MQ
 - `scripts/mock_sensor.py` publie des mesures normales et anormales.
 - `scripts/mock_aws_sensor.py` publie directement vers AWS IoT Core.
 
-## Installation avec uv
+## Installation et lancement avec uv
 
 ```powershell
 uv sync
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+La configuration de production utilise `DATABASE_URL` avec une URL PostgreSQL,
+ainsi que `AWS_REGION`, `AWS_IOT_ENDPOINT` et les credentials IAM du role App Runner. Le
+defaut local est SQLite. `GET /api/v1/health` execute un test DB et retourne
+`ok` ou `degraded`.
+
+## API Cloud
+
+- `POST /api/v1/devices/{device_id}/haptic/trigger`
+- `GET /api/v1/devices`
+- `GET /api/v1/devices/{device_id}/events/falls?page=1&page_size=50`
+- `GET /api/v1/health`
+
+App Runner ne consomme pas directement MQTT : AWS IoT Core doit router les
+messages vers SQS, Lambda ou un worker qui appelle `ingest_fall_event`. Cette
+architecture evite toute connexion MQTT persistante dans le processus HTTP.
+
+## Docker local
+
+```powershell
+docker compose up --build
 ```
 
 ## Tests
@@ -84,8 +113,11 @@ Les variables prefixees par `HEALTHKICKS_` sont prioritaires sur le YAML. Les an
 - `HEALTHKICKS_AI_RETRAIN_INTERVAL`
 - `HEALTHKICKS_AI_CONTAMINATION`, `HEALTHKICKS_AI_HAPTIC_COOLDOWN_SECONDS`
 
-Variables AWS disponibles : `HEALTHKICKS_AWS_IOT_ENDPOINT`, `HEALTHKICKS_AWS_IOT_THING_NAME`, `HEALTHKICKS_AWS_IOT_CLIENT_ID`, `HEALTHKICKS_AWS_IOT_CERT_PATH`, `HEALTHKICKS_AWS_IOT_PRIVATE_KEY_PATH` et `HEALTHKICKS_AWS_IOT_ROOT_CA_PATH`. Les noms `AWS_IOT_*` restent compatibles.
+Variables AWS disponibles : `AWS_REGION`, `AWS_IOT_ENDPOINT`, `AWS_IOT_HAPTIC_COMMAND_TOPIC`, ainsi que leurs variantes `HEALTHKICKS_AWS_IOT_*`. Le template haptique par defaut est `healthkicks/v1/{device_id}/commands/haptic`.
 
 Endpoints Shadow : `GET /api/aws/shadow` et `PATCH /api/aws/shadow` avec un payload comme `{"state": {"vibration_enabled": true, "sensibility_level": 70}}`.
 
-Le modele attend les six champs IMU `ax`, `ay`, `az`, `gx`, `gy`, `gz`. Il se forme apres le warm-up initial, puis declenche une vibration lors d'une prediction d'anomalie si MQTT est connecte.
+Le contrat HTTP expose `/api/v1`, ainsi que `/` et `/api/v1/health`. Les anciens
+routeurs telemetry et haptic ne sont pas montes dans l'application Cloud.
+La creation automatique du schema est active en local ; desactive-la en production
+avec `HEALTHKICKS_AUTO_CREATE_TABLES=false` et applique des migrations versionnees.

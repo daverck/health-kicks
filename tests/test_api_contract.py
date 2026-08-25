@@ -4,7 +4,6 @@ from fastapi import HTTPException
 
 from app.controllers.haptic_controller import create_router
 from app.core.config import settings
-from app.core.mqtt_client import MQTTClient
 from app.main import app
 from app.models.haptic_model import HapticCommand
 
@@ -34,9 +33,10 @@ def get_trigger_endpoint(fake_client: FakeMQTTClient):
 def test_openapi_exposes_expected_endpoints() -> None:
     paths = app.openapi()["paths"]
 
-    assert "/api/telemetry/latest" in paths
-    assert "/api/telemetry/history" in paths
-    assert "/api/haptic/trigger" in paths
+    assert "/api/v1/devices/{device_id}/haptic/trigger" in paths
+    assert "/api/v1/devices" in paths
+    assert "/api/telemetry/latest" not in paths
+    assert "/api/haptic/trigger" not in paths
 
 
 def test_haptic_controller_accepts_json_command() -> None:
@@ -74,7 +74,5 @@ def test_haptic_controller_reports_mqtt_outage() -> None:
         raise AssertionError("Expected a 503 when MQTT publication is unavailable")
 
 
-def test_mqtt_client_drops_haptic_command_when_offline() -> None:
-    client = MQTTClient(settings)
-
-    assert client.publish_haptic(HapticCommand(intensity=80)) is False
+def test_haptic_topic_is_a_device_scoped_template() -> None:
+    assert settings.aws_iot_haptic_command_topic == "healthkicks/v1/{device_id}/commands/haptic"
