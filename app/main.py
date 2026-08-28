@@ -6,10 +6,11 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.controllers.cloud_controller import create_cloud_router
+from app.api.v1.cloud import create_cloud_router
+from app.api.v1.ingestion import create_ingestion_router
 from app.core.config import settings
-from app.core.database import create_tables
-from app.services.aws_iot_publish_service import AWSIoTPublishService
+from app.db.database import create_tables
+from app.services.aws_iot_service import AWSIoTPublishService
 
 publisher = AWSIoTPublishService()
 
@@ -37,6 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(create_cloud_router(publisher))
+app.include_router(create_ingestion_router())
 
 
 @app.get("/", tags=["Health"])

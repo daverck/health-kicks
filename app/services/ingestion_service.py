@@ -6,7 +6,9 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.database import Device, DeviceStatus, FallEvent, FallStatus, ProcessedMessage
+from app.db.models import Device, DeviceStatus, FallEvent, FallStatus, ProcessedMessage
+from app.schemas.ingestion import IngestionEvent
+from app.schemas.ingestion import DeviceStatusEvent, IngestionEvent
 
 
 def _timestamp(value: Any) -> datetime:
@@ -74,17 +76,50 @@ def ingest_fall_event(
     return event
 
 
+def ingest_event(session: Session, message: dict[str, Any]) -> FallEvent | None:
+    """Validate and persist one AWS IoT Rule event with idempotent delivery."""
+    contract = IngestionEvent.model_validate(message)
+    header = contract.header
+    payload = contract.payload
+    if session.query(ProcessedMessage).filter_by(msg_id=header.msg_id).first():
+        return None
+    session.add(ProcessedMessage(msg_id=header.msg_id))
+    _get_device(session, header.device_id, header.timestamp_utc)
+    event = FallEvent(
+        device_id=header.device_id,
+        event_type=payload.event_type,
+        timestamp_utc=header.timestamp_utc,
+        confidence_score=payload.confidence_score,
+        raw_imu_json=payload.raw_imu_snapshot,
+        status_enum=FallStatus.detected,
+    )
+    session.add(event)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        if session.query(ProcessedMessage).filter_by(msg_id=header.msg_id).first():
+            return None
+        raise
+    session.refresh(event)
+    return event
+
+
 def ingest_device_status(
     session: Session,
     message: dict[str, Any],
     headers: dict[str, Any] | None = None,
 ) -> Device:
     """Normalize a device status packet and update its online/offline presence."""
-    header, payload = _parts(message, headers)
-    device_id = str(header.get("device_id") or payload["device_id"])
-    status = DeviceStatus(str(payload.get("status", header.get("status", "offline"))))
-    device = _get_device(session, device_id, _timestamp(header.get("timestamp_utc", payload.get("timestamp_utc"))))
-    device.status = status
+    if headers is not None:
+        message = {"header": headers, "payload": message}
+    contract = DeviceStatusEvent.model_validate(message)
+    device = _get_device(
+        session,
+        contract.header.device_id,
+        contract.header.timestamp_utc or datetime.now(timezone.utc),
+    )
+    device.status = DeviceStatus(contract.payload.status)
     session.commit()
     session.refresh(device)
     return device

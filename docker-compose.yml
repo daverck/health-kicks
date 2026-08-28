@@ -8,6 +8,8 @@ services:
       AWS_REGION: ${AWS_REGION:-eu-north-1}
       AWS_IOT_ENDPOINT: ${AWS_IOT_ENDPOINT:-}
       AWS_IOT_HAPTIC_COMMAND_TOPIC: ${AWS_IOT_HAPTIC_COMMAND_TOPIC:-healthkicks/v1/{device_id}/commands/haptic}
+      HEALTHKICKS_INGEST_TOKEN: ${HEALTHKICKS_INGEST_TOKEN:?Set HEALTHKICKS_INGEST_TOKEN}
+      HEALTHKICKS_ENVIRONMENT: production
     depends_on:
       postgres:
         condition: service_healthy

@@ -8,7 +8,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings, settings
-from app.models.cloud_models import HapticTrigger
+from app.schemas.cloud import HapticTrigger
 
 logger = logging.getLogger(__name__)
 

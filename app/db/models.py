@@ -1,7 +1,6 @@
 """SQLAlchemy persistence models for the Cloud API."""
 
 from datetime import datetime, timezone
-
 from enum import Enum
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, UniqueConstraint
@@ -20,7 +19,7 @@ class DeviceStatus(str, Enum):
 
 
 class FallStatus(str, Enum):
-    """Processing state of a persisted fall event."""
+    """Processing state of a persisted event."""
 
     detected = "detected"
     acknowledged = "acknowledged"
@@ -44,6 +43,7 @@ class FallEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(128), index=True)
+    event_type: Mapped[str] = mapped_column(String(64), default="fall")
     timestamp_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
@@ -66,7 +66,7 @@ class HapticLog(Base):
 
 
 class ProcessedMessage(Base):
-    """Technical idempotency ledger for broker message identifiers."""
+    """Technical idempotency ledger for webhook message identifiers."""
 
     __tablename__ = "processed_messages"
     __table_args__ = (UniqueConstraint("msg_id"),)

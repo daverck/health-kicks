@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
-from app.models.database import Base
+from app.db.models import Base
 
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
@@ -15,7 +15,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def create_tables() -> None:
-    """Create missing tables for local startup; production can use migrations."""
+    """Create missing tables when explicitly enabled."""
     Base.metadata.create_all(bind=engine)
 
 

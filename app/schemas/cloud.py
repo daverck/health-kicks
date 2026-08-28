@@ -1,4 +1,4 @@
-"""Strict API contracts for the Cloud API."""
+"""Strict Cloud API contracts."""
 
 from datetime import datetime
 

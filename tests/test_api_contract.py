@@ -1,78 +1,56 @@
-"""Tests for API schemas, route contracts, and MQTT boundary behavior."""
+"""Tests for the Cloud API contracts and ingestion endpoint."""
 
-from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import sessionmaker
 
-from app.controllers.haptic_controller import create_router
-from app.core.config import settings
+from app.api.v1.ingestion import settings as ingestion_settings
+from app.db.database import get_db
+from app.db.models import Base, FallEvent
 from app.main import app
-from app.models.haptic_model import HapticCommand
+from app.schemas.ingestion import IngestionEvent
 
 
-class FakeMQTTClient:
-    """Capture haptic commands without connecting to a broker."""
-
-    def __init__(self, accepted: bool = True) -> None:
-        self.accepted = accepted
-        self.commands = []
-
-    def publish_haptic(self, command: HapticCommand) -> bool:
-        self.commands.append(command)
-        return self.accepted
-
-
-def get_trigger_endpoint(fake_client: FakeMQTTClient):
-    """Return the endpoint function from the controller router."""
-    router = create_router(fake_client)
-    return next(
-        route.endpoint
-        for route in router.routes
-        if route.path == "/api/haptic/trigger"
-    )
-
-
-def test_openapi_exposes_expected_endpoints() -> None:
+def test_openapi_exposes_cloud_and_ingestion_endpoints() -> None:
     paths = app.openapi()["paths"]
-
+    assert "/api/v1/ingest/event" in paths
     assert "/api/v1/devices/{device_id}/haptic/trigger" in paths
-    assert "/api/v1/devices" in paths
     assert "/api/telemetry/latest" not in paths
-    assert "/api/haptic/trigger" not in paths
 
 
-def test_haptic_controller_accepts_json_command() -> None:
-    fake_client = FakeMQTTClient()
-    endpoint = get_trigger_endpoint(fake_client)
+def test_header_accepts_timestamp_aliases() -> None:
+    payload = {"event_type": "fall", "confidence_score": 0.95, "raw_imu_snapshot": {"ax": 1.0}}
+    header = {"device_id": "shoe-1", "msg_id": "message-1", "timestamp": "2026-01-01T00:00:00Z"}
+    assert IngestionEvent.model_validate({"header": header, "payload": payload}).header.timestamp_utc.year == 2026
+    header["timestamp_utc"] = header.pop("timestamp")
+    assert IngestionEvent.model_validate({"header": header, "payload": payload}).header.timestamp_utc.year == 2026
 
-    response = endpoint(command=HapticCommand(intensity=100, duration_ms=250))
 
-    assert response == {
-        "status": "command_sent",
-        "intensity": 100,
-        "duration_ms": 250,
+def test_ingestion_route_auth_and_idempotence(monkeypatch) -> None:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    def override_db():
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr("app.api.v1.ingestion.settings", ingestion_settings.__class__(ingest_token="secret", environment="production"))
+    payload = {
+        "header": {"device_id": "shoe-1", "msg_id": "message-1", "timestamp": "2026-01-01T00:00:00Z"},
+        "payload": {"event_type": "fall", "confidence_score": 0.95, "raw_imu_snapshot": {"ax": 1.0}},
     }
-    assert fake_client.commands == [HapticCommand(intensity=100, duration_ms=250)]
-
-
-def test_haptic_controller_preserves_query_parameter_contract() -> None:
-    fake_client = FakeMQTTClient()
-    endpoint = get_trigger_endpoint(fake_client)
-
-    response = endpoint(command=None, intensity=80, duration_ms=300)
-
-    assert response["status"] == "command_sent"
-    assert fake_client.commands == [HapticCommand(intensity=80, duration_ms=300)]
-
-
-def test_haptic_controller_reports_mqtt_outage() -> None:
-    endpoint = get_trigger_endpoint(FakeMQTTClient(accepted=False))
-
     try:
-        endpoint(command=None, intensity=80, duration_ms=None)
-    except HTTPException as error:
-        assert error.status_code == 503
-    else:
-        raise AssertionError("Expected a 503 when MQTT publication is unavailable")
-
-
-def test_haptic_topic_is_a_device_scoped_template() -> None:
-    assert settings.aws_iot_haptic_command_topic == "healthkicks/v1/{device_id}/commands/haptic"
+        with TestClient(app) as client:
+            assert client.post("/api/v1/ingest/event", json=payload).status_code == 401
+            headers = {"X-HealthKicks-Ingest-Token": "secret"}
+            assert client.post("/api/v1/ingest/event", json=payload, headers=headers).json()["duplicate"] is False
+            assert client.post("/api/v1/ingest/event", json=payload, headers=headers).json()["duplicate"] is True
+        with session_factory() as session:
+            assert session.query(FallEvent).count() == 1
+    finally:
+        app.dependency_overrides.clear()
