@@ -30,3 +30,4 @@ archive.zip
 # AWS IoT mTLS credentials must never be committed.
 certs/*
 !certs/.gitkeep
+.env
