@@ -6,6 +6,8 @@ Callback behaviour (per project decision):
 - Otherwise return the token as JSON so the flow is testable via Swagger UI.
 """
 
+import logging
+
 from itsdangerous import BadData, URLSafeSerializer
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -20,6 +22,7 @@ from app.services import auth_service
 from fastapi import Depends
 
 _state_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+logger = logging.getLogger(__name__)
 
 
 class UserResponse(StrictModel):
@@ -56,9 +59,11 @@ def create_auth_router() -> APIRouter:
         try:
             claims = auth_service.exchange_code_for_id_token(code)
         except auth_service.GoogleAuthError as error:
+            logger.error("SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error
         user = auth_service.get_or_create_user(db, claims)
         token = auth_service.issue_access_token(user)
+        logger.info("SSO callback: issued access token for user id=%s", user.id)
 
         if settings.frontend_redirect_url:
             separator = "&" if "?" in settings.frontend_redirect_url else "?"

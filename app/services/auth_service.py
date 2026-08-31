@@ -7,12 +7,16 @@ JWT access token for subsequent requests.
 """
 
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Any
 
 import jwt
 import httpx
 from authlib.jose import JsonWebKey, jwt as authlib_jwt
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.db.models import User, UserRole
@@ -83,9 +87,14 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
         raise GoogleAuthError("Unexpected Google token issuer")
     if payload.get("aud") != settings.google_client_id:
         raise GoogleAuthError("Google token audience mismatch")
+
+    # Marge de tolérance de 10 secondes pour éviter l'erreur de décalage d'horloge
+    leeway = 10
+    now = datetime.now(timezone.utc).timestamp()
     exp = payload.get("exp")
-    if not exp or datetime.now(timezone.utc).timestamp() > float(exp):
+    if not exp or now > (float(exp) + leeway):
         raise GoogleAuthError("Google token expired")
+    exp = payload.get("exp")
 
     jwks = _google_jwks()
     key = _find_key(jwks, header.get("kid"))
@@ -93,7 +102,7 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
         raise GoogleAuthError("No matching Google signing key")
     try:
         claims = authlib_jwt.decode(id_token, key)
-        claims.validate()
+        claims.validate(leeway=leeway)
     except Exception as error:
         raise GoogleAuthError(f"Google ID token signature check failed: {error}") from error
     return dict(payload)
@@ -113,15 +122,24 @@ def _find_key(jwks: dict[str, Any], kid: str | None) -> dict[str, Any] | None:
 
 
 def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
-    """JIT-provision the user on first Google sign-in, then refresh presence."""
+    """JIT-provision the user on first Google sign-in, then refresh presence.
+
+    Every step is logged so that a missing row in the ``users`` table can be
+    traced from the Docker logs (``docker compose logs api``).
+    """
     google_sub = str(claims["sub"])
     email = str(claims.get("email") or "").strip().lower()
     if not email:
         raise GoogleAuthError("Google account did not expose an email address")
 
+    db_target = session.get_bind().url.render_as_string(hide_password=True)
+    logger.info("SSO sign-in: sub=%s email=%s db=%s", google_sub, email, db_target)
+
     user = session.query(User).filter_by(google_sub=google_sub).one_or_none()
     if user is None:
         user = session.query(User).filter_by(email=email).one_or_none()
+        if user is not None:
+            logger.info("SSO sign-in: matched existing user id=%s by email", user.id)
     if user is None:
         user = User(
             google_sub=google_sub,
@@ -131,13 +149,43 @@ def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
             role=UserRole.user,
         )
         session.add(user)
+        logger.info("SSO sign-in: staging new user email=%s for insert", email)
     else:
         user.google_sub = google_sub
         user.name = claims.get("name") or user.name
         user.avatar_url = claims.get("picture") or user.avatar_url
     user.last_login_utc = datetime.now(timezone.utc)
-    session.commit()
+
+    try:
+        session.commit()
+    except IntegrityError as error:
+        # Race: the same Google account signed in concurrently. Roll back and
+        # re-read the row the other request inserted instead of failing.
+        session.rollback()
+        logger.warning("SSO sign-in: concurrent insert for email=%s, re-reading", email)
+        user = (
+            session.query(User).filter_by(google_sub=google_sub).one_or_none()
+            or session.query(User).filter_by(email=email).one_or_none()
+        )
+        if user is None:
+            logger.error("SSO sign-in: insert failed and no user found: %s", error)
+            raise GoogleAuthError(f"User persistence failed: {error}") from error
+    except SQLAlchemyError as error:
+        session.rollback()
+        logger.exception(
+            "SSO sign-in: COMMIT FAILED against db=%s for email=%s — rolled back",
+            db_target,
+            email,
+        )
+        raise GoogleAuthError(f"Database error while persisting user: {error}") from error
+
     session.refresh(user)
+    logger.info(
+        "SSO sign-in: user persisted id=%s email=%s role=%s",
+        user.id,
+        user.email,
+        user.role.value,
+    )
     return user
 
 
