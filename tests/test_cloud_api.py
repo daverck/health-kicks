@@ -41,7 +41,7 @@ def test_haptic_failure_is_logged() -> None:
     session = sessionmaker(bind=engine)()
     endpoint = next(route.endpoint for route in create_cloud_router(FailedPublisher()).routes if route.path.endswith("haptic/trigger"))
     try:
-        endpoint("shoe-3", HapticTrigger(intensity=80), session)
+        endpoint("shoe-3", HapticTrigger(intensity=80), user=None, db=session)
     except Exception as error:
         assert getattr(error, "status_code", None) == 503
     else:
