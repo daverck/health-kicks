@@ -24,6 +24,15 @@ class Settings:
     aws_region: str = "eu-north-1"
     ingest_token: str = ""
     environment: str = "development"
+    # Google SSO / JWT (Step 1)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    oauth_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+    frontend_redirect_url: str = ""
+    jwt_secret: str = "dev-only-insecure-secret"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+    public_origins: list[str] | None = None
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -70,6 +79,17 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "aws_region": yaml_values.get("aws_region", defaults.aws_region),
         "ingest_token": yaml_values.get("ingest_token", defaults.ingest_token),
         "environment": yaml_values.get("environment", defaults.environment),
+        # Google SSO / JWT (Step 1); support flat keys and a nested [auth] section.
+        "google_client_id": _nested_value(yaml_values, "auth", "google_client_id", defaults.google_client_id),
+        "google_client_secret": _nested_value(yaml_values, "auth", "google_client_secret", defaults.google_client_secret),
+        "oauth_redirect_uri": _nested_value(yaml_values, "auth", "oauth_redirect_uri", defaults.oauth_redirect_uri),
+        "frontend_redirect_url": _nested_value(yaml_values, "auth", "frontend_redirect_url", defaults.frontend_redirect_url),
+        "jwt_secret": _nested_value(yaml_values, "auth", "jwt_secret", defaults.jwt_secret),
+        "jwt_algorithm": _nested_value(yaml_values, "auth", "jwt_algorithm", defaults.jwt_algorithm),
+        "access_token_expire_minutes": int(
+            _nested_value(yaml_values, "auth", "access_token_expire_minutes", defaults.access_token_expire_minutes)
+        ),
+        "public_origins": yaml_values.get("public_origins", defaults.public_origins),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -80,6 +100,15 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "aws_region": (("AWS_REGION", "AWS_DEFAULT_REGION"), str),
         "ingest_token": (("HEALTHKICKS_INGEST_TOKEN",), str),
         "environment": (("HEALTHKICKS_ENVIRONMENT",), str),
+        # Google SSO / JWT (Step 1)
+        "google_client_id": (("HEALTHKICKS_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"), str),
+        "google_client_secret": (("HEALTHKICKS_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"), str),
+        "oauth_redirect_uri": (("HEALTHKICKS_OAUTH_REDIRECT_URI",), str),
+        "frontend_redirect_url": (("HEALTHKICKS_FRONTEND_REDIRECT_URL",), str),
+        "jwt_secret": (("HEALTHKICKS_JWT_SECRET", "JWT_SECRET"), str),
+        "jwt_algorithm": (("HEALTHKICKS_JWT_ALGORITHM",), str),
+        "access_token_expire_minutes": (("HEALTHKICKS_ACCESS_TOKEN_EXPIRE_MINUTES",), int),
+        "public_origins": (("HEALTHKICKS_PUBLIC_ORIGINS",), lambda value: [origin.strip() for origin in value.split(",") if origin.strip()]),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
