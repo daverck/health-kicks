@@ -73,3 +73,45 @@ class ProcessedMessage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     msg_id: Mapped[str] = mapped_column(String(255), nullable=False)
+
+# --- Auth & user management (Step 2) ---
+
+
+class UserRole(str, Enum):
+    """Role hierarchy for authorization checks."""
+
+    admin = "admin"
+    clinician = "clinician"
+    user = "user"
+
+
+class User(Base):
+    """Google SSO user, auto-provisioned on first sign-in."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    google_sub: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    role: Mapped[UserRole] = mapped_column(default=UserRole.user)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    last_login_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeviceOwnership(Base):
+    """Binding between a user account and an IoT device (future phase)."""
+
+    __tablename__ = "device_ownership"
+    __table_args__ = (UniqueConstraint("user_id", "device_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    device_id: Mapped[str] = mapped_column(String(128), index=True)
+    bound_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
