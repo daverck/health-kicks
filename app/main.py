@@ -6,6 +6,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.ingestion import create_ingestion_router
 from app.core.config import settings
@@ -33,11 +34,12 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.public_origins or ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.include_router(create_cloud_router(publisher))
+app.include_router(create_auth_router())
 app.include_router(create_ingestion_router())
 
 
