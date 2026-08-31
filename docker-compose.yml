@@ -1,9 +1,10 @@
 services:
-  api:
+  # One-shot service: applies Alembic migrations to the local Postgres before
+  # the API starts (mirrors what entrypoint.sh does against RDS in production).
+  migrate:
     build: .
-    ports:
-      - "8000:8000"
-    environment:
+    command: ["alembic", "upgrade", "head"]
+    environment: &api_env
       DATABASE_URL: postgresql+psycopg2://healthkicks:healthkicks@postgres:5432/healthkicks
       AWS_REGION: ${AWS_REGION:-eu-north-1}
       AWS_IOT_ENDPOINT: ${AWS_IOT_ENDPOINT:-}
@@ -19,12 +20,35 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *api_env
+      # Local containers auto-create schema as a fallback; migrations are the
+      # source of truth via the `migrate` service above.
+      HEALTHKICKS_AUTO_CREATE_TABLES: "false"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   postgres:
     image: postgres:16
     environment:
       POSTGRES_DB: healthkicks
       POSTGRES_USER: healthkicks
       POSTGRES_PASSWORD: healthkicks
+      # Faster local startup + tuned for integration-test churn.
+      POSTGRES_INITDB_ARGS: --data-checksums
+    command: ["postgres", "-c", "log_statement=ddl", "-c", "max_connections=100"]
     ports:
       - "5432:5432"
     volumes:
