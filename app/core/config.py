@@ -24,6 +24,9 @@ class Settings:
     aws_region: str = "eu-north-1"
     ingest_token: str = ""
     environment: str = "development"
+    # RDS IAM authentication (token regenerated per connection, 15 min expiry)
+    use_rds_iam: bool = False
+    database_sslmode: str = "require"
     # Google SSO / JWT (Step 1)
     google_client_id: str = ""
     google_client_secret: str = ""
@@ -79,6 +82,8 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "aws_region": yaml_values.get("aws_region", defaults.aws_region),
         "ingest_token": yaml_values.get("ingest_token", defaults.ingest_token),
         "environment": yaml_values.get("environment", defaults.environment),
+        "use_rds_iam": yaml_values.get("use_rds_iam", defaults.use_rds_iam),
+        "database_sslmode": yaml_values.get("database_sslmode", defaults.database_sslmode),
         # Google SSO / JWT (Step 1); support flat keys and a nested [auth] section.
         "google_client_id": _nested_value(yaml_values, "auth", "google_client_id", defaults.google_client_id),
         "google_client_secret": _nested_value(yaml_values, "auth", "google_client_secret", defaults.google_client_secret),
@@ -100,6 +105,8 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "aws_region": (("AWS_REGION", "AWS_DEFAULT_REGION"), str),
         "ingest_token": (("HEALTHKICKS_INGEST_TOKEN",), str),
         "environment": (("HEALTHKICKS_ENVIRONMENT",), str),
+        "use_rds_iam": (("USE_RDS_IAM", "HEALTHKICKS_USE_RDS_IAM"), lambda value: value.lower() in {"1", "true", "yes"}),
+        "database_sslmode": (("DATABASE_SSLMODE", "HEALTHKICKS_DATABASE_SSLMODE"), str),
         # Google SSO / JWT (Step 1)
         "google_client_id": (("HEALTHKICKS_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"), str),
         "google_client_secret": (("HEALTHKICKS_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"), str),
