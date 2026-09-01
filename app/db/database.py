@@ -1,55 +1,70 @@
 """Synchronous SQLAlchemy setup used by HTTP request handlers.
 
-When ``USE_RDS_IAM=true``, the password in DATABASE_URL is ignored: an AWS IAM
-authentication token (valid 15 minutes) is generated for every new physical
-connection via the ``do_connect`` event, so recycled pooled connections never
-outlive their token.
+When ``USE_RDS_IAM=true`` (e.g. running in a container on an EC2 instance
+with the ``EC2ToAuroraBDDAuthRole`` IAM role), a custom ``creator`` opens
+``psycopg2`` connections directly with a fresh AWS RDS IAM auth token
+(valid 15 minutes) on every new physical connection, so pooled connections
+never outlive their token. SSL is enforced via ``DATABASE_SSLMODE``
+(default ``require``).
+
+When ``USE_RDS_IAM=false``, the standard SQLAlchemy connection based on
+``DATABASE_URL`` (classic password) is used — local development default.
 """
 
 from collections.abc import Generator
 
 import boto3
-from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
+import psycopg2
+from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.db.models import Base
 
 
-def _rds_iam_password(url: str) -> str:
-    """Generate a fresh IAM auth token for the host/user in ``url``."""
-    from sqlalchemy.engine import make_url
-
-    db_url = make_url(url)
+def _get_iam_token(db_url) -> str:
+    """Generate a fresh IAM auth token for the host/user in ``db_url``."""
     client = boto3.client("rds", region_name=settings.aws_region)
     return client.generate_db_auth_token(
         DBHostname=db_url.host,
         Port=db_url.port or 5432,
-        DBUsername=db_url.username or "",
+        DBUsername=db_url.username or "postgres",
         Region=settings.aws_region,
     )
 
 
-def _install_rds_iam_hook(engine: Engine, url: str) -> None:
-    """Regenerate the IAM token on each new physical connection."""
-
-    @event.listens_for(engine, "do_connect")
-    def provide_iam_token(dialect, conn_rec, cargs, cparams):
-        token = _rds_iam_password(url)
-        # cparams goes straight to psycopg2.connect(), NOT through a URL, so the
-        # raw token must be passed unquoted (quote_plus would corrupt it).
-        cparams["password"] = token
+def _connect_with_iam():
+    """Custom engine creator: open one psycopg2 connection with a fresh token."""
+    db_url = make_url(settings.database_url)
+    token = _get_iam_token(db_url)
+    return psycopg2.connect(
+        host=db_url.host,
+        port=db_url.port or 5432,
+        user=db_url.username or "postgres",
+        password=token,
+        dbname=db_url.database or "postgres",
+        sslmode=getattr(settings, "database_sslmode", "require"),
+    )
 
 
 _is_postgres = settings.database_url.startswith("postgresql")
-connect_args = {"check_same_thread": False} if not _is_postgres else {}
-if _is_postgres and settings.use_rds_iam and "sslmode" not in settings.database_url:
-    connect_args["sslmode"] = settings.database_sslmode
 
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
-if _is_postgres and settings.use_rds_iam:
-    _install_rds_iam_hook(engine, settings.database_url)
+if _is_postgres and getattr(settings, "use_rds_iam", False):
+    # Custom creator: the token is regenerated on each new physical
+    # connection (the URL password is ignored entirely).
+    engine = create_engine(
+        "postgresql+psycopg2://",
+        creator=_connect_with_iam,
+        pool_pre_ping=True,
+    )
+else:
+    connect_args = {"check_same_thread": False} if not _is_postgres else {}
+    engine = create_engine(
+        settings.database_url,
+        connect_args=connect_args,
+        pool_pre_ping=True,
+    )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
