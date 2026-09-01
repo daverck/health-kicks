@@ -7,12 +7,13 @@ JWT access token for subsequent requests.
 """
 
 from datetime import datetime, timedelta, timezone
+import json
 import logging
 from typing import Any
 
 import jwt
 import httpx
-from authlib.jose import JsonWebKey, jwt as authlib_jwt
+from jwt.algorithms import RSAAlgorithm
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -101,8 +102,15 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     if key is None:
         raise GoogleAuthError("No matching Google signing key")
     try:
-        claims = authlib_jwt.decode(id_token, key)
-        claims.validate(leeway=leeway)
+        public_key = RSAAlgorithm.from_jwk(json.dumps(key))
+        # Signature + exp check (10 s leeway); iss/aud already validated above.
+        jwt.decode(
+            id_token,
+            public_key,
+            algorithms=[header.get("alg", "RS256")],
+            audience=settings.google_client_id,
+            leeway=leeway,
+        )
     except Exception as error:
         raise GoogleAuthError(f"Google ID token signature check failed: {error}") from error
     return dict(payload)
