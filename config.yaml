@@ -3,6 +3,7 @@
 environment: development
 database_url: postgresql+psycopg2://healthkicks:healthkicks@localhost:5432/healthkicks
 auto_create_tables: true
+device_inactivity_days: 30
 
 aws_iot:
   endpoint: a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com
