@@ -79,3 +79,23 @@ def test_alembic_upgrade_head_handles_preexisting_create_all_schema(
         assert conn.execute(sa.text("SELECT count(*) FROM devices")).scalar() == 10
 
     engine.dispose()
+
+
+def test_programmatic_migrations_with_shared_connection(alembic_cfg: Config) -> None:
+    db_url = alembic_cfg.get_main_option("sqlalchemy.url")
+    test_engine = sa.create_engine(db_url)
+
+    # Pass connection in attributes directly, simulating run_migrations()
+    with test_engine.begin() as conn:
+        alembic_cfg.attributes["connection"] = conn
+        command.upgrade(alembic_cfg, "head")
+
+    with test_engine.connect() as conn:
+        tables = set(sa.inspect(conn).get_table_names())
+        assert "devices" in tables
+        assert "alembic_version" in tables
+        count = conn.execute(sa.text("SELECT count(*) FROM devices")).scalar()
+        assert count == 10
+
+    test_engine.dispose()
+
