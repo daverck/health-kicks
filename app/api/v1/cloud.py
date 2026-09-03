@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import CurrentUser, RequireAdmin
 from app.db.database import get_db
 from app.db.models import Device, FallEvent, HapticLog
-from app.schemas.cloud import DeviceResponse, FallEventPage, FallEventResponse, HealthResponse, HapticTrigger
+from app.schemas.cloud import FallEventPage, FallEventResponse, HealthResponse, HapticTrigger
 from app.services.aws_iot_service import AWSIoTPublishService
 
 
@@ -33,10 +33,6 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         if not published:
             raise HTTPException(status_code=503, detail="AWS IoT publish unavailable")
         return {"status": "command_sent", "device_id": device_id, "intensity": command.intensity, "duration_ms": command.duration_ms}
-
-    @router.get("/devices", response_model=list[DeviceResponse])
-    def list_devices(user: CurrentUser, db: Session = Depends(get_db)) -> list[Device]:
-        return list(db.query(Device).order_by(Device.created_at.desc()).all())
 
     @router.get("/devices/{device_id}/events/falls", response_model=FallEventPage)
     def list_falls(device_id: str, user: CurrentUser, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100), db: Session = Depends(get_db)) -> FallEventPage:
