@@ -8,10 +8,12 @@
 #                        run migrations from a separate one-off task instead.
 set -e
 
-if [ "${MIGRATE_ON_START:-false}" = "true" ]; then
-    echo "[entrypoint] Running Alembic migrations against $(echo "$DATABASE_URL" | sed 's|//[^@]*@|//***@|')"
+# Container startup: runs pending Alembic migrations by default before starting uvicorn
+# (set MIGRATE_ON_START=false to disable automatic migrations at container start).
+if [ "${MIGRATE_ON_START:-true}" = "true" ]; then
+    echo "[entrypoint] Running Alembic migrations against $(echo "${DATABASE_URL:-$HEALTHKICKS_DATABASE_URL}" | sed 's|//[^@]*@|//***@|')"
     alembic upgrade head
-    echo "[entrypoint] Migrations up to date."
+    echo "[entrypoint] Migrations completed."
 fi
 
 exec "$@"
