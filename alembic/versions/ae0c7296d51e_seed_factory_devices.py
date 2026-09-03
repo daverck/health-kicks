@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 logger = logging.getLogger("alembic.runtime.migration")
 
-FACTORY_DEVICE_IDS = [f"HK-SHOE-{i:03d}" for i in range(1, 11)]
+FACTORY_DEVICE_IDS = [f"HK-{i}" for i in range(1, 11)]  # HK-1, HK-2, ..., HK-10
 
 
 def upgrade() -> None:
