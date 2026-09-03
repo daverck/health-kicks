@@ -32,7 +32,7 @@ class AWSIoTPublishService:
     def publish_haptic(self, device_id: str, command: HapticTrigger) -> bool:
         """Publish one normalized haptic command without maintaining a connection."""
         topic = self._config.aws_iot_haptic_command_topic.format(device_id=device_id)
-        payload = {"device_id": device_id, "intensity": command.intensity, "duration_ms": command.duration_ms}
+        payload = {"intensity": command.intensity, "duration_ms": command.duration_ms}
         try:
             self._client_for_publish().publish(topic=topic, qos=1, payload=json.dumps(payload))
         except (BotoCoreError, ClientError) as error:
