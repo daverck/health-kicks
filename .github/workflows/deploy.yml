@@ -1,8 +1,10 @@
-name: Build & Deploy Backend to EC2
+name: CI & CD - Test, Build & Deploy Backend to EC2
 
 on:
-  # push:
-  #   branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch: # Permet de lancer le déploiement manuellement depuis GitHub
 
 env:
@@ -11,59 +13,85 @@ env:
   ACCOUNT_ID: 693906847467
 
 jobs:
+  test:
+    name: Run Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Configurer Python 3.11
+        run: uv python install 3.11
+
+      - name: Installer les dépendances
+        run: uv sync --frozen
+
+      - name: Exécuter la suite de tests avec pytest
+        run: uv run pytest -v
+
   deploy:
+    name: Build & Deploy Backend to EC2
+    needs: test
+    # Déploiement déclenché manuellement via workflow_dispatch
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: AWS
 
     steps:
-    - name: Checkout du code
-      uses: actions/checkout@v4
+      - name: Checkout du code
+        uses: actions/checkout@v4
 
-    - name: Configuration des identifiants AWS
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configuration des identifiants AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Connexion à Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Connexion à Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build et Push de l'image Docker sur ECR
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        # Build de l'image et tag en latest + commit SHA
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      - name: Build et Push de l'image Docker sur ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build de l'image et tag en latest + commit SHA
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-    - name: Déploiement SSH sur l'instance EC2
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          # Connexion à ECR depuis l'EC2
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+      - name: Déploiement SSH sur l'instance EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Connexion à ECR depuis l'EC2
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-          # Récupération de la dernière image
-          docker pull ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+            # Récupération de la dernière image
+            docker pull ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
 
-          # Arrêt et suppression de l'ancien conteneur s'il existe
-          docker stop healthkicks-backend || true
-          docker rm healthkicks-backend || true
+            # Arrêt et suppression de l'ancien conteneur s'il existe
+            docker stop healthkicks-backend || true
+            docker rm healthkicks-backend || true
 
-          # Nettoyage des anciennes images inutilisées pour libérer le disque
-          docker image prune -f
+            # Nettoyage des anciennes images inutilisées pour libérer le disque
+            docker image prune -f
 
-          # Relancement du conteneur avec les variables IAM
-          docker run -d \
-            --name healthkicks-backend \
-            --restart unless-stopped \
-            -p 8000:8000 \
-            --env-file /home/ubuntu/.env \
-            ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+            # Relancement du conteneur avec les variables IAM
+            docker run -d \
+              --name healthkicks-backend \
+              --restart unless-stopped \
+              -p 8000:8000 \
+              --env-file /home/ubuntu/.env \
+              ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
