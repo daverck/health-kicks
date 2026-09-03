@@ -12,7 +12,8 @@ FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    MIGRATE_ON_START=true
 
 WORKDIR /app
 COPY --from=builder /build/requirements.txt ./requirements.txt

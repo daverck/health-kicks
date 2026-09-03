@@ -37,6 +37,7 @@ class Settings:
     access_token_expire_minutes: int = 60
     public_origins: list[str] | None = None
     device_inactivity_days: int = 30
+    migrate_on_start: bool = True
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -99,6 +100,9 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "device_inactivity_days": int(
             yaml_values.get("device_inactivity_days", defaults.device_inactivity_days)
         ),
+        "migrate_on_start": bool(
+            yaml_values.get("migrate_on_start", defaults.migrate_on_start)
+        ),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -121,6 +125,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "access_token_expire_minutes": (("HEALTHKICKS_ACCESS_TOKEN_EXPIRE_MINUTES",), int),
         "public_origins": (("HEALTHKICKS_PUBLIC_ORIGINS",), lambda value: [origin.strip() for origin in value.split(",") if origin.strip()]),
         "device_inactivity_days": (("HEALTHKICKS_DEVICE_INACTIVITY_DAYS", "DEVICE_INACTIVITY_DAYS"), int),
+        "migrate_on_start": (("MIGRATE_ON_START", "HEALTHKICKS_MIGRATE_ON_START"), lambda value: value.lower() in {"1", "true", "yes"}),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
