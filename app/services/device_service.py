@@ -1,45 +1,104 @@
 """Service layer for device management and user-device association."""
 
+from datetime import datetime, timedelta, timezone
+import logging
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import Device, DeviceOwnership
 from app.schemas.device import DeviceCreate, DeviceResponse
+
+logger = logging.getLogger(__name__)
 
 
 def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceResponse:
     """
-    Bind a device to a user:
-    1. Retrieve or create the device in the devices table.
-    2. If device already exists and a name is provided, update its name.
-    3. Check if (user_id, device_id) already exists in device_ownership.
-    4. If already bound, raise HTTP 400.
-    5. Otherwise, create DeviceOwnership record and return DeviceResponse.
+    Bind a factory-registered device to a user account:
+    1. Verify that the device exists in the factory inventory (devices table).
+       If absent, raise HTTP 404.
+    2. Check existing ownership for this device:
+       a. If already bound to the current user, raise HTTP 400.
+       b. If bound to another user, check the last activity (connection / telemetry):
+          - If inactive (> device_inactivity_days from config, default 30 days),
+            automatically unbind the previous owner and bind to the new user.
+          - Otherwise, reject with HTTP 400 and log the event.
+    3. Update the device nickname if payload.name is provided.
+    4. Create the new DeviceOwnership entry and return DeviceResponse.
     """
     device = db.query(Device).filter_by(device_id=payload.device_id).one_or_none()
     if device is None:
-        device = Device(device_id=payload.device_id, name=payload.name)
-        db.add(device)
-        db.flush()
-    elif payload.name is not None:
-        device.name = payload.name
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not found",
+        )
 
-    existing_ownership = (
+    existing_ownerships = (
         db.query(DeviceOwnership)
-        .filter_by(user_id=user_id, device_id=payload.device_id)
-        .one_or_none()
+        .filter_by(device_id=payload.device_id)
+        .all()
     )
-    if existing_ownership is not None:
+
+    # Check if already bound to the requesting user
+    if any(o.user_id == user_id for o in existing_ownerships):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Device already bound to this user",
         )
 
-    ownership = DeviceOwnership(user_id=user_id, device_id=payload.device_id)
-    db.add(ownership)
+    # Check if currently bound to another user
+    if existing_ownerships:
+        previous_user_ids = [o.user_id for o in existing_ownerships]
+        timestamps = [device.last_seen_utc] + [o.bound_at_utc for o in existing_ownerships if o.bound_at_utc]
+        valid_timestamps = [t for t in timestamps if t is not None]
+
+        now = datetime.now(timezone.utc)
+        if valid_timestamps:
+            last_activity = max(
+                t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+                for t in valid_timestamps
+            )
+        else:
+            last_activity = None
+
+        inactivity_threshold = timedelta(days=settings.device_inactivity_days)
+        is_inactive = (last_activity is None) or ((now - last_activity) > inactivity_threshold)
+
+        if is_inactive:
+            logger.info(
+                "Device %s auto-unbound from user(s) %s due to inactivity (> %s days, last activity: %s) and re-bound to user %s",
+                payload.device_id,
+                previous_user_ids,
+                settings.device_inactivity_days,
+                last_activity,
+                user_id,
+            )
+            for o in existing_ownerships:
+                db.delete(o)
+            db.flush()
+        else:
+            logger.warning(
+                "Device binding rejected: device %s is currently bound to user(s) %s with recent activity at %s (threshold: %s days)",
+                payload.device_id,
+                previous_user_ids,
+                last_activity,
+                settings.device_inactivity_days,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device is already owned by another user",
+            )
+
+    # Update nickname if provided
+    if payload.name is not None:
+        device.name = payload.name
+
+    new_ownership = DeviceOwnership(user_id=user_id, device_id=payload.device_id)
+    db.add(new_ownership)
     db.commit()
     db.refresh(device)
-    db.refresh(ownership)
+    db.refresh(new_ownership)
 
     return DeviceResponse(
         id=device.id,
@@ -48,7 +107,7 @@ def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceRespo
         status=device.status,
         last_seen_utc=device.last_seen_utc,
         created_at=device.created_at,
-        bound_at_utc=ownership.bound_at_utc,
+        bound_at_utc=new_ownership.bound_at_utc,
     )
 
 
