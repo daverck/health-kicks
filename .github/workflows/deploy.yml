@@ -38,8 +38,9 @@ jobs:
   deploy:
     name: Build & Deploy Backend to EC2
     needs: test
-    # Déploiement déclenché manuellement via workflow_dispatch
-    if: github.event_name == 'workflow_dispatch'
+    # Déploiement automatique après succès des tests sur la branche main
+    if: github.ref == 'refs/heads/main'
+    # if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: AWS
 
