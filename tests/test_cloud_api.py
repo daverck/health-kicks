@@ -1,5 +1,6 @@
 """Focused tests for Cloud persistence and AWS publication."""
 
+import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -9,6 +10,8 @@ from app.schemas.cloud import HapticTrigger
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.ingestion_service import ingest_device_status
 
+TEST_DEVICE_ID = "HK-1"
+
 
 def test_iot_publish_uses_normalized_payload_without_network() -> None:
     class FakeIoTData:
@@ -16,8 +19,12 @@ def test_iot_publish_uses_normalized_payload_without_network() -> None:
             self.kwargs = kwargs
 
     client = FakeIoTData()
-    assert AWSIoTPublishService(client).publish_haptic("shoe-1", HapticTrigger(intensity=80)) is True
-    assert '"device_id": "shoe-1"' in client.kwargs["payload"]
+    command = HapticTrigger(intensity=80, duration_ms=500)
+    assert AWSIoTPublishService(client).publish_haptic(TEST_DEVICE_ID, command) is True
+    assert client.kwargs["topic"] == f"healthkicks/v1/{TEST_DEVICE_ID}/commands/haptic"
+    payload = json.loads(client.kwargs["payload"])
+    assert payload == {"intensity": 80, "duration_ms": 500}
+    assert "device_id" not in payload
 
 
 def test_status_ingestion_updates_device_presence() -> None:

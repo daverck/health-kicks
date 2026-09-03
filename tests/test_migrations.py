@@ -22,6 +22,9 @@ def alembic_cfg(tmp_path: Path, monkeypatch) -> Config:
     return cfg
 
 
+TEST_DEVICE_ID = "HK-1"
+
+
 def test_alembic_upgrade_head_from_scratch(alembic_cfg: Config) -> None:
     db_url = alembic_cfg.get_main_option("sqlalchemy.url")
     engine = sa.create_engine(db_url)
@@ -32,13 +35,15 @@ def test_alembic_upgrade_head_from_scratch(alembic_cfg: Config) -> None:
     # 2. Verify all 10 factory devices are seeded
     with engine.connect() as conn:
         devices = conn.execute(
-            sa.text("SELECT device_id, status FROM devices ORDER BY device_id")
+            sa.text("SELECT device_id, name, status FROM devices")
         ).fetchall()
         assert len(devices) == 10
-        assert devices[0][0] == "HK-SHOE-001"
-        assert devices[-1][0] == "HK-SHOE-010"
-        for _, status in devices:
+        device_ids = {row[0] for row in devices}
+        assert TEST_DEVICE_ID in device_ids
+        assert device_ids == {f"HK-{i}" for i in range(1, 11)}
+        for device_id, name, status in devices:
             assert status == "offline"
+            assert name == f"HealthKicks Shoe {device_id.split('-')[-1]}"
 
     # 3. Test downgrade
     command.downgrade(alembic_cfg, "ac994f8fce7b")

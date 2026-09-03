@@ -83,6 +83,9 @@ def test_unauthenticated_requests_are_rejected(client) -> None:
     assert client.delete("/api/v1/devices/d1").status_code == 401
 
 
+TEST_DEVICE_ID = "HK-1"
+
+
 def test_bind_unknown_device_raises_404(client, auth_headers_a) -> None:
     payload = {"device_id": "non-existent-device", "name": "Fake Shoe"}
     response = client.post("/api/v1/devices", json=payload, headers=auth_headers_a)
@@ -92,16 +95,16 @@ def test_bind_unknown_device_raises_404(client, auth_headers_a) -> None:
 
 def test_bind_factory_device(client, auth_headers_a, db_session, user_a) -> None:
     # Pre-provision factory device in database
-    factory_device = Device(device_id="shoe-left-01")
+    factory_device = Device(device_id=TEST_DEVICE_ID)
     db_session.add(factory_device)
     db_session.commit()
 
-    payload = {"device_id": "shoe-left-01", "name": "Left Smart Shoe"}
+    payload = {"device_id": TEST_DEVICE_ID, "name": "Left Smart Shoe"}
     response = client.post("/api/v1/devices", json=payload, headers=auth_headers_a)
     assert response.status_code == 201
 
     data = response.json()
-    assert data["device_id"] == "shoe-left-01"
+    assert data["device_id"] == TEST_DEVICE_ID
     assert data["name"] == "Left Smart Shoe"
     assert data["status"] == DeviceStatus.offline.value
     assert data["last_seen_utc"] is None
@@ -110,11 +113,11 @@ def test_bind_factory_device(client, auth_headers_a, db_session, user_a) -> None
     assert "created_at" in data
 
     # Verify database state
-    device = db_session.query(Device).filter_by(device_id="shoe-left-01").one()
+    device = db_session.query(Device).filter_by(device_id=TEST_DEVICE_ID).one()
     assert device.name == "Left Smart Shoe"
     ownership = (
         db_session.query(DeviceOwnership)
-        .filter_by(user_id=user_a.id, device_id="shoe-left-01")
+        .filter_by(user_id=user_a.id, device_id=TEST_DEVICE_ID)
         .one()
     )
     assert ownership is not None
