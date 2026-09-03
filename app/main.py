@@ -15,6 +15,7 @@ from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router
 from app.api.v1.ingestion import create_ingestion_router
+from app.api.v1.internal import create_internal_router
 from app.api.v1.users import create_users_router
 from app.core.config import settings
 from app.db.database import create_tables, engine
@@ -76,6 +77,7 @@ app.include_router(create_auth_router())
 app.include_router(create_devices_router())
 app.include_router(create_users_router())
 app.include_router(create_ingestion_router())
+app.include_router(create_internal_router())
 
 
 @app.get("/", tags=["Health"])
