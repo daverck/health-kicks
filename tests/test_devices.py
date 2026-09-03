@@ -1,5 +1,8 @@
 """Integration tests for device association, listing, and dissociation endpoints."""
 
+from datetime import datetime, timedelta, timezone
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -80,7 +83,19 @@ def test_unauthenticated_requests_are_rejected(client) -> None:
     assert client.delete("/api/v1/devices/d1").status_code == 401
 
 
-def test_bind_new_device(client, auth_headers_a, db_session, user_a) -> None:
+def test_bind_unknown_device_raises_404(client, auth_headers_a) -> None:
+    payload = {"device_id": "non-existent-device", "name": "Fake Shoe"}
+    response = client.post("/api/v1/devices", json=payload, headers=auth_headers_a)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Device not found"
+
+
+def test_bind_factory_device(client, auth_headers_a, db_session, user_a) -> None:
+    # Pre-provision factory device in database
+    factory_device = Device(device_id="shoe-left-01")
+    db_session.add(factory_device)
+    db_session.commit()
+
     payload = {"device_id": "shoe-left-01", "name": "Left Smart Shoe"}
     response = client.post("/api/v1/devices", json=payload, headers=auth_headers_a)
     assert response.status_code == 201
@@ -106,12 +121,10 @@ def test_bind_new_device(client, auth_headers_a, db_session, user_a) -> None:
 
 
 def test_bind_existing_device_updates_name(client, auth_headers_a, db_session) -> None:
-    # Pre-create device with an old name
     pre_device = Device(device_id="shoe-right-01", name="Old Name")
     db_session.add(pre_device)
     db_session.commit()
 
-    # User binds and updates name
     payload = {"device_id": "shoe-right-01", "name": "Right Smart Shoe"}
     response = client.post("/api/v1/devices", json=payload, headers=auth_headers_a)
     assert response.status_code == 201
@@ -135,7 +148,10 @@ def test_bind_existing_device_without_name_keeps_name(client, auth_headers_a, db
     assert pre_device.name == "Original Name"
 
 
-def test_bind_duplicate_device_raises_400(client, auth_headers_a) -> None:
+def test_bind_duplicate_device_same_user_raises_400(client, auth_headers_a, db_session) -> None:
+    db_session.add(Device(device_id="shoe-dup-01"))
+    db_session.commit()
+
     payload = {"device_id": "shoe-dup-01", "name": "Smart Shoe"}
     res1 = client.post("/api/v1/devices", json=payload, headers=auth_headers_a)
     assert res1.status_code == 201
@@ -145,26 +161,94 @@ def test_bind_duplicate_device_raises_400(client, auth_headers_a) -> None:
     assert res2.json()["detail"] == "Device already bound to this user"
 
 
-def test_multiple_users_can_bind_same_device(
-    client, auth_headers_a, auth_headers_b, user_a, user_b, db_session
+def test_bind_device_owned_by_another_user_recent_activity_rejected(
+    client, auth_headers_a, user_b, db_session, caplog
 ) -> None:
-    payload = {"device_id": "shared-shoe-01", "name": "Shared Shoe"}
-    res_a = client.post("/api/v1/devices", json=payload, headers=auth_headers_a)
-    assert res_a.status_code == 201
+    # Device bound to user B with recent connection / telemetry (2 days ago)
+    now = datetime.now(timezone.utc)
+    recent_activity = now - timedelta(days=2)
+    device = Device(device_id="shoe-active-01", last_seen_utc=recent_activity)
+    db_session.add(device)
+    db_session.commit()
 
-    res_b = client.post("/api/v1/devices", json=payload, headers=auth_headers_b)
-    assert res_b.status_code == 201
+    ownership_b = DeviceOwnership(
+        user_id=user_b.id,
+        device_id="shoe-active-01",
+        bound_at_utc=recent_activity,
+    )
+    db_session.add(ownership_b)
+    db_session.commit()
 
-    # Check both ownership records exist
-    ownerships = db_session.query(DeviceOwnership).filter_by(device_id="shared-shoe-01").all()
-    assert len(ownerships) == 2
-    user_ids = {o.user_id for o in ownerships}
-    assert user_ids == {user_a.id, user_b.id}
+    # User A tries to bind the device
+    with caplog.at_level(logging.WARNING):
+        response = client.post(
+            "/api/v1/devices",
+            json={"device_id": "shoe-active-01", "name": "User A Shoe"},
+            headers=auth_headers_a,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Device is already owned by another user"
+
+    # Verify event was logged
+    assert any("Device binding rejected: device shoe-active-01" in r.message for r in caplog.records)
+
+    # Verify ownership was NOT transferred and name was NOT updated
+    ownership = db_session.query(DeviceOwnership).filter_by(device_id="shoe-active-01").one()
+    assert ownership.user_id == user_b.id
+
+
+def test_bind_device_owned_by_another_user_inactive_auto_unbinds_and_rebinds(
+    client, auth_headers_a, user_a, user_b, db_session, caplog
+) -> None:
+    # Device bound to user B, but inactive for 45 days (> default 30 days)
+    old_time = datetime.now(timezone.utc) - timedelta(days=45)
+    device = Device(device_id="shoe-inactive-01", last_seen_utc=old_time, name="Old Name")
+    db_session.add(device)
+    db_session.commit()
+
+    ownership_b = DeviceOwnership(
+        user_id=user_b.id,
+        device_id="shoe-inactive-01",
+        bound_at_utc=old_time,
+    )
+    db_session.add(ownership_b)
+    db_session.commit()
+
+    # User A binds the inactive device
+    with caplog.at_level(logging.INFO):
+        response = client.post(
+            "/api/v1/devices",
+            json={"device_id": "shoe-inactive-01", "name": "Transferred Shoe"},
+            headers=auth_headers_a,
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["device_id"] == "shoe-inactive-01"
+    assert data["name"] == "Transferred Shoe"
+
+    # Verify log of auto-unbind
+    assert any("auto-unbound from user(s)" in r.message for r in caplog.records)
+
+    # Verify database state: only user A owns the device now
+    ownerships = db_session.query(DeviceOwnership).filter_by(device_id="shoe-inactive-01").all()
+    assert len(ownerships) == 1
+    assert ownerships[0].user_id == user_a.id
+
+    db_session.refresh(device)
+    assert device.name == "Transferred Shoe"
 
 
 def test_list_user_devices_isolation_and_pagination(
-    client, auth_headers_a, auth_headers_b
+    client, auth_headers_a, auth_headers_b, db_session
 ) -> None:
+    # Pre-create factory devices
+    for i in range(1, 4):
+        db_session.add(Device(device_id=f"device-a-{i}"))
+    db_session.add(Device(device_id="device-b-1"))
+    db_session.commit()
+
     # User A binds 3 devices
     for i in range(1, 4):
         res = client.post(
@@ -208,7 +292,11 @@ def test_list_user_devices_isolation_and_pagination(
 
 
 def test_unbind_device(client, auth_headers_a, db_session, user_a) -> None:
-    # Bind a device
+    # Pre-create factory device
+    db_session.add(Device(device_id="shoe-to-unbind"))
+    db_session.commit()
+
+    # Bind device
     client.post(
         "/api/v1/devices",
         json={"device_id": "shoe-to-unbind", "name": "To Unbind"},
@@ -227,7 +315,7 @@ def test_unbind_device(client, auth_headers_a, db_session, user_a) -> None:
     )
     assert ownership is None
 
-    # Device table row is retained
+    # Device table row is retained in factory inventory
     device = db_session.query(Device).filter_by(device_id="shoe-to-unbind").one_or_none()
     assert device is not None
 

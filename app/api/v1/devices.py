@@ -41,3 +41,4 @@ def create_devices_router() -> APIRouter:
         device_service.unbind_device(db=db, user_id=user.id, device_id=device_id)
 
     return router
+
