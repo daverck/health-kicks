@@ -204,3 +204,4 @@ def get_or_create_azure_user(session: Session, user_info: dict[str, Any]) -> Use
         user.auth_provider,
     )
     return user
+
