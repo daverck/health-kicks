@@ -155,7 +155,6 @@ def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
             name=claims.get("name"),
             avatar_url=claims.get("picture"),
             role=UserRole.user,
-            auth_provider="google",
         )
         session.add(user)
         logger.info("SSO sign-in: staging new user email=%s for insert", email)
@@ -163,8 +162,6 @@ def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
         user.google_sub = google_sub
         user.name = claims.get("name") or user.name
         user.avatar_url = claims.get("picture") or user.avatar_url
-        if not user.auth_provider:
-            user.auth_provider = "google"
     user.last_login_utc = datetime.now(timezone.utc)
 
     try:

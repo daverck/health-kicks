@@ -218,7 +218,6 @@ def test_get_or_create_azure_user_new(db_session) -> None:
     assert user.email == "new.azure@example.com"
     assert user.name == "Azure User"
     assert user.role == UserRole.user
-    assert user.auth_provider == "azure"
     assert user.is_active is True
     assert user.last_login_utc is not None
 
@@ -231,7 +230,6 @@ def test_get_or_create_azure_user_links_existing_google_user(db_session) -> None
         email="shared@example.com",
         name="Original Google Name",
         role=UserRole.admin,
-        auth_provider="google",
     )
     db_session.add(existing)
     db_session.commit()
@@ -250,8 +248,6 @@ def test_get_or_create_azure_user_links_existing_google_user(db_session) -> None
     assert linked_user.azure_sub == "az-new-sub"
     assert linked_user.google_sub == "g-orig-sub"
     assert linked_user.role == UserRole.admin
-    # auth_provider must NOT be overwritten
-    assert linked_user.auth_provider == "google"
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +378,6 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
         email="linked.doc@healthkicks.org",
         name="Dr. Gregory",
         role=UserRole.clinician,
-        auth_provider="google",
     )
     db_session.add(google_user)
     db_session.commit()
@@ -415,11 +410,10 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
         assert data["user"]["email"] == "linked.doc@healthkicks.org"
         assert data["user"]["role"] == "clinician"
 
-        # 3. Verify in DB that account was linked without overriding google_sub or initial auth_provider
+        # 3. Verify in DB that account was linked without overriding google_sub
         db_user = db_session.query(User).filter_by(id=user_id).one()
         assert db_user.google_sub == "g-112233"
         assert db_user.azure_sub == "az-445566"
-        assert db_user.auth_provider == "google"
 
         # 4. Verify /me endpoint works with the issued token
         me_res = auth_client.get(

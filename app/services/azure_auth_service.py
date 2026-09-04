@@ -136,11 +136,7 @@ def exchange_code_for_azure_user(code: str) -> dict[str, Any]:
 
 
 def get_or_create_azure_user(session: Session, user_info: dict[str, Any]) -> User:
-    """JIT-provision the user on Azure sign-in or link with existing email account.
-    
-    If an existing user is matched by email, azure_sub is linked without overwriting
-    the initial auth_provider or altering user permissions.
-    """
+    """JIT-provision the user on Azure sign-in or link with existing email account."""
     azure_sub = str(user_info["azure_sub"])
     email = str(user_info["email"]).strip().lower()
     name = user_info.get("name")
@@ -160,7 +156,6 @@ def get_or_create_azure_user(session: Session, user_info: dict[str, Any]) -> Use
             email=email,
             name=name,
             role=UserRole.user,
-            auth_provider="azure",
         )
         session.add(user)
         logger.info("Azure SSO sign-in: staging new user email=%s for insert", email)
@@ -168,9 +163,6 @@ def get_or_create_azure_user(session: Session, user_info: dict[str, Any]) -> Use
         user.azure_sub = azure_sub
         if not user.name and name:
             user.name = name
-        # Explicit rule: do not overwrite initial provider if already set
-        if not user.auth_provider:
-            user.auth_provider = "azure"
 
     user.last_login_utc = datetime.now(timezone.utc)
 
@@ -197,11 +189,12 @@ def get_or_create_azure_user(session: Session, user_info: dict[str, Any]) -> Use
 
     session.refresh(user)
     logger.info(
-        "Azure SSO sign-in: user persisted id=%s email=%s role=%s provider=%s",
+        "Azure SSO sign-in: user persisted id=%s email=%s role=%s",
         user.id,
         user.email,
         user.role.value,
-        user.auth_provider,
     )
     return user
+
+
 
