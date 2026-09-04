@@ -86,12 +86,14 @@ class UserRole(str, Enum):
 
 
 class User(Base):
-    """Google SSO user, auto-provisioned on first sign-in."""
+    """User account provisioned via Google or Microsoft Entra ID (Azure AD) SSO."""
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    google_sub: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    google_sub: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    azure_sub: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    auth_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
