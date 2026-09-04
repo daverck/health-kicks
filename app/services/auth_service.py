@@ -155,6 +155,7 @@ def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
             name=claims.get("name"),
             avatar_url=claims.get("picture"),
             role=UserRole.user,
+            auth_provider="google",
         )
         session.add(user)
         logger.info("SSO sign-in: staging new user email=%s for insert", email)
@@ -162,6 +163,8 @@ def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
         user.google_sub = google_sub
         user.name = claims.get("name") or user.name
         user.avatar_url = claims.get("picture") or user.avatar_url
+        if not user.auth_provider:
+            user.auth_provider = "google"
     user.last_login_utc = datetime.now(timezone.utc)
 
     try:
@@ -203,6 +206,7 @@ def issue_access_token(user: User) -> str:
     payload = {
         "sub": str(user.id),
         "google_sub": user.google_sub,
+        "azure_sub": user.azure_sub,
         "email": user.email,
         "role": user.role.value,
         "iat": int(now.timestamp()),
@@ -214,3 +218,12 @@ def issue_access_token(user: User) -> str:
 def verify_access_token(token: str) -> dict[str, Any]:
     """Verify one of our own access tokens, raising jwt.PyJWTError on failure."""
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+
+
+# Re-export Microsoft Entra ID (Azure AD) SSO services
+from app.services.azure_auth_service import (  # noqa: E402
+    AzureAuthError,
+    azure_authorization_url,
+    exchange_code_for_azure_user,
+    get_or_create_azure_user,
+)
