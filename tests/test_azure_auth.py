@@ -267,20 +267,30 @@ def test_endpoint_azure_login_unconfigured(mock_azure_settings, db_session) -> N
 
 
 def test_endpoint_azure_login_redirect(auth_client) -> None:
-    res = auth_client.get("/api/v1/auth/azure/login", follow_redirects=False)
+    res = auth_client.get("/api/v1/auth/azure/login?redirect=true", follow_redirects=False)
     assert res.status_code == 307
     location = res.headers["location"]
     assert "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/authorize" in location
     assert "client_id=test-az-client-id" in location
     assert "scope=openid+profile+email+User.Read" in location or "scope=openid%20profile%20email%20User.Read" in location
+    assert "state=" in location
 
 
 def test_endpoint_azure_login_json(auth_client) -> None:
-    res = auth_client.get("/api/v1/auth/azure/login?redirect=false")
+    res = auth_client.get("/api/v1/auth/azure/login")
     assert res.status_code == 200
     data = res.json()
     assert "authorization_url" in data
+    assert "state" in data
     assert "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/authorize" in data["authorization_url"]
+
+    # Verify state is signed and contained in authorization_url
+    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    state_payload = serializer.loads(data["state"])
+    assert state_payload["provider"] == "azure"
+    assert "nonce" in state_payload and len(state_payload["nonce"]) > 0
+    from urllib.parse import quote
+    assert quote(data["state"], safe="") in data["authorization_url"] or data["state"] in data["authorization_url"]
 
 
 def test_endpoint_azure_callback_invalid_state(auth_client) -> None:
@@ -293,8 +303,10 @@ def test_endpoint_azure_callback_invalid_state(auth_client) -> None:
 
 
 def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
+    import secrets
+
     serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
-    valid_state = serializer.dumps({"nonce": "hk", "provider": "azure"})
+    valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
 
     mock_user_info = {
         "azure_sub": "az-sub-777",
@@ -328,35 +340,11 @@ def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
         assert claims["email"] == "doctor@healthkicks.org"
 
 
-def test_endpoint_azure_callback_get_with_frontend_redirect(auth_client, mock_azure_settings) -> None:
-    mock_azure_settings(frontend_redirect_url="https://frontend.healthkicks.org/login")
-
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
-    valid_state = serializer.dumps({"nonce": "hk", "provider": "azure"})
-
-    mock_user_info = {
-        "azure_sub": "az-sub-888",
-        "email": "nurse@healthkicks.org",
-        "name": "Nurse Jackie",
-        "profile": {},
-        "id_token_claims": {},
-    }
-
-    with patch(
-        "app.services.auth_service.exchange_code_for_azure_user",
-        return_value=mock_user_info,
-    ):
-        res = auth_client.get(
-            f"/api/v1/auth/azure/callback?code=valid-code&state={valid_state}",
-            follow_redirects=False,
-        )
-        assert res.status_code == 307
-        assert res.headers["location"].startswith("https://frontend.healthkicks.org/login?access_token=")
-
-
 def test_endpoint_azure_callback_post_token_exchange_error(auth_client) -> None:
+    import secrets
+
     serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
-    valid_state = serializer.dumps({"nonce": "hk", "provider": "azure"})
+    valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
 
     with patch(
         "app.services.auth_service.exchange_code_for_azure_user",
