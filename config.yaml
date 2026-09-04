@@ -11,12 +11,16 @@ aws_iot:
   haptic_command_topic: healthkicks/v1/{device_id}/commands/haptic
 
 
-# Google SSO / JWT authentication.
+# Google and Microsoft Entra ID SSO / JWT authentication.
 # In production, set these via environment variables (HEALTHKICKS_*) instead.
 auth:
   google_client_id: ""
   google_client_secret: ""
   oauth_redirect_uri: http://localhost:8000/api/v1/auth/google/callback
+  azure_client_id: ""
+  azure_client_secret: ""
+  azure_tenant_id: "common"
+  azure_redirect_uri: ""
   frontend_redirect_url: ""   # empty => OAuth callback returns JSON (Swagger-friendly)
   jwt_secret: dev-only-insecure-secret
   jwt_algorithm: HS256

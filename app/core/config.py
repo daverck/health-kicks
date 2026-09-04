@@ -38,6 +38,27 @@ class Settings:
     public_origins: list[str] | None = None
     device_inactivity_days: int = 30
     migrate_on_start: bool = True
+    # Microsoft Entra ID (Azure AD) SSO
+    azure_client_id: str = ""
+    azure_client_secret: str = ""
+    azure_tenant_id: str = "common"
+    azure_redirect_uri: str = ""
+
+    @property
+    def AZURE_CLIENT_ID(self) -> str:
+        return self.azure_client_id
+
+    @property
+    def AZURE_CLIENT_SECRET(self) -> str:
+        return self.azure_client_secret
+
+    @property
+    def AZURE_TENANT_ID(self) -> str:
+        return self.azure_tenant_id
+
+    @property
+    def AZURE_REDIRECT_URI(self) -> str:
+        return self.azure_redirect_uri
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -103,6 +124,11 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "migrate_on_start": bool(
             yaml_values.get("migrate_on_start", defaults.migrate_on_start)
         ),
+        # Microsoft Entra ID (Azure AD) SSO
+        "azure_client_id": _nested_value(yaml_values, "auth", "azure_client_id", defaults.azure_client_id),
+        "azure_client_secret": _nested_value(yaml_values, "auth", "azure_client_secret", defaults.azure_client_secret),
+        "azure_tenant_id": _nested_value(yaml_values, "auth", "azure_tenant_id", defaults.azure_tenant_id),
+        "azure_redirect_uri": _nested_value(yaml_values, "auth", "azure_redirect_uri", defaults.azure_redirect_uri),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -126,6 +152,11 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "public_origins": (("HEALTHKICKS_PUBLIC_ORIGINS",), lambda value: [origin.strip() for origin in value.split(",") if origin.strip()]),
         "device_inactivity_days": (("HEALTHKICKS_DEVICE_INACTIVITY_DAYS", "DEVICE_INACTIVITY_DAYS"), int),
         "migrate_on_start": (("MIGRATE_ON_START", "HEALTHKICKS_MIGRATE_ON_START"), lambda value: value.lower() in {"1", "true", "yes"}),
+        # Microsoft Entra ID (Azure AD) SSO
+        "azure_client_id": (("HEALTHKICKS_AZURE_CLIENT_ID", "AZURE_CLIENT_ID"), str),
+        "azure_client_secret": (("HEALTHKICKS_AZURE_CLIENT_SECRET", "AZURE_CLIENT_SECRET"), str),
+        "azure_tenant_id": (("HEALTHKICKS_AZURE_TENANT_ID", "AZURE_TENANT_ID"), str),
+        "azure_redirect_uri": (("HEALTHKICKS_AZURE_REDIRECT_URI", "AZURE_REDIRECT_URI"), str),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
