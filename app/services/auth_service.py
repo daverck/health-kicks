@@ -36,7 +36,7 @@ def google_authorization_url(state: str) -> str:
     """Build the Google consent redirect (Authorization Code + OIDC scopes)."""
     params = {
         "client_id": settings.google_client_id,
-        "redirect_uri": settings.oauth_redirect_uri,
+        "redirect_uri": settings.google_redirect_uri,
         "response_type": "code",
         "scope": "openid email profile",
         "state": state,
@@ -63,7 +63,7 @@ def exchange_code_for_id_token(code: str) -> dict[str, Any]:
             "code": code,
             "client_id": settings.google_client_id,
             "client_secret": settings.google_client_secret,
-            "redirect_uri": settings.oauth_redirect_uri,
+            "redirect_uri": settings.google_redirect_uri,
             "grant_type": "authorization_code",
         },
         timeout=10.0,

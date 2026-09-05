@@ -30,7 +30,7 @@ class Settings:
     # Google SSO / JWT (Step 1)
     google_client_id: str = ""
     google_client_secret: str = ""
-    oauth_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
     frontend_redirect_url: str = ""
     jwt_secret: str = "dev-only-insecure-secret"
     jwt_algorithm: str = "HS256"
@@ -43,22 +43,6 @@ class Settings:
     azure_client_secret: str = ""
     azure_tenant_id: str = "common"
     azure_redirect_uri: str = ""
-
-    @property
-    def AZURE_CLIENT_ID(self) -> str:
-        return self.azure_client_id
-
-    @property
-    def AZURE_CLIENT_SECRET(self) -> str:
-        return self.azure_client_secret
-
-    @property
-    def AZURE_TENANT_ID(self) -> str:
-        return self.azure_tenant_id
-
-    @property
-    def AZURE_REDIRECT_URI(self) -> str:
-        return self.azure_redirect_uri
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -110,7 +94,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         # Google SSO / JWT (Step 1); support flat keys and a nested [auth] section.
         "google_client_id": _nested_value(yaml_values, "auth", "google_client_id", defaults.google_client_id),
         "google_client_secret": _nested_value(yaml_values, "auth", "google_client_secret", defaults.google_client_secret),
-        "oauth_redirect_uri": _nested_value(yaml_values, "auth", "oauth_redirect_uri", defaults.oauth_redirect_uri),
+        "google_redirect_uri": _nested_value(yaml_values, "auth", "google_redirect_uri", defaults.google_redirect_uri),
         "frontend_redirect_url": _nested_value(yaml_values, "auth", "frontend_redirect_url", defaults.frontend_redirect_url),
         "jwt_secret": _nested_value(yaml_values, "auth", "jwt_secret", defaults.jwt_secret),
         "jwt_algorithm": _nested_value(yaml_values, "auth", "jwt_algorithm", defaults.jwt_algorithm),
@@ -144,7 +128,13 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         # Google SSO / JWT (Step 1)
         "google_client_id": (("HEALTHKICKS_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"), str),
         "google_client_secret": (("HEALTHKICKS_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"), str),
-        "oauth_redirect_uri": (("HEALTHKICKS_OAUTH_REDIRECT_URI",), str),
+        "google_redirect_uri": (
+            (
+                "HEALTHKICKS_GOOGLE_REDIRECT_URI",
+                "GOOGLE_REDIRECT_URI",
+            ),
+            str,
+        ),
         "frontend_redirect_url": (("HEALTHKICKS_FRONTEND_REDIRECT_URL",), str),
         "jwt_secret": (("HEALTHKICKS_JWT_SECRET", "JWT_SECRET"), str),
         "jwt_algorithm": (("HEALTHKICKS_JWT_ALGORITHM",), str),

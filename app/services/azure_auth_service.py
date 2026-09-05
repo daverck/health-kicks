@@ -22,14 +22,14 @@ class AzureAuthError(Exception):
 
 def azure_authorization_url(state: str) -> str:
     """Build the Microsoft Entra ID authorization redirect URL."""
-    if not settings.AZURE_CLIENT_ID or not settings.AZURE_CLIENT_SECRET:
+    if not settings.azure_client_id or not settings.azure_client_secret:
         raise AzureAuthError("Microsoft Azure OAuth credentials are not configured")
-    tenant_id = settings.AZURE_TENANT_ID or "common"
+    tenant_id = settings.azure_tenant_id or "common"
     base_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
     params = {
-        "client_id": settings.AZURE_CLIENT_ID,
+        "client_id": settings.azure_client_id,
         "response_type": "code",
-        "redirect_uri": settings.AZURE_REDIRECT_URI,
+        "redirect_uri": settings.azure_redirect_uri,
         "response_mode": "query",
         "scope": "openid profile email User.Read",
         "state": state,
@@ -40,20 +40,20 @@ def azure_authorization_url(state: str) -> str:
 
 def exchange_code_for_azure_user(code: str) -> dict[str, Any]:
     """Exchange the authorization code for tokens and retrieve the Microsoft user profile."""
-    if not settings.AZURE_CLIENT_ID or not settings.AZURE_CLIENT_SECRET:
+    if not settings.azure_client_id or not settings.azure_client_secret:
         raise AzureAuthError("Microsoft Azure OAuth credentials are not configured")
-    tenant_id = settings.AZURE_TENANT_ID or "common"
+    tenant_id = settings.azure_tenant_id or "common"
     token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
     try:
         response = httpx.post(
             token_endpoint,
             data={
-                "client_id": settings.AZURE_CLIENT_ID,
-                "client_secret": settings.AZURE_CLIENT_SECRET,
+                "client_id": settings.azure_client_id,
+                "client_secret": settings.azure_client_secret,
                 "code": code,
                 "grant_type": "authorization_code",
-                "redirect_uri": settings.AZURE_REDIRECT_URI,
+                "redirect_uri": settings.azure_redirect_uri,
             },
             timeout=10.0,
         )

@@ -95,7 +95,7 @@ def create_auth_router() -> APIRouter:
 
     @router.get("/azure/login")
     def azure_login(request: Request, redirect: bool = False):
-        if not settings.AZURE_CLIENT_ID or not settings.AZURE_CLIENT_SECRET:
+        if not settings.azure_client_id or not settings.azure_client_secret:
             raise HTTPException(status_code=503, detail="Azure SSO is not configured")
         state = _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
         try:
