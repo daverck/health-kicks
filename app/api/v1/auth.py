@@ -1,9 +1,10 @@
-"""Google SSO authentication routes.
+"""SSO (OAuth2/OIDC) authentication routes for Google and Microsoft Entra ID.
 
-Callback behaviour (per project decision):
-- If ``google_frontend_redirect_url`` is configured, redirect the SPA to
-  ``<frontend>?access_token=<jwt>``.
-- Otherwise return the token as JSON so the flow is testable via Swagger UI.
+SPA Frontend-First flow:
+1. Frontend calls GET /api/v1/auth/{provider}/login?redirect=false to obtain the authorization URL & state.
+2. User authenticates on the provider and is redirected directly to the SPA callback route.
+3. The SPA sends code & state via POST /api/v1/auth/{provider}/callback.
+4. Backend verifies state, exchanges code for user profile, and returns the session JWT as JSON.
 """
 
 import logging
@@ -41,46 +42,54 @@ class TokenResponse(StrictModel):
     user: UserResponse
 
 
-class AzureLoginResponse(StrictModel):
+class OAuthLoginResponse(StrictModel):
     authorization_url: str
     state: str
 
 
-class AzureCallbackRequest(StrictModel):
+class OAuthCallbackRequest(StrictModel):
     code: str
     state: str
+
+
+GoogleLoginResponse = OAuthLoginResponse
+GoogleCallbackRequest = OAuthCallbackRequest
+AzureLoginResponse = OAuthLoginResponse
+AzureCallbackRequest = OAuthCallbackRequest
 
 
 def create_auth_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
-    @router.get("/google/login")
-    def google_login() -> RedirectResponse:
+    @router.get("/google/login", response_model=GoogleLoginResponse)
+    def google_login(request: Request, redirect: bool = False):
         if not settings.google_client_id or not settings.google_client_secret:
             raise HTTPException(status_code=503, detail="Google SSO is not configured")
-        state = _state_serializer.dumps({"nonce": "hk"})
-        return RedirectResponse(google_auth_service.google_authorization_url(state))
+        state = _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
+        url = google_auth_service.google_authorization_url(state)
 
-    @router.get("/google/callback")
-    def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+        accept = request.headers.get("accept", "")
+        if redirect and ("text/html" in accept or "application/json" not in accept):
+            return RedirectResponse(url)
+        return GoogleLoginResponse(authorization_url=url, state=state)
+
+    @router.post("/google/callback", response_model=TokenResponse)
+    def google_callback(payload: GoogleCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
         try:
-            _state_serializer.loads(state)
+            _state_serializer.loads(payload.state)
         except BadData as error:
             raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
+
         try:
-            claims = google_auth_service.exchange_code_for_id_token(code)
+            claims = google_auth_service.exchange_code_for_id_token(payload.code)
         except google_auth_service.GoogleAuthError as error:
-            logger.error("SSO callback: token exchange failed: %s", error)
+            logger.error("Google SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error
+
         user = google_auth_service.get_or_create_user(db, claims)
         token = token_service.issue_access_token(user)
-        logger.info("SSO callback: issued access token for user id=%s", user.id)
+        logger.info("Google SSO callback: issued access token for user id=%s", user.id)
 
-        if settings.google_frontend_redirect_url:
-            separator = "&" if "?" in settings.google_frontend_redirect_url else "?"
-            return RedirectResponse(
-                f"{settings.google_frontend_redirect_url}{separator}access_token={token}"
-            )
         return TokenResponse(
             access_token=token,
             user=UserResponse(

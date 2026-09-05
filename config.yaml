@@ -16,12 +16,11 @@ aws_iot:
 auth:
   google_client_id: ""
   google_client_secret: ""
-  google_redirect_uri: "https://healthkicks.duckdns.org:8443/auth/google/callback"
+  google_redirect_uri: "https://healthkicks.duckdns.org/auth/google/callback"
   azure_client_id: ""
   azure_client_secret: ""
   azure_tenant_id: "common"
-  azure_redirect_uri: "https://healthkicks.duckdns.org:8443/auth/azure/callback"
-  google_frontend_redirect_url: ""   # empty => OAuth callback returns JSON (Swagger-friendly)
+  azure_redirect_uri: "https://healthkicks.duckdns.org/auth/azure/callback"
   jwt_secret: dev-only-insecure-secret
   jwt_algorithm: HS256
   access_token_expire_minutes: 60
