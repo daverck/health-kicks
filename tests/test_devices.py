@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.database import get_db
 from app.db.models import Base, Device, DeviceOwnership, DeviceStatus, User, UserRole
 from app.main import app
-from app.services import auth_service
+from app.services import token_service
 
 
 @pytest.fixture()
@@ -67,13 +67,13 @@ def user_b(db_session) -> User:
 
 @pytest.fixture()
 def auth_headers_a(user_a) -> dict[str, str]:
-    token = auth_service.issue_access_token(user_a)
+    token = token_service.issue_access_token(user_a)
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture()
 def auth_headers_b(user_b) -> dict[str, str]:
-    token = auth_service.issue_access_token(user_b)
+    token = token_service.issue_access_token(user_b)
     return {"Authorization": f"Bearer {token}"}
 
 

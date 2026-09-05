@@ -1,26 +1,26 @@
-"""Google SSO (OAuth2/OIDC) and JWT access-token services.
+﻿"""Google SSO (OAuth2/OIDC) services.
 
 The API is stateless: users authenticate through Google's Authorization Code
-flow, the ID token is verified against Google's JWKS, the account is
-auto-provisioned on first sign-in (JIT), and the API issues its own signed
-JWT access token for subsequent requests.
+flow, the ID token is verified against Google's JWKS, and the account is
+auto-provisioned on first sign-in (JIT).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
+from urllib.parse import quote
 
-import jwt
 import httpx
+import jwt
 from jwt.algorithms import RSAAlgorithm
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger(__name__)
-
 from app.core.config import settings
 from app.db.models import User, UserRole
+
+logger = logging.getLogger(__name__)
 
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -43,14 +43,8 @@ def google_authorization_url(state: str) -> str:
         "access_type": "online",
         "prompt": "select_account",
     }
-    query = "&".join(f"{key}={_urlencode(value)}" for key, value in params.items())
+    query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params.items())
     return f"{GOOGLE_AUTH_ENDPOINT}?{query}"
-
-
-def _urlencode(value: str) -> str:
-    from urllib.parse import quote
-
-    return quote(value, safe="")
 
 
 def exchange_code_for_id_token(code: str) -> dict[str, Any]:
@@ -95,7 +89,6 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     exp = payload.get("exp")
     if not exp or now > (float(exp) + leeway):
         raise GoogleAuthError("Google token expired")
-    exp = payload.get("exp")
 
     jwks = _google_jwks()
     key = _find_key(jwks, header.get("kid"))
@@ -195,32 +188,3 @@ def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
         user.role.value,
     )
     return user
-
-
-def issue_access_token(user: User) -> str:
-    """Sign a stateless access token for API calls."""
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": str(user.id),
-        "google_sub": user.google_sub,
-        "azure_sub": user.azure_sub,
-        "email": user.email,
-        "role": user.role.value,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=settings.access_token_expire_minutes)).timestamp()),
-    }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
-
-
-def verify_access_token(token: str) -> dict[str, Any]:
-    """Verify one of our own access tokens, raising jwt.PyJWTError on failure."""
-    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-
-
-# Re-export Microsoft Entra ID (Azure AD) SSO services
-from app.services.azure_auth_service import (  # noqa: E402
-    AzureAuthError,
-    azure_authorization_url,
-    exchange_code_for_azure_user,
-    get_or_create_azure_user,
-)

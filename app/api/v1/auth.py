@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import User
 from app.schemas.cloud import StrictModel
-from app.services import auth_service
+from app.services import azure_auth_service, google_auth_service, token_service
 from fastapi import Depends
 
 _state_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
@@ -59,7 +59,7 @@ def create_auth_router() -> APIRouter:
         if not settings.google_client_id or not settings.google_client_secret:
             raise HTTPException(status_code=503, detail="Google SSO is not configured")
         state = _state_serializer.dumps({"nonce": "hk"})
-        return RedirectResponse(auth_service.google_authorization_url(state))
+        return RedirectResponse(google_auth_service.google_authorization_url(state))
 
     @router.get("/google/callback")
     def google_callback(code: str, state: str, db: Session = Depends(get_db)):
@@ -68,12 +68,12 @@ def create_auth_router() -> APIRouter:
         except BadData as error:
             raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
         try:
-            claims = auth_service.exchange_code_for_id_token(code)
-        except auth_service.GoogleAuthError as error:
+            claims = google_auth_service.exchange_code_for_id_token(code)
+        except google_auth_service.GoogleAuthError as error:
             logger.error("SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error
-        user = auth_service.get_or_create_user(db, claims)
-        token = auth_service.issue_access_token(user)
+        user = google_auth_service.get_or_create_user(db, claims)
+        token = token_service.issue_access_token(user)
         logger.info("SSO callback: issued access token for user id=%s", user.id)
 
         if settings.frontend_redirect_url:
@@ -99,8 +99,8 @@ def create_auth_router() -> APIRouter:
             raise HTTPException(status_code=503, detail="Azure SSO is not configured")
         state = _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
         try:
-            url = auth_service.azure_authorization_url(state)
-        except auth_service.AzureAuthError as error:
+            url = azure_auth_service.azure_authorization_url(state)
+        except azure_auth_service.AzureAuthError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
 
         accept = request.headers.get("accept", "")
@@ -116,13 +116,13 @@ def create_auth_router() -> APIRouter:
             raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
 
         try:
-            user_info = auth_service.exchange_code_for_azure_user(payload.code)
-        except auth_service.AzureAuthError as error:
+            user_info = azure_auth_service.exchange_code_for_azure_user(payload.code)
+        except azure_auth_service.AzureAuthError as error:
             logger.error("Azure SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error
 
-        user = auth_service.get_or_create_azure_user(db, user_info)
-        token = auth_service.issue_access_token(user)
+        user = azure_auth_service.get_or_create_azure_user(db, user_info)
+        token = token_service.issue_access_token(user)
         logger.info("Azure SSO callback: issued access token for user id=%s", user.id)
 
         return TokenResponse(

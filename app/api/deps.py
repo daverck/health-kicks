@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db.models import User, UserRole
-from app.services.auth_service import verify_access_token
+from app.services.token_service import verify_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 

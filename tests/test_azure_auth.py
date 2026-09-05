@@ -15,7 +15,7 @@ from app.api.v1.auth import create_auth_router
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import Base, User, UserRole
-from app.services import auth_service, azure_auth_service
+from app.services import azure_auth_service, token_service
 from app.services.azure_auth_service import AzureAuthError
 
 
@@ -35,14 +35,12 @@ def mock_azure_settings(monkeypatch):
     def _apply(**overrides):
         import app.api.v1.auth
         import app.core.config
-        import app.services.auth_service
         import app.services.azure_auth_service
 
         current = app.core.config.settings
         new_settings = dataclasses.replace(current, **overrides)
         monkeypatch.setattr(app.core.config, "settings", new_settings)
         monkeypatch.setattr(app.services.azure_auth_service, "settings", new_settings)
-        monkeypatch.setattr(app.services.auth_service, "settings", new_settings)
         monkeypatch.setattr(app.api.v1.auth, "settings", new_settings)
         return new_settings
 
@@ -317,7 +315,7 @@ def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
     }
 
     with patch(
-        "app.services.auth_service.exchange_code_for_azure_user",
+        "app.services.azure_auth_service.exchange_code_for_azure_user",
         return_value=mock_user_info,
     ):
         res = auth_client.post(
@@ -334,7 +332,7 @@ def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
         assert data["user"]["is_active"] is True
 
         # Verify access token
-        claims = auth_service.verify_access_token(data["access_token"])
+        claims = token_service.verify_access_token(data["access_token"])
         assert claims["sub"] == str(data["user"]["id"])
         assert claims["azure_sub"] == "az-sub-777"
         assert claims["email"] == "doctor@healthkicks.org"
@@ -347,7 +345,7 @@ def test_endpoint_azure_callback_post_token_exchange_error(auth_client) -> None:
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
 
     with patch(
-        "app.services.auth_service.exchange_code_for_azure_user",
+        "app.services.azure_auth_service.exchange_code_for_azure_user",
         side_effect=AzureAuthError("Azure token exchange failed (401)"),
     ):
         res = auth_client.post(
@@ -385,7 +383,7 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
     }
 
     with patch(
-        "app.services.auth_service.exchange_code_for_azure_user",
+        "app.services.azure_auth_service.exchange_code_for_azure_user",
         return_value=mock_user_info,
     ):
         res = auth_client.post(
