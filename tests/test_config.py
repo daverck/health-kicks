@@ -30,6 +30,7 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert settings.azure_tenant_id == "common"
     assert settings.azure_redirect_uri == ""
     assert settings.google_redirect_uri == "http://localhost:8000/api/v1/auth/google/callback"
+    assert settings.google_frontend_redirect_url == ""
 
 
 def test_azure_environment_overrides(tmp_path: Path, monkeypatch) -> None:
@@ -47,6 +48,8 @@ def test_azure_environment_overrides(tmp_path: Path, monkeypatch) -> None:
 
 def test_google_environment_overrides(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://healthkicks.duckdns.org:8443/auth/google/callback")
+    monkeypatch.setenv("GOOGLE_FRONTEND_REDIRECT_URL", "https://healthkicks.duckdns.org/auth/google/callback")
     settings = load_settings(tmp_path / "missing.yaml")
     assert settings.google_redirect_uri == "https://healthkicks.duckdns.org:8443/auth/google/callback"
+    assert settings.google_frontend_redirect_url == "https://healthkicks.duckdns.org/auth/google/callback"
 

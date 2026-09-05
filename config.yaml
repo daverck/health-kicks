@@ -21,7 +21,7 @@ auth:
   azure_client_secret: ""
   azure_tenant_id: "common"
   azure_redirect_uri: "https://healthkicks.duckdns.org:8443/auth/azure/callback"
-  frontend_redirect_url: ""   # empty => OAuth callback returns JSON (Swagger-friendly)
+  google_frontend_redirect_url: ""   # empty => OAuth callback returns JSON (Swagger-friendly)
   jwt_secret: dev-only-insecure-secret
   jwt_algorithm: HS256
   access_token_expire_minutes: 60

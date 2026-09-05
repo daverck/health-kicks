@@ -31,7 +31,7 @@ class Settings:
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
-    frontend_redirect_url: str = ""
+    google_frontend_redirect_url: str = ""
     jwt_secret: str = "dev-only-insecure-secret"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
@@ -95,7 +95,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "google_client_id": _nested_value(yaml_values, "auth", "google_client_id", defaults.google_client_id),
         "google_client_secret": _nested_value(yaml_values, "auth", "google_client_secret", defaults.google_client_secret),
         "google_redirect_uri": _nested_value(yaml_values, "auth", "google_redirect_uri", defaults.google_redirect_uri),
-        "frontend_redirect_url": _nested_value(yaml_values, "auth", "frontend_redirect_url", defaults.frontend_redirect_url),
+        "google_frontend_redirect_url": _nested_value(yaml_values, "auth", "google_frontend_redirect_url", defaults.google_frontend_redirect_url),
         "jwt_secret": _nested_value(yaml_values, "auth", "jwt_secret", defaults.jwt_secret),
         "jwt_algorithm": _nested_value(yaml_values, "auth", "jwt_algorithm", defaults.jwt_algorithm),
         "access_token_expire_minutes": int(
@@ -135,7 +135,13 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             ),
             str,
         ),
-        "frontend_redirect_url": (("HEALTHKICKS_FRONTEND_REDIRECT_URL",), str),
+        "google_frontend_redirect_url": (
+            (
+                "HEALTHKICKS_GOOGLE_FRONTEND_REDIRECT_URL",
+                "GOOGLE_FRONTEND_REDIRECT_URL",
+            ),
+            str,
+        ),
         "jwt_secret": (("HEALTHKICKS_JWT_SECRET", "JWT_SECRET"), str),
         "jwt_algorithm": (("HEALTHKICKS_JWT_ALGORITHM",), str),
         "access_token_expire_minutes": (("HEALTHKICKS_ACCESS_TOKEN_EXPIRE_MINUTES",), int),

@@ -1,8 +1,8 @@
 """Google SSO authentication routes.
 
 Callback behaviour (per project decision):
-- If ``frontend_redirect_url`` is configured, redirect the SPA to
-  ``<frontend>#access_token=<jwt>`` (fragment, never sent to servers/logs).
+- If ``google_frontend_redirect_url`` is configured, redirect the SPA to
+  ``<frontend>?access_token=<jwt>``.
 - Otherwise return the token as JSON so the flow is testable via Swagger UI.
 """
 
@@ -76,10 +76,10 @@ def create_auth_router() -> APIRouter:
         token = token_service.issue_access_token(user)
         logger.info("SSO callback: issued access token for user id=%s", user.id)
 
-        if settings.frontend_redirect_url:
-            separator = "&" if "?" in settings.frontend_redirect_url else "?"
+        if settings.google_frontend_redirect_url:
+            separator = "&" if "?" in settings.google_frontend_redirect_url else "?"
             return RedirectResponse(
-                f"{settings.frontend_redirect_url}{separator}access_token={token}"
+                f"{settings.google_frontend_redirect_url}{separator}access_token={token}"
             )
         return TokenResponse(
             access_token=token,
