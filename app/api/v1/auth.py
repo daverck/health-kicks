@@ -27,6 +27,23 @@ _state_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
 logger = logging.getLogger(__name__)
 
 
+def generate_oauth_state(provider: str) -> str:
+    """Generate a signed anti-CSRF OAuth state containing a nonce and the provider name."""
+    return _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": provider})
+
+
+def verify_oauth_state(state: str, expected_provider: str) -> dict:
+    """Validate the cryptographic signature and provider of an anti-CSRF OAuth state."""
+    try:
+        data = _state_serializer.loads(state)
+    except BadData as error:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
+
+    if not isinstance(data, dict) or data.get("provider") != expected_provider:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    return data
+
+
 class UserResponse(StrictModel):
     id: int
     email: str
@@ -35,11 +52,30 @@ class UserResponse(StrictModel):
     role: str
     is_active: bool
 
+    @classmethod
+    def from_user(cls, user: User) -> "UserResponse":
+        return cls(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            avatar_url=user.avatar_url,
+            role=user.role.value if hasattr(user.role, "value") else str(user.role),
+            is_active=user.is_active,
+        )
+
 
 class TokenResponse(StrictModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+    @classmethod
+    def build(cls, user: User, token: str) -> "TokenResponse":
+        return cls(
+            access_token=token,
+            token_type="bearer",
+            user=UserResponse.from_user(user),
+        )
 
 
 class OAuthLoginResponse(StrictModel):
@@ -65,7 +101,7 @@ def create_auth_router() -> APIRouter:
     def google_login(request: Request, redirect: bool = False):
         if not settings.google_client_id or not settings.google_client_secret:
             raise HTTPException(status_code=503, detail="Google SSO is not configured")
-        state = _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
+        state = generate_oauth_state("google")
         url = google_auth_service.google_authorization_url(state)
 
         accept = request.headers.get("accept", "")
@@ -75,10 +111,7 @@ def create_auth_router() -> APIRouter:
 
     @router.post("/google/callback", response_model=TokenResponse)
     def google_callback(payload: GoogleCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        try:
-            _state_serializer.loads(payload.state)
-        except BadData as error:
-            raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
+        verify_oauth_state(payload.state, expected_provider="google")
 
         try:
             claims = google_auth_service.exchange_code_for_id_token(payload.code)
@@ -90,23 +123,13 @@ def create_auth_router() -> APIRouter:
         token = token_service.issue_access_token(user)
         logger.info("Google SSO callback: issued access token for user id=%s", user.id)
 
-        return TokenResponse(
-            access_token=token,
-            user=UserResponse(
-                id=user.id,
-                email=user.email,
-                name=user.name,
-                avatar_url=user.avatar_url,
-                role=user.role.value,
-                is_active=user.is_active,
-            ),
-        )
+        return TokenResponse.build(user, token)
 
     @router.get("/azure/login")
     def azure_login(request: Request, redirect: bool = False):
         if not settings.azure_client_id or not settings.azure_client_secret:
             raise HTTPException(status_code=503, detail="Azure SSO is not configured")
-        state = _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
+        state = generate_oauth_state("azure")
         try:
             url = azure_auth_service.azure_authorization_url(state)
         except azure_auth_service.AzureAuthError as error:
@@ -119,10 +142,7 @@ def create_auth_router() -> APIRouter:
 
     @router.post("/azure/callback", response_model=TokenResponse)
     def azure_callback(payload: AzureCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        try:
-            _state_serializer.loads(payload.state)
-        except BadData as error:
-            raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
+        verify_oauth_state(payload.state, expected_provider="azure")
 
         try:
             user_info = azure_auth_service.exchange_code_for_azure_user(payload.code)
@@ -134,27 +154,10 @@ def create_auth_router() -> APIRouter:
         token = token_service.issue_access_token(user)
         logger.info("Azure SSO callback: issued access token for user id=%s", user.id)
 
-        return TokenResponse(
-            access_token=token,
-            user=UserResponse(
-                id=user.id,
-                email=user.email,
-                name=user.name,
-                avatar_url=user.avatar_url,
-                role=user.role.value,
-                is_active=user.is_active,
-            ),
-        )
+        return TokenResponse.build(user, token)
 
     @router.get("/me", response_model=UserResponse)
     def me(user: CurrentUser) -> UserResponse:
-        return UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            avatar_url=user.avatar_url,
-            role=user.role.value,
-            is_active=user.is_active,
-        )
+        return UserResponse.from_user(user)
 
     return router

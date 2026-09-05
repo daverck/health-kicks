@@ -1,17 +1,16 @@
 """Microsoft Entra ID (Azure AD) SSO (OAuth2/OIDC) and Graph services."""
 
-from datetime import datetime, timezone
 import logging
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 import jwt
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import User, UserRole
+from app.db.models import User
+from app.services.user_service import UserProvisioningError, upsert_sso_user
 
 logger = logging.getLogger(__name__)
 
@@ -137,64 +136,17 @@ def exchange_code_for_azure_user(code: str) -> dict[str, Any]:
 
 def get_or_create_azure_user(session: Session, user_info: dict[str, Any]) -> User:
     """JIT-provision the user on Azure sign-in or link with existing email account."""
-    azure_sub = str(user_info["azure_sub"])
-    email = str(user_info["email"]).strip().lower()
-    name = user_info.get("name")
-
-    db_target = session.get_bind().url.render_as_string(hide_password=True)
-    logger.info("Azure SSO sign-in: azure_sub=%s email=%s db=%s", azure_sub, email, db_target)
-
-    user = session.query(User).filter_by(azure_sub=azure_sub).one_or_none()
-    if user is None:
-        user = session.query(User).filter_by(email=email).one_or_none()
-        if user is not None:
-            logger.info("Azure SSO sign-in: matched existing user id=%s by email", user.id)
-
-    if user is None:
-        user = User(
-            azure_sub=azure_sub,
-            email=email,
-            name=name,
-            role=UserRole.user,
-        )
-        session.add(user)
-        logger.info("Azure SSO sign-in: staging new user email=%s for insert", email)
-    else:
-        user.azure_sub = azure_sub
-        if not user.name and name:
-            user.name = name
-
-    user.last_login_utc = datetime.now(timezone.utc)
-
     try:
-        session.commit()
-    except IntegrityError as error:
-        session.rollback()
-        logger.warning("Azure SSO sign-in: concurrent insert for email=%s, re-reading", email)
-        user = (
-            session.query(User).filter_by(azure_sub=azure_sub).one_or_none()
-            or session.query(User).filter_by(email=email).one_or_none()
+        return upsert_sso_user(
+            session=session,
+            provider="azure",
+            provider_sub=str(user_info["azure_sub"]),
+            email=str(user_info["email"]),
+            name=user_info.get("name"),
+            avatar_url=None,
         )
-        if user is None:
-            logger.error("Azure SSO sign-in: insert failed and no user found: %s", error)
-            raise AzureAuthError(f"User persistence failed: {error}") from error
-    except SQLAlchemyError as error:
-        session.rollback()
-        logger.exception(
-            "Azure SSO sign-in: COMMIT FAILED against db=%s for email=%s — rolled back",
-            db_target,
-            email,
-        )
-        raise AzureAuthError(f"Database error while persisting user: {error}") from error
-
-    session.refresh(user)
-    logger.info(
-        "Azure SSO sign-in: user persisted id=%s email=%s role=%s",
-        user.id,
-        user.email,
-        user.role.value,
-    )
-    return user
+    except UserProvisioningError as error:
+        raise AzureAuthError(str(error)) from error
 
 
 

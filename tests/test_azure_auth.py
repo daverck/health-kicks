@@ -300,6 +300,18 @@ def test_endpoint_azure_callback_invalid_state(auth_client) -> None:
     assert "Invalid OAuth state" in res.json()["detail"]
 
 
+def test_endpoint_azure_callback_rejects_google_state(auth_client) -> None:
+    from app.api.v1.auth import generate_oauth_state
+
+    google_state = generate_oauth_state("google")
+    res = auth_client.post(
+        "/api/v1/auth/azure/callback",
+        json={"code": "auth-code", "state": google_state},
+    )
+    assert res.status_code == 400
+    assert "Invalid OAuth state" in res.json()["detail"]
+
+
 def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
     import secrets
 

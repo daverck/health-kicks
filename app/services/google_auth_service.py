@@ -1,11 +1,10 @@
-﻿"""Google SSO (OAuth2/OIDC) services.
+"""Google SSO (OAuth2/OIDC) services.
 
 The API is stateless: users authenticate through Google's Authorization Code
 flow, the ID token is verified against Google's JWKS, and the account is
 auto-provisioned on first sign-in (JIT).
 """
 
-from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
@@ -14,11 +13,11 @@ from urllib.parse import quote
 import httpx
 import jwt
 from jwt.algorithms import RSAAlgorithm
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import User, UserRole
+from app.db.models import User
+from app.services.user_service import UserProvisioningError, upsert_sso_user
 
 logger = logging.getLogger(__name__)
 
@@ -123,68 +122,15 @@ def _find_key(jwks: dict[str, Any], kid: str | None) -> dict[str, Any] | None:
 
 
 def get_or_create_user(session: Session, claims: dict[str, Any]) -> User:
-    """JIT-provision the user on first Google sign-in, then refresh presence.
-
-    Every step is logged so that a missing row in the ``users`` table can be
-    traced from the Docker logs (``docker compose logs api``).
-    """
-    google_sub = str(claims["sub"])
-    email = str(claims.get("email") or "").strip().lower()
-    if not email:
-        raise GoogleAuthError("Google account did not expose an email address")
-
-    db_target = session.get_bind().url.render_as_string(hide_password=True)
-    logger.info("SSO sign-in: sub=%s email=%s db=%s", google_sub, email, db_target)
-
-    user = session.query(User).filter_by(google_sub=google_sub).one_or_none()
-    if user is None:
-        user = session.query(User).filter_by(email=email).one_or_none()
-        if user is not None:
-            logger.info("SSO sign-in: matched existing user id=%s by email", user.id)
-    if user is None:
-        user = User(
-            google_sub=google_sub,
-            email=email,
+    """JIT-provision the user on first Google sign-in, then refresh presence."""
+    try:
+        return upsert_sso_user(
+            session=session,
+            provider="google",
+            provider_sub=str(claims.get("sub") or ""),
+            email=str(claims.get("email") or ""),
             name=claims.get("name"),
             avatar_url=claims.get("picture"),
-            role=UserRole.user,
         )
-        session.add(user)
-        logger.info("SSO sign-in: staging new user email=%s for insert", email)
-    else:
-        user.google_sub = google_sub
-        user.name = claims.get("name") or user.name
-        user.avatar_url = claims.get("picture") or user.avatar_url
-    user.last_login_utc = datetime.now(timezone.utc)
-
-    try:
-        session.commit()
-    except IntegrityError as error:
-        # Race: the same Google account signed in concurrently. Roll back and
-        # re-read the row the other request inserted instead of failing.
-        session.rollback()
-        logger.warning("SSO sign-in: concurrent insert for email=%s, re-reading", email)
-        user = (
-            session.query(User).filter_by(google_sub=google_sub).one_or_none()
-            or session.query(User).filter_by(email=email).one_or_none()
-        )
-        if user is None:
-            logger.error("SSO sign-in: insert failed and no user found: %s", error)
-            raise GoogleAuthError(f"User persistence failed: {error}") from error
-    except SQLAlchemyError as error:
-        session.rollback()
-        logger.exception(
-            "SSO sign-in: COMMIT FAILED against db=%s for email=%s — rolled back",
-            db_target,
-            email,
-        )
-        raise GoogleAuthError(f"Database error while persisting user: {error}") from error
-
-    session.refresh(user)
-    logger.info(
-        "SSO sign-in: user persisted id=%s email=%s role=%s",
-        user.id,
-        user.email,
-        user.role.value,
-    )
-    return user
+    except UserProvisioningError as error:
+        raise GoogleAuthError(str(error)) from error

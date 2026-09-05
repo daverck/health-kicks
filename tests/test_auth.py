@@ -203,6 +203,20 @@ def test_endpoint_google_callback_invalid_state() -> None:
     assert "Invalid OAuth state" in res.json()["detail"]
 
 
+def test_endpoint_google_callback_rejects_azure_state() -> None:
+    from app.api.v1.auth import generate_oauth_state
+    from app.main import app
+
+    azure_state = generate_oauth_state("azure")
+    client = TestClient(app)
+    res = client.post(
+        "/api/v1/auth/google/callback",
+        json={"code": "g-code", "state": azure_state},
+    )
+    assert res.status_code == 400
+    assert "Invalid OAuth state" in res.json()["detail"]
+
+
 def test_endpoint_google_callback_post_success(db_session, monkeypatch) -> None:
     import secrets
     from unittest.mock import patch
