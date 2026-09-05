@@ -118,11 +118,18 @@ def create_auth_router() -> APIRouter:
         except google_auth_service.GoogleAuthError as error:
             logger.error("Google SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error
+        except Exception as error:
+            logger.exception("Google SSO callback: unexpected error during code exchange: %s", error)
+            raise HTTPException(status_code=500, detail="Internal server error during Google authentication") from error
 
-        user = google_auth_service.get_or_create_user(db, claims)
-        token = token_service.issue_access_token(user)
+        try:
+            user = google_auth_service.get_or_create_user(db, claims)
+            token = token_service.issue_access_token(user)
+        except Exception as error:
+            logger.exception("Google SSO callback: user provisioning failed: %s", error)
+            raise HTTPException(status_code=500, detail="User persistence failed") from error
+
         logger.info("Google SSO callback: issued access token for user id=%s", user.id)
-
         return TokenResponse.build(user, token)
 
     @router.get("/azure/login")
@@ -149,11 +156,18 @@ def create_auth_router() -> APIRouter:
         except azure_auth_service.AzureAuthError as error:
             logger.error("Azure SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error
+        except Exception as error:
+            logger.exception("Azure SSO callback: unexpected error during code exchange: %s", error)
+            raise HTTPException(status_code=500, detail="Internal server error during Azure authentication") from error
 
-        user = azure_auth_service.get_or_create_azure_user(db, user_info)
-        token = token_service.issue_access_token(user)
+        try:
+            user = azure_auth_service.get_or_create_azure_user(db, user_info)
+            token = token_service.issue_access_token(user)
+        except Exception as error:
+            logger.exception("Azure SSO callback: user provisioning failed: %s", error)
+            raise HTTPException(status_code=500, detail="User persistence failed") from error
+
         logger.info("Azure SSO callback: issued access token for user id=%s", user.id)
-
         return TokenResponse.build(user, token)
 
     @router.get("/me", response_model=UserResponse)

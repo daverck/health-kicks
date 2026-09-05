@@ -5,6 +5,7 @@ flow, the ID token is verified against Google's JWKS, and the account is
 auto-provisioned on first sign-in (JIT).
 """
 
+from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
@@ -50,18 +51,24 @@ def exchange_code_for_id_token(code: str) -> dict[str, Any]:
     """Exchange the authorization code and verify the returned Google ID token."""
     if not settings.google_client_id or not settings.google_client_secret:
         raise GoogleAuthError("Google OAuth credentials are not configured")
-    response = httpx.post(
-        GOOGLE_TOKEN_ENDPOINT,
-        data={
-            "code": code,
-            "client_id": settings.google_client_id,
-            "client_secret": settings.google_client_secret,
-            "redirect_uri": settings.google_redirect_uri,
-            "grant_type": "authorization_code",
-        },
-        timeout=10.0,
-    )
+    try:
+        response = httpx.post(
+            GOOGLE_TOKEN_ENDPOINT,
+            data={
+                "code": code,
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "redirect_uri": settings.google_redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=10.0,
+        )
+    except httpx.HTTPError as error:
+        logger.error("Google token exchange HTTP error: %s", error)
+        raise GoogleAuthError(f"Google token exchange network failure: {error}") from error
+
     if response.status_code != 200:
+        logger.error("Google token endpoint error (%s): %s", response.status_code, response.text)
         raise GoogleAuthError(f"Google token exchange failed ({response.status_code})")
     id_token = response.json().get("id_token")
     if not id_token:
@@ -109,9 +116,13 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
 
 
 def _google_jwks() -> dict[str, Any]:
-    response = httpx.get(GOOGLE_JWKS_URI, timeout=10.0)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = httpx.get(GOOGLE_JWKS_URI, timeout=10.0)
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPError as error:
+        logger.error("Failed to retrieve Google JWKS certs: %s", error)
+        raise GoogleAuthError(f"Failed to retrieve Google signing keys: {error}") from error
 
 
 def _find_key(jwks: dict[str, Any], kid: str | None) -> dict[str, Any] | None:

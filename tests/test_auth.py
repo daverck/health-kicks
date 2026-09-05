@@ -279,5 +279,105 @@ def test_endpoint_google_callback_post_token_exchange_error() -> None:
             json={"code": "expired-code", "state": valid_state},
         )
         assert res.status_code == 401
-        assert "Google token exchange failed" in res.json()["detail"]
+    assert "Google token exchange failed" in res.json()["detail"]
 
+
+def test_verify_google_id_token_malformed() -> None:
+    with pytest.raises(google_auth_service.GoogleAuthError, match="Malformed Google ID token"):
+        google_auth_service.verify_google_id_token("not-a-valid-jwt")
+
+
+def test_verify_google_id_token_invalid_issuer(mock_google_settings) -> None:
+    mock_google_settings(google_client_id="test-client-id")
+    import jwt
+    token = jwt.encode(
+        {"iss": "https://evil.example.com", "aud": "test-client-id", "exp": 9999999999},
+        "test-secret-key-32-characters-long",
+        algorithm="HS256",
+    )
+    with pytest.raises(google_auth_service.GoogleAuthError, match="Unexpected Google token issuer"):
+        google_auth_service.verify_google_id_token(token)
+
+
+def test_verify_google_id_token_audience_mismatch(mock_google_settings) -> None:
+    mock_google_settings(google_client_id="expected-client-id")
+    import jwt
+    token = jwt.encode(
+        {"iss": "https://accounts.google.com", "aud": "wrong-client-id", "exp": 9999999999},
+        "test-secret-key-32-characters-long",
+        algorithm="HS256",
+    )
+    with pytest.raises(google_auth_service.GoogleAuthError, match="Google token audience mismatch"):
+        google_auth_service.verify_google_id_token(token)
+
+
+def test_verify_google_id_token_expired(mock_google_settings) -> None:
+    mock_google_settings(google_client_id="expected-client-id")
+    import jwt
+    import time
+    token = jwt.encode(
+        {
+            "iss": "https://accounts.google.com",
+            "aud": "expected-client-id",
+            "exp": int(time.time()) - 30,  # expired beyond 10s leeway
+        },
+        "test-secret-key-32-characters-long",
+        algorithm="HS256",
+    )
+    with pytest.raises(google_auth_service.GoogleAuthError, match="Google token expired"):
+        google_auth_service.verify_google_id_token(token)
+
+
+def test_verify_google_id_token_no_matching_key(mock_google_settings) -> None:
+    mock_google_settings(google_client_id="expected-client-id")
+    import jwt
+    import time
+    from unittest.mock import patch
+    token = jwt.encode(
+        {
+            "iss": "https://accounts.google.com",
+            "aud": "expected-client-id",
+            "exp": int(time.time()) + 3600,
+        },
+        "test-secret-key-32-characters-long",
+        algorithm="HS256",
+        headers={"kid": "unknown-kid"},
+    )
+    with patch("app.services.google_auth_service._google_jwks", return_value={"keys": []}):
+        with pytest.raises(google_auth_service.GoogleAuthError, match="No matching Google signing key"):
+            google_auth_service.verify_google_id_token(token)
+
+
+def test_exchange_code_for_id_token_network_error(mock_google_settings) -> None:
+    mock_google_settings(
+        google_client_id="g-client-id",
+        google_client_secret="g-client-secret",
+    )
+    import httpx
+    from unittest.mock import patch
+    with patch("httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+        with pytest.raises(google_auth_service.GoogleAuthError, match="network failure"):
+            google_auth_service.exchange_code_for_id_token("auth-code")
+
+
+def test_endpoint_google_callback_post_unexpected_exception(caplog) -> None:
+    import secrets
+    from unittest.mock import patch
+    from itsdangerous import URLSafeSerializer
+    from app.core.config import settings
+    from app.main import app
+
+    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
+
+    with patch(
+        "app.services.google_auth_service.exchange_code_for_id_token",
+        side_effect=RuntimeError("Surprise crash in exchange"),
+    ):
+        client = TestClient(app)
+        res = client.post(
+            "/api/v1/auth/google/callback",
+            json={"code": "any-code", "state": valid_state},
+        )
+        assert res.status_code == 500
+        assert "unexpected error during code exchange" in caplog.text

@@ -74,3 +74,4 @@ def test_upsert_sso_user_links_existing_by_email(db_session):
     assert linked.google_sub == "g-202"
     assert linked.azure_sub == "az-202"
     assert linked.role == UserRole.admin
+

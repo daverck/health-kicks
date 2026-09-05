@@ -117,3 +117,4 @@ def upsert_sso_user(
         user.role.value,
     )
     return user
+
