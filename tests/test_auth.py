@@ -257,6 +257,11 @@ def test_endpoint_google_callback_post_success(db_session, monkeypatch) -> None:
         assert claims["google_sub"] == "google-sub-999"
         assert claims["email"] == "test.google@healthkicks.org"
 
+        assert "refresh_token" in data
+        assert data["refresh_token"] is not None
+        refreshed_user_id = token_service.verify_refresh_token(data["refresh_token"])
+        assert refreshed_user_id == data["user"]["id"]
+
 
 def test_endpoint_google_callback_post_token_exchange_error() -> None:
     import secrets
@@ -381,3 +386,226 @@ def test_endpoint_google_callback_post_unexpected_exception(caplog) -> None:
         )
         assert res.status_code == 500
         assert "unexpected error during code exchange" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Refresh Token Unit & Endpoint Tests
+# ---------------------------------------------------------------------------
+
+
+def test_issue_and_verify_refresh_token_roundtrip(db_session) -> None:
+    user = User(google_sub="refresh-sub-1", email="refresh1@example.com", role=UserRole.user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    token = token_service.issue_refresh_token(user)
+    user_id = token_service.verify_refresh_token(token)
+    assert user_id == user.id
+
+
+def test_verify_refresh_token_expired(db_session) -> None:
+    import jwt
+    import time
+    from fastapi import HTTPException
+    from app.core.config import settings
+
+    user = User(google_sub="exp-sub", email="exp@example.com", role=UserRole.user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    expired_payload = {
+        "sub": str(user.id),
+        "type": "refresh",
+        "iat": int(time.time()) - 3600,
+        "exp": int(time.time()) - 10,
+    }
+    expired_token = jwt.encode(expired_payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+    with pytest.raises(HTTPException) as exc_info:
+        token_service.verify_refresh_token(expired_token)
+    assert exc_info.value.status_code == 401
+    assert "Refresh token expired" in exc_info.value.detail
+
+
+def test_verify_refresh_token_rejects_access_token(db_session) -> None:
+    from fastapi import HTTPException
+
+    user = User(google_sub="acc-sub", email="acc@example.com", role=UserRole.user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    access_token = token_service.issue_access_token(user)
+    with pytest.raises(HTTPException) as exc_info:
+        token_service.verify_refresh_token(access_token)
+    assert exc_info.value.status_code == 401
+    assert "Token is not a refresh token" in exc_info.value.detail
+
+
+def test_verify_refresh_token_invalid_signature() -> None:
+    import jwt
+    import time
+    from fastapi import HTTPException
+
+    token = jwt.encode(
+        {"sub": "123", "type": "refresh", "exp": int(time.time()) + 3600},
+        "wrong-secret-key-32-characters-long",
+        algorithm="HS256",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        token_service.verify_refresh_token(token)
+    assert exc_info.value.status_code == 401
+    assert "Invalid refresh token" in exc_info.value.detail
+
+
+def test_verify_refresh_token_invalid_subject() -> None:
+    import jwt
+    import time
+    from fastapi import HTTPException
+    from app.core.config import settings
+
+    # sub is not a valid int
+    token = jwt.encode(
+        {"sub": "not-an-int", "type": "refresh", "exp": int(time.time()) + 3600},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        token_service.verify_refresh_token(token)
+    assert exc_info.value.status_code == 401
+    assert "Invalid refresh token subject" in exc_info.value.detail
+
+
+def test_verify_access_token_rejects_refresh_token(db_session) -> None:
+    import jwt
+
+    user = User(google_sub="ref-rej", email="rej@example.com", role=UserRole.user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    refresh_token = token_service.issue_refresh_token(user)
+    with pytest.raises(jwt.InvalidTokenError, match="Token is not an access token"):
+        token_service.verify_access_token(refresh_token)
+
+
+def test_endpoint_refresh_nominal(db_session) -> None:
+    from app.db.database import get_db
+    from app.main import app
+
+    user = User(google_sub="g-refresh-nom", email="refresh.user@example.com", role=UserRole.user, name="Refreshed")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    refresh_token = token_service.issue_refresh_token(user)
+    app.dependency_overrides[get_db] = lambda: db_session
+
+    client = TestClient(app)
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["token_type"] == "bearer"
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["user"]["id"] == user.id
+    assert data["user"]["email"] == "refresh.user@example.com"
+
+    # Verify that the new access token can query /me
+    me_res = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {data['access_token']}"},
+    )
+    assert me_res.status_code == 200
+    assert me_res.json()["email"] == "refresh.user@example.com"
+
+    # Verify rotation: the newly issued refresh_token is also valid and can be refreshed again
+    rotated_res = client.post("/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]})
+    assert rotated_res.status_code == 200
+    assert rotated_res.json()["user"]["id"] == user.id
+
+
+def test_endpoint_refresh_expired_token(db_session) -> None:
+    import jwt
+    import time
+    from app.core.config import settings
+    from app.db.database import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    expired_token = jwt.encode(
+        {"sub": "1", "type": "refresh", "exp": int(time.time()) - 100},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    client = TestClient(app)
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": expired_token})
+    assert res.status_code == 401
+    assert "Refresh token expired" in res.json()["detail"]
+
+
+def test_endpoint_refresh_rejects_access_token(db_session) -> None:
+    from app.db.database import get_db
+    from app.main import app
+
+    user = User(google_sub="g-acc", email="acc.test@example.com", role=UserRole.user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    access_token = token_service.issue_access_token(user)
+    app.dependency_overrides[get_db] = lambda: db_session
+
+    client = TestClient(app)
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": access_token})
+    assert res.status_code == 401
+    assert "Token is not a refresh token" in res.json()["detail"]
+
+
+def test_endpoint_refresh_inactive_user(db_session) -> None:
+    from app.db.database import get_db
+    from app.main import app
+
+    inactive_user = User(
+        google_sub="g-inactive",
+        email="inactive@example.com",
+        role=UserRole.user,
+        is_active=False,
+    )
+    db_session.add(inactive_user)
+    db_session.commit()
+    db_session.refresh(inactive_user)
+
+    refresh_token = token_service.issue_refresh_token(inactive_user)
+    app.dependency_overrides[get_db] = lambda: db_session
+
+    client = TestClient(app)
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert res.status_code == 401
+    assert "Unknown or inactive user" in res.json()["detail"]
+
+
+def test_endpoint_refresh_unknown_user(db_session) -> None:
+    import jwt
+    import time
+    from app.core.config import settings
+    from app.db.database import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    # User ID 999999 does not exist in DB
+    ghost_token = jwt.encode(
+        {"sub": "999999", "type": "refresh", "exp": int(time.time()) + 3600},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    client = TestClient(app)
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": ghost_token})
+    assert res.status_code == 401
+    assert "Unknown or inactive user" in res.json()["detail"]
+

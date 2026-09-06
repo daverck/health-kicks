@@ -34,6 +34,7 @@ class Settings:
     jwt_secret: str = "dev-only-insecure-secret"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    refresh_token_expire_days: int = 7
     public_origins: list[str] | None = None
     device_inactivity_days: int = 30
     migrate_on_start: bool = True
@@ -99,6 +100,9 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "access_token_expire_minutes": int(
             _nested_value(yaml_values, "auth", "access_token_expire_minutes", defaults.access_token_expire_minutes)
         ),
+        "refresh_token_expire_days": int(
+            _nested_value(yaml_values, "auth", "refresh_token_expire_days", defaults.refresh_token_expire_days)
+        ),
         "public_origins": yaml_values.get("public_origins", defaults.public_origins),
         "device_inactivity_days": int(
             yaml_values.get("device_inactivity_days", defaults.device_inactivity_days)
@@ -136,6 +140,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "jwt_secret": (("HEALTHKICKS_JWT_SECRET", "JWT_SECRET"), str),
         "jwt_algorithm": (("HEALTHKICKS_JWT_ALGORITHM",), str),
         "access_token_expire_minutes": (("HEALTHKICKS_ACCESS_TOKEN_EXPIRE_MINUTES",), int),
+        "refresh_token_expire_days": (("HEALTHKICKS_REFRESH_TOKEN_EXPIRE_DAYS", "REFRESH_TOKEN_EXPIRE_DAYS"), int),
         "public_origins": (("HEALTHKICKS_PUBLIC_ORIGINS",), lambda value: [origin.strip() for origin in value.split(",") if origin.strip()]),
         "device_inactivity_days": (("HEALTHKICKS_DEVICE_INACTIVITY_DAYS", "DEVICE_INACTIVITY_DAYS"), int),
         "migrate_on_start": (("MIGRATE_ON_START", "HEALTHKICKS_MIGRATE_ON_START"), lambda value: value.lower() in {"1", "true", "yes"}),

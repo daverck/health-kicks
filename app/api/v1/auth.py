@@ -11,7 +11,7 @@ import logging
 import secrets
 
 from itsdangerous import BadData, URLSafeSerializer
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,6 @@ from app.db.database import get_db
 from app.db.models import User
 from app.schemas.cloud import StrictModel
 from app.services import azure_auth_service, google_auth_service, token_service
-from fastapi import Depends
 
 _state_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
 logger = logging.getLogger(__name__)
@@ -66,16 +65,22 @@ class UserResponse(StrictModel):
 
 class TokenResponse(StrictModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     user: UserResponse
 
     @classmethod
-    def build(cls, user: User, token: str) -> "TokenResponse":
+    def build(cls, user: User, access_token: str, refresh_token: str | None = None) -> "TokenResponse":
         return cls(
-            access_token=token,
+            access_token=access_token,
+            refresh_token=refresh_token,
             token_type="bearer",
             user=UserResponse.from_user(user),
         )
+
+
+class RefreshTokenRequest(StrictModel):
+    refresh_token: str
 
 
 class OAuthLoginResponse(StrictModel):
@@ -124,13 +129,14 @@ def create_auth_router() -> APIRouter:
 
         try:
             user = google_auth_service.get_or_create_user(db, claims)
-            token = token_service.issue_access_token(user)
+            access_token = token_service.issue_access_token(user)
+            refresh_token = token_service.issue_refresh_token(user)
         except Exception as error:
             logger.exception("Google SSO callback: user provisioning failed: %s", error)
             raise HTTPException(status_code=500, detail="User persistence failed") from error
 
         logger.info("Google SSO callback: issued access token for user id=%s", user.id)
-        return TokenResponse.build(user, token)
+        return TokenResponse.build(user, access_token, refresh_token)
 
     @router.get("/azure/login")
     def azure_login(request: Request, redirect: bool = False):
@@ -162,13 +168,29 @@ def create_auth_router() -> APIRouter:
 
         try:
             user = azure_auth_service.get_or_create_azure_user(db, user_info)
-            token = token_service.issue_access_token(user)
+            access_token = token_service.issue_access_token(user)
+            refresh_token = token_service.issue_refresh_token(user)
         except Exception as error:
             logger.exception("Azure SSO callback: user provisioning failed: %s", error)
             raise HTTPException(status_code=500, detail="User persistence failed") from error
 
         logger.info("Azure SSO callback: issued access token for user id=%s", user.id)
-        return TokenResponse.build(user, token)
+        return TokenResponse.build(user, access_token, refresh_token)
+
+    @router.post("/refresh", response_model=TokenResponse)
+    def refresh(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> TokenResponse:
+        user_id = token_service.verify_refresh_token(payload.refresh_token)
+        user = db.query(User).filter_by(id=user_id).one_or_none()
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unknown or inactive user",
+            )
+
+        new_access_token = token_service.issue_access_token(user)
+        new_refresh_token = token_service.issue_refresh_token(user)
+        logger.info("Session refreshed for user id=%s", user.id)
+        return TokenResponse.build(user, new_access_token, new_refresh_token)
 
     @router.get("/me", response_model=UserResponse)
     def me(user: CurrentUser) -> UserResponse:
