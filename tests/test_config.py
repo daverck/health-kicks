@@ -31,6 +31,7 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert settings.azure_redirect_uri == ""
     assert settings.google_redirect_uri == "http://localhost:4200/auth/google/callback"
     assert settings.refresh_token_expire_days == 7
+    assert settings.dynamodb_telemetry_table == "healthkicks_telemetry"
 
 
 def test_azure_environment_overrides(tmp_path: Path, monkeypatch) -> None:
@@ -56,5 +57,12 @@ def test_refresh_token_expire_days_environment_override(tmp_path: Path, monkeypa
     monkeypatch.setenv("REFRESH_TOKEN_EXPIRE_DAYS", "14")
     settings = load_settings(tmp_path / "missing.yaml")
     assert settings.refresh_token_expire_days == 14
+
+
+def test_dynamodb_telemetry_table_environment_override(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DYNAMODB_TELEMETRY_TABLE", "custom_telemetry_table")
+    settings = load_settings(tmp_path / "missing.yaml")
+    assert settings.dynamodb_telemetry_table == "custom_telemetry_table"
+
 
 

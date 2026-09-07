@@ -17,6 +17,8 @@ def test_openapi_exposes_cloud_and_ingestion_endpoints() -> None:
     assert "/api/v1/ingest/event" in paths
     assert "/api/v1/devices/{device_id}/haptic/trigger" in paths
     assert "/api/v1/auth/refresh" in paths
+    assert "/api/v1/devices/{device_id}/telemetry" in paths
+    assert "/api/v1/devices/{device_id}/telemetry/sessions/{session_id}" in paths
     assert "/api/telemetry/latest" not in paths
 
 

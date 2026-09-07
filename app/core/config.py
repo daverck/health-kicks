@@ -43,6 +43,8 @@ class Settings:
     azure_client_secret: str = ""
     azure_tenant_id: str = "common"
     azure_redirect_uri: str = ""
+    # DynamoDB Telemetry (Studio mode)
+    dynamodb_telemetry_table: str = "healthkicks_telemetry"
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -115,6 +117,11 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "azure_client_secret": _nested_value(yaml_values, "auth", "azure_client_secret", defaults.azure_client_secret),
         "azure_tenant_id": _nested_value(yaml_values, "auth", "azure_tenant_id", defaults.azure_tenant_id),
         "azure_redirect_uri": _nested_value(yaml_values, "auth", "azure_redirect_uri", defaults.azure_redirect_uri),
+        # DynamoDB Telemetry (Studio mode)
+        "dynamodb_telemetry_table": yaml_values.get(
+            "dynamodb_telemetry_table",
+            _nested_value(yaml_values, "aws", "telemetry_table", defaults.dynamodb_telemetry_table),
+        ),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -149,6 +156,11 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "azure_client_secret": (("HEALTHKICKS_AZURE_CLIENT_SECRET", "AZURE_CLIENT_SECRET"), str),
         "azure_tenant_id": (("HEALTHKICKS_AZURE_TENANT_ID", "AZURE_TENANT_ID"), str),
         "azure_redirect_uri": (("HEALTHKICKS_AZURE_REDIRECT_URI", "AZURE_REDIRECT_URI"), str),
+        # DynamoDB Telemetry (Studio mode)
+        "dynamodb_telemetry_table": (
+            ("HEALTHKICKS_DYNAMODB_TELEMETRY_TABLE", "DYNAMODB_TELEMETRY_TABLE"),
+            str,
+        ),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
