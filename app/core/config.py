@@ -19,6 +19,7 @@ class Settings:
 
     aws_iot_endpoint: str = ""
     aws_iot_haptic_command_topic: str = "healthkicks/v1/{device_id}/commands/haptic"
+    aws_iot_studio_start_topic: str = "healthkicks/v1/{device_id}/commands/studio/start"
     database_url: str = "postgresql+psycopg2://healthkicks:healthkicks@localhost:5432/healthkicks"
     auto_create_tables: bool = True
     aws_region: str = "eu-north-1"
@@ -86,6 +87,12 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             "haptic_command_topic",
             defaults.aws_iot_haptic_command_topic,
         ),
+        "aws_iot_studio_start_topic": _nested_value(
+            yaml_values,
+            "aws_iot",
+            "studio_start_topic",
+            defaults.aws_iot_studio_start_topic,
+        ),
         "database_url": yaml_values.get("database_url", defaults.database_url),
         "auto_create_tables": yaml_values.get("auto_create_tables", defaults.auto_create_tables),
         "aws_region": yaml_values.get("aws_region", defaults.aws_region),
@@ -127,6 +134,13 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         "aws_iot_endpoint": (("HEALTHKICKS_AWS_IOT_ENDPOINT", "AWS_IOT_ENDPOINT"), str),
         "aws_iot_haptic_command_topic": (("HEALTHKICKS_AWS_IOT_HAPTIC_COMMAND_TOPIC", "AWS_IOT_HAPTIC_COMMAND_TOPIC"), str),
+        "aws_iot_studio_start_topic": (
+            (
+                "HEALTHKICKS_AWS_IOT_STUDIO_START_TOPIC",
+                "AWS_IOT_STUDIO_START_TOPIC",
+            ),
+            str,
+        ),
         "database_url": (("DATABASE_URL", "HEALTHKICKS_DATABASE_URL"), str),
         "auto_create_tables": (("HEALTHKICKS_AUTO_CREATE_TABLES",), lambda value: value.lower() in {"1", "true", "yes"}),
         "aws_region": (("AWS_REGION", "AWS_DEFAULT_REGION"), str),

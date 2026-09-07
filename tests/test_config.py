@@ -32,6 +32,7 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert settings.google_redirect_uri == "http://localhost:4200/auth/google/callback"
     assert settings.refresh_token_expire_days == 7
     assert settings.dynamodb_telemetry_table == "healthkicks_telemetry"
+    assert settings.aws_iot_studio_start_topic == "healthkicks/v1/{device_id}/commands/studio/start"
 
 
 def test_azure_environment_overrides(tmp_path: Path, monkeypatch) -> None:
@@ -63,6 +64,13 @@ def test_dynamodb_telemetry_table_environment_override(tmp_path: Path, monkeypat
     monkeypatch.setenv("DYNAMODB_TELEMETRY_TABLE", "custom_telemetry_table")
     settings = load_settings(tmp_path / "missing.yaml")
     assert settings.dynamodb_telemetry_table == "custom_telemetry_table"
+
+
+def test_aws_iot_studio_start_topic_environment_override(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AWS_IOT_STUDIO_START_TOPIC", "custom/studio/{device_id}/start")
+    settings = load_settings(tmp_path / "missing.yaml")
+    assert settings.aws_iot_studio_start_topic == "custom/studio/{device_id}/start"
+
 
 
 

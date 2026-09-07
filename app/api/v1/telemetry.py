@@ -2,20 +2,32 @@
 
 from datetime import datetime
 import logging
+import uuid
 
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.deps import CurrentUser
-from app.schemas.telemetry import ImuReadingResponse, StudioSessionReadingsResponse
+from app.schemas.telemetry import (
+    ImuReadingResponse,
+    StudioSessionReadingsResponse,
+    StudioStartRequest,
+    StudioStartResponse,
+)
+from app.services.iot_service import IotCommandService
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
 
 
-def create_telemetry_router(service: TelemetryService | None = None) -> APIRouter:
-    """Build the telemetry router with injected TelemetryService."""
+def create_telemetry_router(
+    service: TelemetryService | None = None,
+    iot_service: IotCommandService | None = None,
+) -> APIRouter:
+    """Build the telemetry router with injected TelemetryService and IotCommandService."""
     router = APIRouter(prefix="/api/v1/devices", tags=["Telemetry"])
     telemetry_service = service or TelemetryService()
+    command_service = iot_service or IotCommandService()
 
     @router.get(
         "/{device_id}/telemetry",
@@ -78,4 +90,53 @@ def create_telemetry_router(service: TelemetryService | None = None) -> APIRoute
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @router.post(
+        "/{device_id}/commands/studio/start",
+        response_model=StudioStartResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def start_studio_session(
+        device_id: str,
+        command: StudioStartRequest,
+        user: CurrentUser,
+    ) -> StudioStartResponse:
+        """Trigger a remote Studio IMU recording session on an edge device."""
+        session_id = str(uuid.uuid4())
+        try:
+            topic = command_service.send_studio_start(
+                device_id=device_id,
+                command=command,
+                session_id=session_id,
+            )
+        except (BotoCoreError, ClientError) as error:
+            logger.error(
+                "AWS IoT Core error dispatching studio start to %s: %s",
+                device_id,
+                error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to dispatch command to device",
+            )
+        except Exception as error:
+            logger.exception(
+                "Unexpected error dispatching studio start to %s: %s",
+                device_id,
+                error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to dispatch command to device",
+            )
+
+        return StudioStartResponse(
+            status="command_dispatched",
+            device_id=device_id,
+            session_id=session_id,
+            label=command.label,
+            duration_sec=command.duration_sec,
+            topic=topic,
+        )
+
     return router
+
