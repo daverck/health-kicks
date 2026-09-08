@@ -33,6 +33,11 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert settings.refresh_token_expire_days == 7
     assert settings.dynamodb_telemetry_table == "healthkicks_telemetry"
     assert settings.aws_iot_studio_start_topic == "healthkicks/v1/{device_id}/commands/studio/start"
+    assert settings.database_pool_size == 5
+    assert settings.database_max_overflow == 10
+    assert settings.database_pool_recycle == 300
+    assert settings.database_pool_pre_ping is True
+    assert settings.log_level == "INFO"
 
 
 def test_azure_environment_overrides(tmp_path: Path, monkeypatch) -> None:
@@ -72,5 +77,16 @@ def test_aws_iot_studio_start_topic_environment_override(tmp_path: Path, monkeyp
     assert settings.aws_iot_studio_start_topic == "custom/studio/{device_id}/start"
 
 
+def test_database_pool_and_log_environment_overrides(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_POOL_SIZE", "15")
+    monkeypatch.setenv("DATABASE_MAX_OVERFLOW", "25")
+    monkeypatch.setenv("DATABASE_POOL_RECYCLE", "600")
+    monkeypatch.setenv("DATABASE_POOL_PRE_PING", "false")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
 
-
+    settings = load_settings(tmp_path / "missing.yaml")
+    assert settings.database_pool_size == 15
+    assert settings.database_max_overflow == 25
+    assert settings.database_pool_recycle == 600
+    assert settings.database_pool_pre_ping is False
+    assert settings.log_level == "DEBUG"

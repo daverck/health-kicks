@@ -5,11 +5,13 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from alembic import command
 from alembic.config import Config
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
@@ -19,8 +21,11 @@ from app.api.v1.internal import create_internal_router
 from app.api.v1.telemetry import create_telemetry_router
 from app.api.v1.users import create_users_router
 from app.core.config import settings
+from app.core.logging import setup_logging
 from app.db.database import create_tables, engine
 from app.services.aws_iot_service import AWSIoTPublishService
+
+setup_logging()
 
 logger = logging.getLogger("healthkicks.app")
 publisher = AWSIoTPublishService()
@@ -67,6 +72,20 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def unhandled_exception_middleware(request: Request, call_next: Any) -> Response:
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.exception(f"Unhandled Exception on {request.method} {request.url}: {exc}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal Server Error"},
+        )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.public_origins or ["*"],

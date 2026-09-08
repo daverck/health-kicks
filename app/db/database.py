@@ -12,59 +12,89 @@ When ``USE_RDS_IAM=false``, the standard SQLAlchemy connection based on
 """
 
 from collections.abc import Generator
+from functools import partial
+from typing import Any
 
 import boto3
 import psycopg2
 from sqlalchemy import create_engine
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.db.models import Base
 
 
-def _get_iam_token(db_url) -> str:
+def _get_iam_token(db_url, settings_obj: Settings = settings) -> str:
     """Generate a fresh IAM auth token for the host/user in ``db_url``."""
-    client = boto3.client("rds", region_name=settings.aws_region)
+    client = boto3.client("rds", region_name=settings_obj.aws_region)
     return client.generate_db_auth_token(
         DBHostname=db_url.host,
         Port=db_url.port or 5432,
         DBUsername=db_url.username or "postgres",
-        Region=settings.aws_region,
+        Region=settings_obj.aws_region,
     )
 
 
-def _connect_with_iam():
+def _connect_with_iam(settings_obj: Settings = settings):
     """Custom engine creator: open one psycopg2 connection with a fresh token."""
-    db_url = make_url(settings.database_url)
-    token = _get_iam_token(db_url)
+    db_url = make_url(settings_obj.database_url)
+    token = _get_iam_token(db_url, settings_obj=settings_obj)
     return psycopg2.connect(
         host=db_url.host,
         port=db_url.port or 5432,
         user=db_url.username or "postgres",
         password=token,
         dbname=db_url.database or "postgres",
-        sslmode=getattr(settings, "database_sslmode", "require"),
+        sslmode=getattr(settings_obj, "database_sslmode", "require"),
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
     )
 
 
-_is_postgres = settings.database_url.startswith("postgresql")
+def build_engine(settings_obj: Settings = settings) -> Engine:
+    """Create and configure the SQLAlchemy engine with pool resilience settings."""
+    is_postgres = settings_obj.database_url.startswith("postgresql")
 
-if _is_postgres and getattr(settings, "use_rds_iam", False):
-    # Custom creator: the token is regenerated on each new physical
-    # connection (the URL password is ignored entirely).
-    engine = create_engine(
-        "postgresql+psycopg2://",
-        creator=_connect_with_iam,
-        pool_pre_ping=True,
+    engine_kwargs: dict[str, Any] = {
+        "pool_pre_ping": getattr(settings_obj, "database_pool_pre_ping", True),
+        "pool_recycle": getattr(settings_obj, "database_pool_recycle", 300),
+    }
+
+    if is_postgres:
+        engine_kwargs["pool_size"] = getattr(settings_obj, "database_pool_size", 5)
+        engine_kwargs["max_overflow"] = getattr(settings_obj, "database_max_overflow", 10)
+
+    if is_postgres and getattr(settings_obj, "use_rds_iam", False):
+        # Custom creator: the token is regenerated on each new physical
+        # connection (the URL password is ignored entirely).
+        creator = partial(_connect_with_iam, settings_obj)
+        return create_engine(
+            "postgresql+psycopg2://",
+            creator=creator,
+            **engine_kwargs,
+        )
+
+    connect_args = (
+        {
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        }
+        if is_postgres
+        else {"check_same_thread": False}
     )
-else:
-    connect_args = {"check_same_thread": False} if not _is_postgres else {}
-    engine = create_engine(
-        settings.database_url,
+    return create_engine(
+        settings_obj.database_url,
         connect_args=connect_args,
-        pool_pre_ping=True,
+        **engine_kwargs,
     )
+
+
+engine = build_engine(settings)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 

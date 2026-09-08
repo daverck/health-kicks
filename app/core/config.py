@@ -46,6 +46,13 @@ class Settings:
     azure_redirect_uri: str = ""
     # DynamoDB Telemetry (Studio mode)
     dynamodb_telemetry_table: str = "healthkicks_telemetry"
+    # Database pool resilience & configuration
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
+    database_pool_recycle: int = 300
+    database_pool_pre_ping: bool = True
+    # Logging
+    log_level: str = "INFO"
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -129,6 +136,24 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             "dynamodb_telemetry_table",
             _nested_value(yaml_values, "aws", "telemetry_table", defaults.dynamodb_telemetry_table),
         ),
+        # Database pool resilience
+        "database_pool_size": int(
+            _nested_value(yaml_values, "database", "pool_size", defaults.database_pool_size)
+        ),
+        "database_max_overflow": int(
+            _nested_value(yaml_values, "database", "max_overflow", defaults.database_max_overflow)
+        ),
+        "database_pool_recycle": int(
+            _nested_value(yaml_values, "database", "pool_recycle", defaults.database_pool_recycle)
+        ),
+        "database_pool_pre_ping": bool(
+            _nested_value(yaml_values, "database", "pool_pre_ping", defaults.database_pool_pre_ping)
+        ),
+        # Logging
+        "log_level": yaml_values.get(
+            "log_level",
+            _nested_value(yaml_values, "logging", "level", defaults.log_level),
+        ),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -175,6 +200,16 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             ("HEALTHKICKS_DYNAMODB_TELEMETRY_TABLE", "DYNAMODB_TELEMETRY_TABLE"),
             str,
         ),
+        # Database pool resilience
+        "database_pool_size": (("HEALTHKICKS_DATABASE_POOL_SIZE", "DATABASE_POOL_SIZE"), int),
+        "database_max_overflow": (("HEALTHKICKS_DATABASE_MAX_OVERFLOW", "DATABASE_MAX_OVERFLOW"), int),
+        "database_pool_recycle": (("HEALTHKICKS_DATABASE_POOL_RECYCLE", "DATABASE_POOL_RECYCLE"), int),
+        "database_pool_pre_ping": (
+            ("HEALTHKICKS_DATABASE_POOL_PRE_PING", "DATABASE_POOL_PRE_PING"),
+            lambda value: value.lower() in {"1", "true", "yes"},
+        ),
+        # Logging
+        "log_level": (("HEALTHKICKS_LOG_LEVEL", "LOG_LEVEL"), str),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
