@@ -247,3 +247,69 @@ class TelemetryService:
             by_label=by_label,
         )
 
+    def update_session_label(
+        self,
+        device_id: str,
+        session_id: str,
+        new_label: str,
+    ) -> int:
+        """Update the label of all readings belonging to a Studio session in DynamoDB."""
+        table = self._get_table()
+        items_to_update: list[dict[str, Any]] = []
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": Key("device_id").eq(device_id),
+            "FilterExpression": Attr("session_id").eq(session_id),
+            "ProjectionExpression": "device_id, #ts",
+            "ExpressionAttributeNames": {"#ts": "timestamp"},
+        }
+
+        while True:
+            try:
+                response = table.query(**query_kwargs)
+            except (BotoCoreError, ClientError) as error:
+                logger.error(
+                    "DynamoDB query failed while updating session %s label: %s",
+                    session_id,
+                    error,
+                )
+                raise
+
+            items_to_update.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+
+        if not items_to_update:
+            return 0
+
+        for item in items_to_update:
+            try:
+                table.update_item(
+                    Key={
+                        "device_id": item["device_id"],
+                        "timestamp": item["timestamp"],
+                    },
+                    UpdateExpression="SET #lbl = :new_label",
+                    ExpressionAttributeNames={"#lbl": "label"},
+                    ExpressionAttributeValues={":new_label": new_label},
+                )
+            except (BotoCoreError, ClientError) as error:
+                logger.error(
+                    "DynamoDB update_item failed for device %s ts %s: %s",
+                    item["device_id"],
+                    item["timestamp"],
+                    error,
+                )
+                raise
+
+        logger.info(
+            "Updated label to '%s' for %d readings of device %s session %s",
+            new_label,
+            len(items_to_update),
+            device_id,
+            session_id,
+        )
+        return len(items_to_update)
+
+

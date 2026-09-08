@@ -18,6 +18,7 @@ from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router
 from app.api.v1.ingestion import create_ingestion_router
 from app.api.v1.internal import create_internal_router
+from app.api.v1.studio_sessions import create_studio_sessions_router
 from app.api.v1.telemetry import create_telemetry_router
 from app.api.v1.users import create_users_router
 from app.core.config import settings
@@ -99,6 +100,7 @@ app.include_router(create_users_router())
 app.include_router(create_ingestion_router())
 app.include_router(create_internal_router())
 app.include_router(create_telemetry_router())
+app.include_router(create_studio_sessions_router())
 
 
 @app.get("/", tags=["Health"])

@@ -2,9 +2,10 @@
 
 from datetime import datetime, timezone
 from enum import Enum
+from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -103,6 +104,10 @@ class User(Base):
     )
     last_login_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    @property
+    def is_admin(self) -> bool:
+        return self.role == UserRole.admin
+
 
 class DeviceOwnership(Base):
     """Binding between a user account and an IoT device (future phase)."""
@@ -116,3 +121,22 @@ class DeviceOwnership(Base):
     bound_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class StudioSession(Base):
+    """Recorded IMU data capture session for ML dataset curation."""
+
+    __tablename__ = "studio_sessions"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    device_id: Mapped[str] = mapped_column(String(128), index=True)
+    label: Mapped[str] = mapped_column(String(64), index=True)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+    duration_sec: Mapped[float] = mapped_column(Float, default=5.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship("User", lazy="joined")
+
