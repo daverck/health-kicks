@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from app.api.deps import CurrentUser
 from app.schemas.telemetry import (
     ImuReadingResponse,
+    StudioDatasetStatsResponse,
     StudioSessionReadingsResponse,
     StudioStartRequest,
     StudioStartResponse,
@@ -25,11 +26,13 @@ def create_telemetry_router(
     iot_service: IotCommandService | None = None,
 ) -> APIRouter:
     """Build the telemetry router with injected TelemetryService and IotCommandService."""
-    router = APIRouter(prefix="/api/v1/devices", tags=["Telemetry"])
+    root_router = APIRouter()
+    devices_router = APIRouter(prefix="/api/v1/devices", tags=["Telemetry"])
+    studio_router = APIRouter(prefix="/api/v1/studio", tags=["Studio"])
     telemetry_service = service or TelemetryService()
     command_service = iot_service or IotCommandService()
 
-    @router.get(
+    @devices_router.get(
         "/{device_id}/telemetry",
         response_model=StudioSessionReadingsResponse | list[ImuReadingResponse],
     )
@@ -74,7 +77,7 @@ def create_telemetry_router(
             detail="Must provide either session_id or both start_time and end_time",
         )
 
-    @router.delete(
+    @devices_router.delete(
         "/{device_id}/telemetry/sessions/{session_id}",
         status_code=status.HTTP_204_NO_CONTENT,
     )
@@ -90,7 +93,7 @@ def create_telemetry_router(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @router.post(
+    @devices_router.post(
         "/{device_id}/commands/studio/start",
         response_model=StudioStartResponse,
         status_code=status.HTTP_200_OK,
@@ -138,5 +141,49 @@ def create_telemetry_router(
             topic=topic,
         )
 
-    return router
+    @devices_router.get(
+        "/{device_id}/studio/stats",
+        response_model=StudioDatasetStatsResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def get_device_studio_stats(
+        device_id: str,
+        user: CurrentUser,
+    ) -> StudioDatasetStatsResponse:
+        """Get dataset statistics (session counts by label) for a specific device."""
+        try:
+            return telemetry_service.get_dataset_stats(device_id=device_id)
+        except (BotoCoreError, ClientError) as error:
+            logger.error(
+                "DynamoDB error fetching studio stats for device %s: %s",
+                device_id,
+                error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to retrieve studio stats from telemetry store",
+            )
+
+    @studio_router.get(
+        "/stats",
+        response_model=StudioDatasetStatsResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def get_global_studio_stats(
+        user: CurrentUser,
+    ) -> StudioDatasetStatsResponse:
+        """Get dataset statistics (session counts by label) across all devices."""
+        try:
+            return telemetry_service.get_dataset_stats(device_id=None)
+        except (BotoCoreError, ClientError) as error:
+            logger.error("DynamoDB error fetching global studio stats: %s", error)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to retrieve studio stats from telemetry store",
+            )
+
+    root_router.include_router(devices_router)
+    root_router.include_router(studio_router)
+    return root_router
+
 

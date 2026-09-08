@@ -20,6 +20,8 @@ def test_openapi_exposes_cloud_and_ingestion_endpoints() -> None:
     assert "/api/v1/devices/{device_id}/telemetry" in paths
     assert "/api/v1/devices/{device_id}/telemetry/sessions/{session_id}" in paths
     assert "/api/v1/devices/{device_id}/commands/studio/start" in paths
+    assert "/api/v1/devices/{device_id}/studio/stats" in paths
+    assert "/api/v1/studio/stats" in paths
     assert "/api/telemetry/latest" not in paths
 
 

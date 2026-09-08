@@ -54,3 +54,11 @@ class StudioStartResponse(StrictModel):
     duration_sec: float
     topic: str
 
+
+class StudioDatasetStatsResponse(StrictModel):
+    """Aggregated session counts for Studio dataset training."""
+
+    device_id: str | None = None
+    total_sessions: int
+    by_label: dict[str, int]
+

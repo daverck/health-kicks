@@ -10,7 +10,11 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings, settings
-from app.schemas.telemetry import ImuReadingResponse, StudioSessionReadingsResponse
+from app.schemas.telemetry import (
+    ImuReadingResponse,
+    StudioDatasetStatsResponse,
+    StudioSessionReadingsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,3 +185,65 @@ class TelemetryService:
         items = response.get("Items", [])
         items.sort(key=lambda x: int(x["timestamp"]))
         return [_item_to_reading(item) for item in items]
+
+    def get_dataset_stats(
+        self,
+        device_id: str | None = None,
+    ) -> StudioDatasetStatsResponse:
+        """Aggregate recorded studio sessions by label and compute total sessions."""
+        table = self._get_table()
+        items: list[dict[str, Any]] = []
+        filter_expr = Attr("session_id").exists() & Attr("label").exists()
+        proj_expr = "session_id, #lbl"
+        attr_names = {"#lbl": "label"}
+
+        if device_id:
+            query_kwargs: dict[str, Any] = {
+                "KeyConditionExpression": Key("device_id").eq(device_id),
+                "FilterExpression": filter_expr,
+                "ProjectionExpression": proj_expr,
+                "ExpressionAttributeNames": attr_names,
+            }
+            fetch_fn = table.query
+        else:
+            query_kwargs = {
+                "FilterExpression": filter_expr,
+                "ProjectionExpression": proj_expr,
+                "ExpressionAttributeNames": attr_names,
+            }
+            fetch_fn = table.scan
+
+        while True:
+            try:
+                response = fetch_fn(**query_kwargs)
+            except (BotoCoreError, ClientError) as error:
+                logger.error(
+                    "DynamoDB stats query failed for device %s: %s",
+                    device_id,
+                    error,
+                )
+                raise
+
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+
+        sessions: dict[str, str] = {}
+        for item in items:
+            s_id = item.get("session_id")
+            lbl = item.get("label")
+            if s_id and lbl:
+                sessions[str(s_id)] = str(lbl)
+
+        by_label: dict[str, int] = {}
+        for lbl in sessions.values():
+            by_label[lbl] = by_label.get(lbl, 0) + 1
+
+        return StudioDatasetStatsResponse(
+            device_id=device_id,
+            total_sessions=len(sessions),
+            by_label=by_label,
+        )
+
