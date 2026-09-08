@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
 from app.db.database import get_db
-from app.db.models import StudioSession, User
+from app.db.models import StudioSession, User, UserRole
 from app.schemas.studio import (
     PaginatedSessionsResponse,
     StudioSessionSummary,
@@ -19,6 +19,10 @@ from app.schemas.telemetry import StudioSessionReadingsResponse
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
+
+
+def _is_admin(user: User) -> bool:
+    return user.role == UserRole.admin
 
 
 def _parse_uuid(session_id: str) -> UUID:
@@ -43,7 +47,7 @@ def _get_authorized_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Studio session '{session_id}' not found",
         )
-    if not user.is_admin and session.user_id != user.id:
+    if not _is_admin(user) and session.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: access to this studio session is denied",
@@ -84,7 +88,7 @@ def create_studio_sessions_router(
         """List studio sessions with RBAC, pagination, and filters."""
         query = db.query(StudioSession)
 
-        if not user.is_admin:
+        if not _is_admin(user):
             query = query.filter(StudioSession.user_id == user.id)
         else:
             if user_id is not None:
@@ -104,7 +108,7 @@ def create_studio_sessions_router(
             .all()
         )
 
-        items = [_to_summary(s, is_admin=user.is_admin) for s in sessions]
+        items = [_to_summary(s, is_admin=_is_admin(user)) for s in sessions]
         return PaginatedSessionsResponse(
             items=items,
             total=total,
@@ -170,7 +174,7 @@ def create_studio_sessions_router(
                 error,
             )
 
-        return _to_summary(session, is_admin=user.is_admin)
+        return _to_summary(session, is_admin=_is_admin(user))
 
     @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_session(

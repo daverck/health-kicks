@@ -104,10 +104,6 @@ class User(Base):
     )
     last_login_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    @property
-    def is_admin(self) -> bool:
-        return self.role == UserRole.admin
-
 
 class DeviceOwnership(Base):
     """Binding between a user account and an IoT device (future phase)."""
