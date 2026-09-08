@@ -104,7 +104,7 @@ def test_start_studio_session_success_defaults(test_client, mock_iot_client) -> 
     assert payload["pulse_count"] == 3
     assert payload["pulse_duration_ms"] == 150
     assert payload["pulse_pause_ms"] == 350
-    assert payload["pulse_intensity"] == 180
+    assert payload["pulse_intensity"] == 210
 
 
 def test_start_studio_session_success_custom_parameters(test_client, mock_iot_client) -> None:

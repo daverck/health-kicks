@@ -41,7 +41,7 @@ class StudioStartRequest(StrictModel):
     pulse_count: int = Field(default=3, ge=1, le=5)
     pulse_duration_ms: int = Field(default=150, ge=50, le=1000)
     pulse_pause_ms: int = Field(default=350, ge=100, le=1000)
-    pulse_intensity: int = Field(default=180, ge=50, le=255)
+    pulse_intensity: int = Field(default=210, ge=50, le=255)
 
 
 class StudioStartResponse(StrictModel):
