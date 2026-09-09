@@ -73,7 +73,7 @@ def run_migrations_online() -> None:
         from app.db.database import engine as app_engine
 
         cfg_url = config.get_main_option("sqlalchemy.url")
-        if cfg_url and str(app_engine.url) != cfg_url and not getattr(settings, "use_rds_iam", False):
+        if cfg_url and str(app_engine.url) != cfg_url and ("sqlite" in cfg_url or not getattr(settings, "use_rds_iam", False)):
             connectable = engine_from_config(
                 config.get_section(config.config_ini_section, {}),
                 prefix="sqlalchemy.",

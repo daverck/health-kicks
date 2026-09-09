@@ -3,6 +3,12 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def mock_lifespan_migrations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent TestClient(app) from triggering real migrations on live databases during tests."""
+    monkeypatch.setattr("app.main.run_migrations", lambda: None)
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add an explicit switch for tests requiring external AWS services."""
     parser.addoption(
