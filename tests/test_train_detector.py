@@ -6,10 +6,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-import joblib
-import numpy as np
-import pandas as pd
 import pytest
+
+# Skip gracefully if optional ML dependencies are not installed
+joblib = pytest.importorskip("joblib")
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
+pytest.importorskip("sklearn")
 
 from scripts.train_detector import (
     build_dataset_from_sessions,
