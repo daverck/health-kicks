@@ -31,3 +31,7 @@ archive.zip
 certs/*
 !certs/.gitkeep
 .env
+
+# Local ML data cache and model artifacts
+scripts/data/
+scripts/models/
