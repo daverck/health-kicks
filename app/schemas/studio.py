@@ -1,11 +1,25 @@
 """Strict Pydantic schemas for Studio sessions dataset curation."""
 
 from datetime import datetime
+from enum import Enum
 from uuid import UUID
 
 from pydantic import Field
 
 from app.schemas.cloud import StrictModel
+
+
+class StudioActivityLabel(str, Enum):
+    """Standard activity labels for Studio IMU recordings."""
+
+    WALK = "walk"
+    IDLE = "idle"
+    STAIRS = "stairs"
+    RUN = "run"
+    STUMBLE_RECOVER = "stumble_recover"
+    FALL_FORWARD = "fall_forward"
+    FALL_BACKWARD = "fall_backward"
+    FALL_LATERAL = "fall_lateral"
 
 
 class StudioSessionSummary(StrictModel):
@@ -24,7 +38,7 @@ class StudioSessionSummary(StrictModel):
 class StudioSessionUpdatePayload(StrictModel):
     """Payload to update the label of a Studio recording."""
 
-    label: str = Field(min_length=1, max_length=64, description="Reclassified activity label")
+    label: str = Field(min_length=1, max_length=64, description="Reclassified activity label (e.g. idle, walk, fall_forward)")
 
 
 class PaginatedSessionsResponse(StrictModel):

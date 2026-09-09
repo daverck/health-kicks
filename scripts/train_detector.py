@@ -358,6 +358,16 @@ def sync_sessions_cache(
     return list(cached_sessions.values())
 
 
+def is_fall_activity(label: str) -> bool:
+    """Indique si un label correspond à une chute critique (famille 'fall_*')."""
+    return str(label).lower().startswith("fall_")
+
+
+def is_benign_activity(label: str) -> bool:
+    """Indique si un label correspond à une activité normale ou au repos ('idle', 'walk', etc.)."""
+    return not is_fall_activity(label)
+
+
 # -----------------------------------------------------------------------------
 # 3. GÉNÉRATEUR DE SESSIONS SYNTHÉTIQUES (Tests & Démo)
 # -----------------------------------------------------------------------------
@@ -366,6 +376,7 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
 
     Classes simulées :
     - 'walk' : oscillations harmoniques à 1.8 Hz, magnitude ~9.8 m/s² ± 2.5 m/s².
+    - 'idle' : état de repos / immobile (accélération statique 1g ~9.8 m/s², bruit minimal).
     - 'fall_forward' : phase d'apesanteur (norme proche de 0), pic d'impact (> 25 m/s²),
       forte vélocité angulaire (> 6 rad/s).
     - 'stairs' : pas cadencés plus amples et asymétriques.
@@ -378,7 +389,7 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
     n_points = int(duration * sampling_freq)
     t = np.linspace(0, duration, n_points)
 
-    classes = ["walk", "fall_forward", "stairs", "stumble_recover"]
+    classes = ["walk", "idle", "fall_forward", "stairs", "stumble_recover"]
 
     for label in classes:
         for idx in range(n_per_class):
@@ -392,6 +403,15 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
                 gx = 0.3 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
                 gy = 0.2 * np.sin(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
                 gz = 0.4 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
+
+            elif label == "idle":
+                # État stationnaire / repos (gravité statique 1g sur l'axe Y, accélérations et rotations nulles)
+                ax = np.random.normal(0, 0.04, n_points)
+                ay = 9.8 + np.random.normal(0, 0.04, n_points)
+                az = np.random.normal(0, 0.04, n_points)
+                gx = np.random.normal(0, 0.01, n_points)
+                gy = np.random.normal(0, 0.01, n_points)
+                gz = np.random.normal(0, 0.01, n_points)
 
             elif label == "fall_forward":
                 # Chute survenant vers t = 2.5s
@@ -494,7 +514,8 @@ def train_and_benchmark(
     print("Distribution des classes :")
     for lbl, count in pd.Series(y).value_counts().items():
         pct = (count / len(y)) * 100
-        print(f"  * {lbl:<18} : {count:4d} fenetres ({pct:5.1f} %)")
+        cat_tag = "CHUTE CRITIQUE" if is_fall_activity(lbl) else "BENIN"
+        print(f"  * {lbl:<18} : {count:4d} fenetres ({pct:5.1f} %) [{cat_tag}]")
     print("=" * 68 + "\n")
 
     # Définition des classifieurs candidats pour l'Edge
@@ -578,11 +599,17 @@ def train_and_benchmark(
     out_path = Path(output_model_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    unique_classes = [str(c) for c in np.unique(y)]
+    fall_classes = [c for c in unique_classes if is_fall_activity(c)]
+    benign_classes = [c for c in unique_classes if is_benign_activity(c)]
+
     package = {
         "model_name": best_name,
         "estimator": best_clf,
         "feature_names": list(X.columns),
-        "classes": list(np.unique(y)),
+        "classes": unique_classes,
+        "fall_classes": fall_classes,
+        "benign_classes": benign_classes,
         "window_size_sec": float(window_size_sec),
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
         "metrics": {

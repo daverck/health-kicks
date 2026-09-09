@@ -37,7 +37,7 @@ uv run python -m scripts.train_detector
 ```
 
 ### B. Offline Synthetic / Demo Mode (No Database or AWS Required)
-Generates a representative synthetic dataset covering 4 key biomechanical movement classes (`walk`, `fall_forward`, `stairs`, `stumble_recover`), ideal for pipeline verification or offline work:
+Generates a representative synthetic dataset covering 5 key biomechanical movement and posture classes (`walk`, `idle`, `fall_forward`, `stairs`, `stumble_recover`), ideal for pipeline verification or offline work:
 ```bash
 uv run python -m scripts.train_detector --synthetic
 ```
@@ -132,6 +132,7 @@ model_name = artifact["model_name"]
 classes = artifact["classes"]
 
 print(f"Loaded model: {model_name} (Classes: {classes})")
+fall_classes = artifact.get("fall_classes", [c for c in classes if str(c).startswith("fall_")])
 
 # 2. Run inference on a real-time IMU window
 # df_window contains the latest 50-100 real-time IMU frames (ax, ay, az, gx, gy, gz)
@@ -142,8 +143,12 @@ prediction = model.predict(X_new)[0]
 probabilities = model.predict_proba(X_new)[0] if hasattr(model, "predict_proba") else None
 
 print(f"Predicted activity: {prediction}")
-if prediction == "fall_forward":
-    print("ALERT: Fall detected!")
+if prediction in fall_classes or str(prediction).startswith("fall_"):
+    print(f"ALERT: Critical fall detected ({prediction})! Triggering haptic stimulation.")
+elif prediction == "idle":
+    print("Subject is stationary / resting (benign state, no intervention needed).")
+else:
+    print(f"Normal daily movement ({prediction}).")
 ```
 
 

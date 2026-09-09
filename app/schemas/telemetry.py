@@ -36,7 +36,7 @@ class StudioSessionReadingsResponse(StrictModel):
 class StudioStartRequest(StrictModel):
     """Request payload to remotely trigger a Studio recording session."""
 
-    label: str = Field(min_length=1, max_length=64, description="Label d'activité (ex: walk, fall_forward)")
+    label: str = Field(min_length=1, max_length=64, description="Label d'activité (ex: walk, idle, fall_forward)")
     duration_sec: float = Field(default=5.0, ge=1.0, le=30.0)
     pulse_count: int = Field(default=3, ge=1, le=5)
     pulse_duration_ms: int = Field(default=150, ge=50, le=1000)

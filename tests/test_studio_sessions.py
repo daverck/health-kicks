@@ -342,3 +342,53 @@ def test_unauthenticated_rejected(client) -> None:
     assert client.get(f"/api/v1/studio/sessions/{uuid.uuid4()}/readings").status_code == 401
     assert client.patch(f"/api/v1/studio/sessions/{uuid.uuid4()}", json={"label": "walk"}).status_code == 401
     assert client.delete(f"/api/v1/studio/sessions/{uuid.uuid4()}").status_code == 401
+
+
+def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_service, db_session) -> None:
+    """Vérifie qu'une session avec le label 'idle' est acceptée, filtrée, paginée et modifiable."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(
+        id=sess_id,
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="idle",
+        sample_count=50,
+        duration_sec=5.0,
+    )
+    db_session.add(s)
+    db_session.commit()
+
+    # 1. Listing avec filtre ?label=idle
+    res_idle = client.get("/api/v1/studio/sessions?label=idle", headers=_auth_headers(user_a))
+    assert res_idle.status_code == 200
+    data_idle = res_idle.json()
+    assert data_idle["total"] == 1
+    assert data_idle["items"][0]["id"] == str(sess_id)
+    assert data_idle["items"][0]["label"] == "idle"
+
+    # 2. Listing avec filtre ?label=walk (ne doit pas inclure idle)
+    res_walk = client.get("/api/v1/studio/sessions?label=walk", headers=_auth_headers(user_a))
+    assert res_walk.status_code == 200
+    assert res_walk.json()["total"] == 0
+
+    # 3. Modification du label vers 'stairs'
+    res_patch = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}",
+        json={"label": "stairs"},
+        headers=_auth_headers(user_a),
+    )
+    assert res_patch.status_code == 200
+    assert res_patch.json()["label"] == "stairs"
+
+    # 4. Modification de retour vers 'idle'
+    res_patch_idle = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}",
+        json={"label": "idle"},
+        headers=_auth_headers(user_a),
+    )
+    assert res_patch_idle.status_code == 200
+    assert res_patch_idle.json()["label"] == "idle"
+
+    # Vérification en base
+    db_session.refresh(s)
+    assert s.label == "idle"

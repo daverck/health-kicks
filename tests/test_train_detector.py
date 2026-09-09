@@ -15,6 +15,8 @@ from scripts.train_detector import (
     build_dataset_from_sessions,
     compute_window_features,
     generate_synthetic_sessions,
+    is_benign_activity,
+    is_fall_activity,
     main,
     parse_args,
     sync_sessions_cache,
@@ -163,16 +165,31 @@ def test_build_dataset_from_sessions_empty_or_invalid():
 def test_generate_synthetic_sessions():
     """Vérifie la cohérence du générateur de sessions synthétiques."""
     sessions = generate_synthetic_sessions(n_per_class=5)
-    assert len(sessions) == 20  # 4 classes * 5
+    assert len(sessions) == 25  # 5 classes * 5
 
     labels = {s["label"] for s in sessions}
-    assert labels == {"walk", "fall_forward", "stairs", "stumble_recover"}
+    assert labels == {"walk", "idle", "fall_forward", "stairs", "stumble_recover"}
 
     sample_sess = sessions[0]
     assert "session_id" in sample_sess
     assert "readings" in sample_sess
     assert len(sample_sess["readings"]) == 250
     assert "timestamp" in sample_sess["readings"][0]
+
+
+def test_fall_and_benign_activity_helpers():
+    """Vérifie le classement correct des activités bénignes (dont idle) vs chutes critiques."""
+    assert is_benign_activity("idle")
+    assert not is_fall_activity("idle")
+
+    assert is_benign_activity("walk")
+    assert is_benign_activity("stairs")
+    assert is_benign_activity("stumble_recover")
+
+    assert is_fall_activity("fall_forward")
+    assert is_fall_activity("fall_backward")
+    assert is_fall_activity("fall_lateral")
+    assert not is_benign_activity("fall_forward")
 
 
 # -----------------------------------------------------------------------------
@@ -284,6 +301,11 @@ def test_train_and_benchmark_synthetic(tmp_path: Path):
     assert "estimator" in package
     assert "feature_names" in package
     assert "classes" in package
+    assert "fall_classes" in package
+    assert "benign_classes" in package
+    assert "idle" in package["benign_classes"]
+    assert "fall_forward" in package["fall_classes"]
+    assert "idle" not in package["fall_classes"]
     assert "metrics" in package
     assert package["window_size_sec"] == 2.0
 
@@ -291,6 +313,7 @@ def test_train_and_benchmark_synthetic(tmp_path: Path):
     assert model_out.exists()
     loaded_pkg = joblib.load(model_out)
     assert loaded_pkg["model_name"] == package["model_name"]
+    assert "idle" in loaded_pkg["benign_classes"]
 
     # Test d'inférence avec l'estimateur rechargé
     preds = loaded_pkg["estimator"].predict(X.iloc[:5])

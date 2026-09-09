@@ -100,6 +100,23 @@ def test_get_dataset_stats_aggregates_and_deduplicates(telemetry_service, mock_t
     assert call_kwargs["ExpressionAttributeNames"] == {"#lbl": "label"}
 
 
+def test_get_dataset_stats_with_idle_label(telemetry_service, mock_table) -> None:
+    """Vérifie que le label 'idle' est correctement comptabilisé dans les statistiques."""
+    items = [
+        {"session_id": "sess-idle-1", "label": "idle"},
+        {"session_id": "sess-idle-1", "label": "idle"},
+        {"session_id": "sess-idle-2", "label": "idle"},
+        {"session_id": "sess-walk-1", "label": "walk"},
+    ]
+    mock_table.query.return_value = {"Items": items}
+
+    stats = telemetry_service.get_dataset_stats(device_id="device-idle")
+
+    assert stats.total_sessions == 3
+    assert stats.by_label["idle"] == 2
+    assert stats.by_label["walk"] == 1
+
+
 def test_get_dataset_stats_empty(telemetry_service, mock_table) -> None:
     mock_table.query.return_value = {"Items": []}
 
