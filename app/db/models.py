@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -17,13 +17,6 @@ class DeviceStatus(str, Enum):
 
     online = "online"
     offline = "offline"
-
-
-class FallStatus(str, Enum):
-    """Processing state of a persisted event."""
-
-    detected = "detected"
-    acknowledged = "acknowledged"
 
 
 class Device(Base):
@@ -39,18 +32,16 @@ class Device(Base):
     )
 
 
-class FallEvent(Base):
-    __tablename__ = "fall_events"
+class ActivityEvent(Base):
+    __tablename__ = "activity_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(128), index=True)
-    event_type: Mapped[str] = mapped_column(String(64), default="fall")
+    event_type: Mapped[str] = mapped_column(String(64), default="walk")
     timestamp_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    raw_imu_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    status_enum: Mapped[FallStatus] = mapped_column(default=FallStatus.detected)
 
 
 class HapticLog(Base):

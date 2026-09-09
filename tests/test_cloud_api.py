@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.cloud import create_cloud_router
-from app.db.models import Base, DeviceStatus, FallEvent, FallStatus, HapticLog
+from app.db.models import ActivityEvent, Base, DeviceStatus, HapticLog
 from app.schemas.cloud import HapticTrigger
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.ingestion_service import ingest_device_status
@@ -88,9 +88,9 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     assert haptic_log.triggered_at_utc is not None
     assert haptic_log.triggered_by_user is True
 
-    # Verify FallEvent table is NOT polluted with vibrations
-    fall_events_count = session.query(FallEvent).filter_by(device_id=TEST_DEVICE_ID).count()
-    assert fall_events_count == 0
+    # Verify ActivityEvent table is NOT polluted with vibrations
+    activity_events_count = session.query(ActivityEvent).filter_by(device_id=TEST_DEVICE_ID).count()
+    assert activity_events_count == 0
 
     # Verify dedicated list_haptic_history endpoint
     haptic_history_endpoint = next(
@@ -102,11 +102,11 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     assert history_page.items[0].intensity == 120
     assert history_page.items[0].duration_ms == 600
 
-    # Verify list_falls returns only falls (empty here)
-    falls_endpoint = next(
-        route.endpoint for route in router.routes if route.path.endswith("events/falls")
+    # Verify list_activities returns only activities (empty here)
+    activities_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("events/activities")
     )
-    falls_page = falls_endpoint(TEST_DEVICE_ID, user=None, page=1, page_size=10, db=session)
-    assert falls_page.total == 0
+    activities_page = activities_endpoint(TEST_DEVICE_ID, user=None, page=1, page_size=10, db=session)
+    assert activities_page.total == 0
 
     session.close()

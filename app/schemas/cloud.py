@@ -23,20 +23,18 @@ class HapticTrigger(StrictModel):
     duration_ms: int = Field(default=500, ge=50, le=10_000)
 
 
-class FallEventResponse(StrictModel):
+class ActivityEventResponse(StrictModel):
     id: int
     device_id: str
-    event_type: str = "fall"
+    event_type: str = "walk"
     timestamp_utc: datetime
     confidence_score: float | None = None
-    raw_imu_json: dict
-    status_enum: str
 
     model_config = ConfigDict(strict=True, extra="forbid", from_attributes=True)
 
 
-class FallEventPage(StrictModel):
-    items: list[FallEventResponse]
+class ActivityEventPage(StrictModel):
+    items: list[ActivityEventResponse]
     page: int
     page_size: int
     total: int

@@ -1,15 +1,15 @@
 # HealthKicks Backend
 
-FastAPI Cloud API for the **HealthKicks** connected smart shoe: remote haptic stimulation commands, fall event tracking, AWS IoT ingestion webhook, and Studio telemetry curation.
+FastAPI Cloud API for the **HealthKicks** connected smart shoe: remote haptic stimulation commands, activity event tracking, AWS IoT ingestion webhook, and Studio telemetry curation.
 
 ---
 
 ## Architecture
 
 - `app/main.py`: Assembles the stateless FastAPI Cloud API, lifecycle hooks, and database migrations.
-- `app/api/v1/`: Exposes REST endpoints (authentication, devices, haptics, falls, studio sessions, and the `/api/v1/ingest/event` webhook).
+- `app/api/v1/`: Exposes REST endpoints (authentication, devices, haptics, activities, studio sessions, and the `/api/v1/ingest/event` webhook).
 - `app/db/database.py`: Provides synchronous SQLAlchemy engine sessions, connection pool resilience, and automatic AWS RDS IAM DB authentication when enabled.
-- `app/db/models.py`: Declares database persistence models (`Device`, `DeviceOwnership`, `FallEvent`, `HapticLog`, `User`, `StudioSession`, and the idempotent message ledger).
+- `app/db/models.py`: Declares database persistence models (`Device`, `DeviceOwnership`, `ActivityEvent`, `HapticLog`, `User`, `StudioSession`, and the idempotent message ledger).
 - `app/schemas/`: Contains strict Pydantic validation contracts and DTO schemas.
 - `app/services/aws_iot_service.py`: Dispatches AWS IoT MQTT commands via boto3 `iot-data` without a persistent MQTT client.
 - `app/services/telemetry_service.py`: Interfaces with Amazon DynamoDB for high-frequency IMU telemetry storage, time-range queries, and dataset aggregation.
@@ -40,7 +40,7 @@ The health endpoint `GET /api/v1/health` verifies database connectivity and retu
 - `POST /api/v1/auth/refresh`: Refresh expired access token with token rotation.
 - `GET /api/v1/devices`: List registered devices (or user-bound devices).
 - `POST /api/v1/devices/{device_id}/haptic/trigger`: Trigger remote haptic vibration command.
-- `GET /api/v1/devices/{device_id}/events/falls`: Paginated list of detected fall events.
+- `GET /api/v1/devices/{device_id}/events/activities`: Paginated list of detected activity events.
 - `GET /api/v1/studio/sessions`: Paginated historical studio capture sessions with RBAC and label filters.
 - `GET /api/v1/studio/sessions/{id}/readings`: Fetch raw IMU sensor frames from DynamoDB for Chart.js inspection.
 - `PATCH /api/v1/studio/sessions/{id}`: Reclassify studio session label in PostgreSQL and DynamoDB.

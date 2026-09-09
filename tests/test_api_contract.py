@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.ingestion import settings as ingestion_settings
 from app.db.database import get_db
-from app.db.models import Base, FallEvent
+from app.db.models import ActivityEvent, Base
 from app.main import app
 from app.schemas.ingestion import IngestionEvent
 
@@ -60,6 +60,6 @@ def test_ingestion_route_auth_and_idempotence(monkeypatch) -> None:
             assert client.post("/api/v1/ingest/event", json=payload, headers=headers).json()["duplicate"] is False
             assert client.post("/api/v1/ingest/event", json=payload, headers=headers).json()["duplicate"] is True
         with session_factory() as session:
-            assert session.query(FallEvent).count() == 1
+            assert session.query(ActivityEvent).count() == 1
     finally:
         app.dependency_overrides.clear()

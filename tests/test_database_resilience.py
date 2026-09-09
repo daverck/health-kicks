@@ -134,6 +134,6 @@ def test_unhandled_exception_middleware_preserves_http_exceptions() -> None:
     """Verify that expected HTTPExceptions (401, 404, etc.) are unaffected by the exception middleware."""
     client = TestClient(main_app, raise_server_exceptions=False)
     # Access a protected endpoint without auth -> should be 401
-    response = client.get("/api/v1/devices/any-device/events/falls")
+    response = client.get("/api/v1/devices/any-device/events/activities")
     assert response.status_code == 401
     assert "detail" in response.json()

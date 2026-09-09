@@ -6,8 +6,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import Device, DeviceStatus, FallEvent, FallStatus, ProcessedMessage
-from app.schemas.ingestion import IngestionEvent
+from app.db.models import ActivityEvent, Device, DeviceStatus, ProcessedMessage
 from app.schemas.ingestion import DeviceStatusEvent, IngestionEvent
 
 
@@ -23,18 +22,17 @@ def _timestamp(value: Any) -> datetime:
 def _parts(message: dict[str, Any], headers: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
     header = dict(headers or message.get("header") or message.get("headers") or {})
     body = message.get("payload", message)
-    if not isinstance(body, dict):
-        raise ValueError("payload must be a mapping")
-    return header, body
+    payload = dict(body if isinstance(body, dict) else {})
+    return header, payload
 
 
 def _get_device(session: Session, device_id: str, seen_at: datetime) -> Device:
-    device = session.query(Device).filter_by(device_id=device_id).one_or_none()
-    if device is None:
-        device = Device(device_id=device_id)
+    device = session.query(Device).filter_by(device_id=device_id).first()
+    if not device:
+        device = Device(device_id=device_id, name=f"Device {device_id}", status=DeviceStatus.online)
         session.add(device)
-    device.last_seen_utc = seen_at
     device.status = DeviceStatus.online
+    device.last_seen_utc = seen_at
     return device
 
 
@@ -42,8 +40,8 @@ def ingest_fall_event(
     session: Session,
     message: dict[str, Any],
     headers: dict[str, Any] | None = None,
-) -> FallEvent | None:
-    """Normalize and persist a fall event, returning ``None`` for a duplicate msg_id."""
+) -> ActivityEvent | None:
+    """Normalize and persist an activity event, returning ``None`` for a duplicate msg_id."""
     header, payload = _parts(message, headers)
     device_id = str(header.get("device_id") or payload["device_id"])
     seen_at = _timestamp(header.get("timestamp_utc", payload.get("timestamp_utc")))
@@ -53,16 +51,15 @@ def ingest_fall_event(
             return None
         session.add(ProcessedMessage(msg_id=str(msg_id)))
     _get_device(session, device_id, seen_at)
-    event = FallEvent(
+    event = ActivityEvent(
         device_id=device_id,
+        event_type=payload.get("event_type", "fall"),
         timestamp_utc=_timestamp(payload.get("timestamp_utc", header.get("timestamp_utc"))),
         confidence_score=(
             float(payload.get("confidence_score", payload.get("confidence")))
             if payload.get("confidence_score", payload.get("confidence")) is not None
             else None
         ),
-        raw_imu_json=payload.get("raw_imu_json", payload.get("imu", payload)),
-        status_enum=FallStatus.detected,
     )
     session.add(event)
     try:
@@ -76,7 +73,7 @@ def ingest_fall_event(
     return event
 
 
-def ingest_event(session: Session, message: dict[str, Any]) -> FallEvent | None:
+def ingest_event(session: Session, message: dict[str, Any]) -> ActivityEvent | None:
     """Validate and persist one AWS IoT Rule event with idempotent delivery."""
     contract = IngestionEvent.model_validate(message)
     header = contract.header
@@ -85,13 +82,11 @@ def ingest_event(session: Session, message: dict[str, Any]) -> FallEvent | None:
         return None
     session.add(ProcessedMessage(msg_id=header.msg_id))
     _get_device(session, header.device_id, header.timestamp_utc)
-    event = FallEvent(
+    event = ActivityEvent(
         device_id=header.device_id,
         event_type=payload.event_type,
         timestamp_utc=header.timestamp_utc,
         confidence_score=payload.confidence_score,
-        raw_imu_json=payload.raw_imu_snapshot,
-        status_enum=FallStatus.detected,
     )
     session.add(event)
     try:
