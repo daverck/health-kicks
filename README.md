@@ -91,10 +91,13 @@ A complete local ML training and evaluation pipeline is available to train and c
 # Install optional Data Science / ML dependencies
 uv sync --group ml
 
-# Train classifiers with incremental PostgreSQL & DynamoDB caching
+# Authenticate with AWS CLI for live DynamoDB telemetry data
+aws sso login   # or aws login / aws configure
+
+# Train classifiers with incremental PostgreSQL & DynamoDB caching (concurrent batch downloads)
 uv run python -m scripts.train_detector
 
-# Or run in offline synthetic demo mode
+# Or run in offline synthetic demo mode (no AWS or database connection required)
 uv run python -m scripts.train_detector --synthetic
 ```
 
