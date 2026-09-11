@@ -8,22 +8,38 @@ adaptés aux contraintes Edge (Raspberry Pi / microcontrôleur) via validation c
 (Stratified 5-Fold), et sérialise le modèle champion sous forme d'artefact joblib.
 
 Prérequis :
-    Les dépendances de data science sont isolées dans le groupe optionnel 'ml' :
-    $ uv sync --group ml
+    1. Les dépendances de data science sont isolées dans le groupe optionnel 'ml' :
+       $ uv sync --group ml
+
+    2. Authentification AWS CLI pour l'accès aux données réelles de télémétrie DynamoDB :
+       $ aws sso login    # (ou 'aws login' / 'aws configure')
+       Note : l'option '--synthetic' permet d'ignorer AWS pour un entraînement hors-ligne.
 
 Exemples d'utilisation :
-    # Entraînement standard avec cache local incrémental :
+    # Entraînement standard avec cache local incrémental (téléchargement batch) :
     $ uv run python -m scripts.train_detector
+
+    # Téléchargement batch avec réglage de la concurrence (ex: 12 workers) :
+    $ uv run python -m scripts.train_detector --batch-size 12
 
     # Forcer la resynchronisation complète depuis PostgreSQL & DynamoDB :
     $ uv run python -m scripts.train_detector --force-refresh
 
-    # Mode développement / démo hors-ligne avec dataset synthétique :
+    # Mode développement / démo hors-ligne avec dataset synthétique (aucun accès AWS requis) :
     $ uv run python -m scripts.train_detector --synthetic
 
     # Personnalisation des fenêtres et des chemins de sortie :
     $ uv run python -m scripts.train_detector --window-size 2.0 --window-step 0.5 --output-model scripts/models/activity_classifier.joblib
 """
+from pathlib import Path
+from dotenv import load_dotenv
+
+
+def load_project_env() -> None:
+    """Charge le fichier .env du projet sans écraser les variables déjà définies."""
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
 
 import argparse
 from datetime import datetime, timezone
@@ -31,7 +47,6 @@ import json
 import logging
 import math
 import os
-from pathlib import Path
 import sys
 from typing import Any
 
@@ -205,17 +220,57 @@ def build_dataset_from_sessions(
 # -----------------------------------------------------------------------------
 # 2. CACHE LOCAL INCRÉMENTAL (PostgreSQL + DynamoDB)
 # -----------------------------------------------------------------------------
+def _fetch_single_session(
+    sess: Any,
+    telemetry_service: Any,
+) -> tuple[str, dict[str, Any] | None, Exception | None]:
+    """Télécharge les trames IMU d'une session depuis DynamoDB (exécuté dans un thread worker)."""
+    sess_id = str(sess.id)
+    try:
+        readings_resp = telemetry_service.get_session_readings(
+            device_id=sess.device_id,
+            session_id=sess_id,
+        )
+        if readings_resp and readings_resp.readings:
+            raw_readings = [
+                {
+                    "timestamp": r.timestamp_epoch_us,
+                    "ax": r.ax,
+                    "ay": r.ay,
+                    "az": r.az,
+                    "gx": r.gx,
+                    "gy": r.gy,
+                    "gz": r.gz,
+                }
+                for r in readings_resp.readings
+            ]
+            session_dict = {
+                "session_id": sess_id,
+                "device_id": sess.device_id,
+                "label": sess.label,
+                "duration_sec": sess.duration_sec,
+                "sample_count": len(raw_readings),
+                "readings": raw_readings,
+            }
+            return sess_id, session_dict, None
+        return sess_id, None, None
+    except Exception as exc:
+        return sess_id, None, exc
+
+
 def sync_sessions_cache(
     cache_path: Path,
     force_refresh: bool = False,
     synthetic: bool = False,
+    batch_size: int = 8,
 ) -> list[dict[str, Any]]:
-    """Synchronise le cache local avec PostgreSQL et DynamoDB de manière incrémentale.
+    """Synchronise le cache local avec PostgreSQL et DynamoDB de manière incrémentale et par lots.
 
     1. Charge les sessions déjà archivées localement dans `cache_path`.
     2. Interroge la table PostgreSQL `StudioSession` pour identifier les nouvelles captures.
-    3. Ne requiert DynamoDB que pour les trames des sessions manquantes.
-    4. Réécrit le fichier JSON mis à jour.
+    3. Télécharge en batch concurrent (pool de threads de taille `batch_size`) les trames
+       DynamoDB des sessions manquantes.
+    4. Réécrit le fichier JSON mis à jour de manière incrémentale à chaque lot téléchargé.
     """
     if synthetic:
         logger.info("Mode synthétique activé : génération de données artificielles.")
@@ -274,6 +329,39 @@ def sync_sessions_cache(
         logger.info("Pour générer un jeu d'entraînement d'exemple, utilisez : --synthetic")
         return []
 
+    # Filtrage des sessions à télécharger
+    sessions_to_download = []
+    labels_updated = 0
+    for sess in db_sessions:
+        sess_id = str(sess.id)
+        if not force_refresh and sess_id in cached_sessions:
+            if cached_sessions[sess_id].get("label") != sess.label:
+                cached_sessions[sess_id]["label"] = sess.label
+                labels_updated += 1
+        else:
+            sessions_to_download.append(sess)
+
+    def _save_cache_to_disk() -> None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_payload = {
+            "version": 1,
+            "last_sync": datetime.now(timezone.utc).isoformat(),
+            "sessions": cached_sessions,
+        }
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(cache_payload, f, indent=2)
+
+    # Si toutes les sessions sont déjà en cache
+    if not sessions_to_download:
+        logger.info("Toutes les %d sessions sont déjà présentes dans le cache local.", len(cached_sessions))
+        if labels_updated > 0:
+            try:
+                _save_cache_to_disk()
+                logger.info("Labels mis à jour pour %d session(s) dans le cache.", labels_updated)
+            except Exception as write_err:
+                logger.error("Impossible d'écrire le fichier de cache %s : %s", cache_path, write_err)
+        return list(cached_sessions.values())
+
     # Import du service de télémétrie DynamoDB
     try:
         from app.services.telemetry_service import TelemetryService
@@ -283,77 +371,94 @@ def sync_sessions_cache(
         logger.warning("Impossible d'initialiser TelemetryService : %s", init_err)
         telemetry_service = None
 
+    if telemetry_service is None:
+        logger.error("TelemetryService non disponible. Impossible de télécharger les trames DynamoDB.")
+        return list(cached_sessions.values())
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    effective_workers = max(1, min(batch_size, len(sessions_to_download)))
+    total_to_download = len(sessions_to_download)
+    total_batches = (total_to_download + batch_size - 1) // batch_size
+
+    logger.info(
+        "Téléchargement batch DynamoDB : %d session(s) à récupérer en %d lot(s) (concurrence max: %d workers)",
+        total_to_download,
+        total_batches,
+        effective_workers,
+    )
+
     downloaded_count = 0
+    aws_auth_error_notified = False
 
-    for sess in db_sessions:
-        sess_id = str(sess.id)
-
-        # Si la session est déjà en cache et qu'un rafraîchissement complet n'est pas demandé
-        if not force_refresh and sess_id in cached_sessions:
-            # Met à jour le label si corrigé entre-temps dans PostgreSQL
-            cached_sessions[sess_id]["label"] = sess.label
-            continue
-
-        if telemetry_service is None:
-            continue
-
+    for batch_idx in range(0, total_to_download, batch_size):
+        batch_chunk = sessions_to_download[batch_idx : batch_idx + batch_size]
+        batch_num = (batch_idx // batch_size) + 1
         logger.info(
-            "Téléchargement DynamoDB : session %s (device: %s, label: %s)",
-            sess_id,
-            sess.device_id,
-            sess.label,
+            "--> Lot %d/%d : téléchargement de %d session(s) en parallèle...",
+            batch_num,
+            total_batches,
+            len(batch_chunk),
         )
-        try:
-            readings_resp = telemetry_service.get_session_readings(
-                device_id=sess.device_id,
-                session_id=sess_id,
-            )
-            if readings_resp and readings_resp.readings:
-                raw_readings = [
-                    {
-                        "timestamp": r.timestamp_epoch_us,
-                        "ax": r.ax,
-                        "ay": r.ay,
-                        "az": r.az,
-                        "gx": r.gx,
-                        "gy": r.gy,
-                        "gz": r.gz,
-                    }
-                    for r in readings_resp.readings
-                ]
-                cached_sessions[sess_id] = {
-                    "session_id": sess_id,
-                    "device_id": sess.device_id,
-                    "label": sess.label,
-                    "duration_sec": sess.duration_sec,
-                    "sample_count": len(raw_readings),
-                    "readings": raw_readings,
-                }
-                downloaded_count += 1
-            else:
-                logger.warning("Aucune trame IMU dans DynamoDB pour la session %s", sess_id)
-        except Exception as fetch_err:
-            logger.error("Erreur de récupération DynamoDB pour %s : %s", sess_id, fetch_err)
 
-    # Sauvegarde du cache mis à jour
-    if downloaded_count > 0 or force_refresh:
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_payload = {
-                "version": 1,
-                "last_sync": datetime.now(timezone.utc).isoformat(),
-                "sessions": cached_sessions,
+        with ThreadPoolExecutor(max_workers=min(batch_size, len(batch_chunk))) as executor:
+            future_to_sess = {
+                executor.submit(_fetch_single_session, sess, telemetry_service): sess
+                for sess in batch_chunk
             }
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(cache_payload, f, indent=2)
-            logger.info(
-                "Cache local mis à jour : %s (%d sessions totales, %d nouvelles)",
-                cache_path,
-                len(cached_sessions),
-                downloaded_count,
-            )
+            for future in as_completed(future_to_sess):
+                sess_ref = future_to_sess[future]
+                sess_id, session_dict, exc = future.result()
+                if exc is not None:
+                    exc_type = type(exc).__name__
+                    exc_str = str(exc)
+                    if not aws_auth_error_notified and (
+                        "NoCredentialsError" in exc_type
+                        or "PartialCredentialsError" in exc_type
+                        or "ExpiredToken" in exc_str
+                        or "UnrecognizedClientException" in exc_str
+                        or "AccessDenied" in exc_str
+                    ):
+                        logger.error(
+                            "\n" + "=" * 70 + "\n"
+                            "⚠️  AUTHENTIFICATION AWS REQUISE POUR DYNAMODB\n"
+                            "Les identifiants AWS sont introuvables, invalides ou expirés.\n"
+                            "Pour utiliser les sessions DynamoDB réelles, connectez-vous via l'AWS CLI :\n"
+                            "    $ aws sso login    (ou 'aws login' / 'aws configure')\n\n"
+                            "Astuce : pour vous entraîner hors-ligne sans connexion AWS, utilisez :\n"
+                            "    $ uv run python -m scripts.train_detector --synthetic\n"
+                            + "=" * 70
+                        )
+                        aws_auth_error_notified = True
+                    logger.error(
+                        "Erreur DynamoDB pour session %s (device: %s) : %s",
+                        sess_id,
+                        sess_ref.device_id,
+                        exc,
+                    )
+                elif session_dict is not None:
+                    cached_sessions[sess_id] = session_dict
+                    downloaded_count += 1
+                else:
+                    logger.warning(
+                        "Aucune trame IMU dans DynamoDB pour la session %s (device: %s)",
+                        sess_id,
+                        sess_ref.device_id,
+                    )
+
+        # Sauvegarde incrémentale à la fin de chaque lot
+        try:
+            _save_cache_to_disk()
         except Exception as write_err:
-            logger.error("Impossible d'écrire le fichier de cache %s : %s", cache_path, write_err)
+            logger.error("Impossible d'écrire le cache intermédiaire %s : %s", cache_path, write_err)
+
+    logger.info(
+        "Fin du téléchargement batch : %d/%d session(s) enregistrée(s) dans %s (%d sessions totales en cache)",
+        downloaded_count,
+        total_to_download,
+        cache_path,
+        len(cached_sessions),
+    )
 
     return list(cached_sessions.values())
 
@@ -666,6 +771,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Pas de déplacement de la fenêtre en secondes (défaut: 0.5s).",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Nombre de téléchargements simultanés en batch depuis DynamoDB via un pool de threads (défaut: 8).",
+    )
+    parser.add_argument(
         "--synthetic",
         action="store_true",
         help="Génère un dataset synthétique d'exemple (utile sans connexion AWS ou DB).",
@@ -675,6 +786,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     """Point d'entrée principal du script d'entraînement."""
+    load_project_env()
     args = parse_args(argv)
     cache_file = Path(args.cache_path)
 
@@ -684,15 +796,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Cache local          : {cache_file}")
     print(f"* Modele de sortie     : {args.output_model}")
     print(f"* Taille de fenetre    : {args.window_size:.1f} s (pas: {args.window_step:.1f} s)")
+    print(f"* Concurrence batch    : {args.batch_size} sessions simultanees")
     print(f"* Forcer le refresh    : {'OUI' if args.force_refresh else 'NON'}")
     print(f"* Donnees synthetiques : {'OUI' if args.synthetic else 'NON'}")
     print("=" * 68 + "\n")
 
-    # 1. Synchronisation incrémentale du cache
+    # 1. Synchronisation incrémentale du cache (par lots concurrents)
     sessions_data = sync_sessions_cache(
         cache_path=cache_file,
         force_refresh=args.force_refresh,
         synthetic=args.synthetic,
+        batch_size=args.batch_size,
     )
 
     if not sessions_data:

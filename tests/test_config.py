@@ -1,8 +1,39 @@
 """Tests for Cloud configuration defaults and environment overrides."""
 
+import os
 from pathlib import Path
+import pytest
 
 from app.core.config import load_settings
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate configuration tests from local .env variables."""
+    for key in list(os.environ.keys()):
+        if (
+            key.startswith("HEALTHKICKS_")
+            or key.startswith("AZURE_")
+            or key.startswith("GOOGLE_")
+            or key in {
+                "DATABASE_URL",
+                "MIGRATE_ON_START",
+                "USE_RDS_IAM",
+                "DATABASE_SSLMODE",
+                "JWT_SECRET",
+                "REFRESH_TOKEN_EXPIRE_DAYS",
+                "DYNAMODB_TELEMETRY_TABLE",
+                "AWS_IOT_ENDPOINT",
+                "AWS_IOT_HAPTIC_COMMAND_TOPIC",
+                "AWS_IOT_STUDIO_START_TOPIC",
+                "DATABASE_POOL_SIZE",
+                "DATABASE_MAX_OVERFLOW",
+                "DATABASE_POOL_RECYCLE",
+                "DATABASE_POOL_PRE_PING",
+                "LOG_LEVEL",
+            }
+        ):
+            monkeypatch.delenv(key, raising=False)
 
 
 def test_database_defaults_to_postgresql(tmp_path: Path) -> None:

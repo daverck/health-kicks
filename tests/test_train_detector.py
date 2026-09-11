@@ -335,8 +335,59 @@ def test_parse_args_defaults():
     assert args.output_model == "scripts/models/activity_classifier.joblib"
     assert args.window_size == 2.0
     assert args.window_step == 0.5
+    assert args.batch_size == 8
     assert not args.force_refresh
     assert not args.synthetic
+
+
+def test_parse_args_custom_batch_size():
+    """Vérifie la personnalisation de la taille de lot concurrent."""
+    args = parse_args(["--batch-size", "16"])
+    assert args.batch_size == 16
+
+
+def test_sync_sessions_cache_batch_download(tmp_path: Path):
+    """Vérifie que le téléchargement batch concurrent récupère plusieurs sessions correctement."""
+    cache_file = tmp_path / "sessions_batch_cache.json"
+
+    sessions = []
+    for i in range(4):
+        m = MagicMock()
+        m.id = f"sess-{i}"
+        m.device_id = f"dev-{i}"
+        m.label = "walk"
+        m.duration_sec = 5.0
+        sessions.append(m)
+
+    mock_reading = MagicMock()
+    mock_reading.timestamp_epoch_us = 1000
+    mock_reading.ax = 0.0
+    mock_reading.ay = 9.8
+    mock_reading.az = 0.0
+    mock_reading.gx = 0.0
+    mock_reading.gy = 0.0
+    mock_reading.gz = 0.0
+
+    mock_resp = MagicMock()
+    mock_resp.readings = [mock_reading]
+
+    mock_telemetry_svc = MagicMock()
+    mock_telemetry_svc.get_session_readings.return_value = mock_resp
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker, \
+         patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = sessions
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result_sessions = sync_sessions_cache(cache_file, force_refresh=True, batch_size=2)
+
+    assert len(result_sessions) == 4
+    assert mock_telemetry_svc.get_session_readings.call_count == 4
+    assert cache_file.exists()
+    with open(cache_file, "r", encoding="utf-8") as f:
+        disk_data = json.load(f)
+    assert len(disk_data["sessions"]) == 4
 
 
 def test_main_synthetic_execution(tmp_path: Path):
@@ -355,8 +406,11 @@ def test_main_synthetic_execution(tmp_path: Path):
             "2.0",
             "--window-step",
             "1.0",
+            "--batch-size",
+            "4",
         ]
     )
     assert ret_code == 0
     assert model_path.exists()
+
 
