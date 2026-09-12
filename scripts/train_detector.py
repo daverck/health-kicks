@@ -329,18 +329,6 @@ def sync_sessions_cache(
         logger.info("Pour générer un jeu d'entraînement d'exemple, utilisez : --synthetic")
         return []
 
-    # Filtrage des sessions à télécharger
-    sessions_to_download = []
-    labels_updated = 0
-    for sess in db_sessions:
-        sess_id = str(sess.id)
-        if not force_refresh and sess_id in cached_sessions:
-            if cached_sessions[sess_id].get("label") != sess.label:
-                cached_sessions[sess_id]["label"] = sess.label
-                labels_updated += 1
-        else:
-            sessions_to_download.append(sess)
-
     def _save_cache_to_disk() -> None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_payload = {
@@ -350,6 +338,42 @@ def sync_sessions_cache(
         }
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(cache_payload, f, indent=2)
+
+    # 1. Détection et purge automatique des sessions supprimées de PostgreSQL
+    active_db_session_ids = {str(sess.id).lower() for sess in db_sessions}
+    deleted_session_ids = [
+        sess_id
+        for sess_id in list(cached_sessions.keys())
+        if str(sess_id).lower() not in active_db_session_ids
+    ]
+    cache_modified = False
+    if deleted_session_ids:
+        logger.info(
+            "Purge du dataset local : %d session(s) supprimée(s) de PostgreSQL retirée(s) du cache : %s",
+            len(deleted_session_ids),
+            deleted_session_ids,
+        )
+        for sess_id in deleted_session_ids:
+            del cached_sessions[sess_id]
+        cache_modified = True
+        try:
+            _save_cache_to_disk()
+            logger.info("Fichier de cache %s synchronisé sur disque après suppression de %d session(s).", cache_path, len(deleted_session_ids))
+        except Exception as write_err:
+            logger.error("Impossible d'écrire le fichier de cache %s après purge : %s", cache_path, write_err)
+
+    # 2. Filtrage des sessions à télécharger ou dont le label a été modifié
+    sessions_to_download = []
+    labels_updated = 0
+    for sess in db_sessions:
+        sess_id = str(sess.id)
+        if not force_refresh and sess_id in cached_sessions:
+            if cached_sessions[sess_id].get("label") != sess.label:
+                cached_sessions[sess_id]["label"] = sess.label
+                labels_updated += 1
+                cache_modified = True
+        else:
+            sessions_to_download.append(sess)
 
     # Si toutes les sessions sont déjà en cache
     if not sessions_to_download:
@@ -373,6 +397,11 @@ def sync_sessions_cache(
 
     if telemetry_service is None:
         logger.error("TelemetryService non disponible. Impossible de télécharger les trames DynamoDB.")
+        if cache_modified:
+            try:
+                _save_cache_to_disk()
+            except Exception as write_err:
+                logger.error("Impossible d'écrire le cache %s : %s", cache_path, write_err)
         return list(cached_sessions.values())
 
     from concurrent.futures import ThreadPoolExecutor, as_completed

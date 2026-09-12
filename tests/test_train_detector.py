@@ -282,6 +282,76 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
     assert sess_2_id in disk_data["sessions"]
 
 
+def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
+    """Vérifie que les sessions supprimées de la base PostgreSQL sont purgées du cache et du disque."""
+    cache_file = tmp_path / "sessions_cache.json"
+
+    sess_1_id = str(uuid4())
+    sess_2_deleted_id = str(uuid4())
+    sess_3_id = str(uuid4())
+
+    # Cache initial contenant 3 sessions
+    initial_cache = {
+        "version": 1,
+        "last_sync": datetime.now(timezone.utc).isoformat(),
+        "sessions": {
+            sess_1_id: {
+                "session_id": sess_1_id,
+                "device_id": "dev-01",
+                "label": "walk",
+                "readings": [{"ax": 0, "ay": 9.8, "az": 0, "gx": 0, "gy": 0, "gz": 0, "timestamp": 1}],
+            },
+            sess_2_deleted_id: {
+                "session_id": sess_2_deleted_id,
+                "device_id": "dev-01",
+                "label": "fall_forward",
+                "readings": [{"ax": 0, "ay": 9.8, "az": 0, "gx": 0, "gy": 0, "gz": 0, "timestamp": 2}],
+            },
+            sess_3_id: {
+                "session_id": sess_3_id,
+                "device_id": "dev-02",
+                "label": "idle",
+                "readings": [{"ax": 0, "ay": 9.8, "az": 0, "gx": 0, "gy": 0, "gz": 0, "timestamp": 3}],
+            },
+        },
+    }
+    with open(cache_file, "w", encoding="utf-8") as f:
+        json.dump(initial_cache, f)
+
+    # Mock de PostgreSQL : sess_2 a été supprimé de la base !
+    mock_s1 = MagicMock()
+    mock_s1.id = sess_1_id
+    mock_s1.device_id = "dev-01"
+    mock_s1.label = "walk"
+
+    mock_s3 = MagicMock()
+    mock_s3.id = sess_3_id
+    mock_s3.device_id = "dev-02"
+    mock_s3.label = "idle"
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker:
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = [mock_s1, mock_s3]
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result_sessions = sync_sessions_cache(cache_file, force_refresh=False)
+
+    # Le résultat ne doit contenir que sess_1 et sess_3
+    assert len(result_sessions) == 2
+    res_ids = {s["session_id"] for s in result_sessions}
+    assert res_ids == {sess_1_id, sess_3_id}
+    assert sess_2_deleted_id not in res_ids
+
+    # Vérification que le cache sur disque a été synchronisé et purgé de sess_2
+    with open(cache_file, "r", encoding="utf-8") as f:
+        disk_data = json.load(f)
+
+    assert sess_2_deleted_id not in disk_data["sessions"]
+    assert sess_1_id in disk_data["sessions"]
+    assert sess_3_id in disk_data["sessions"]
+    assert len(disk_data["sessions"]) == 2
+
+
 # -----------------------------------------------------------------------------
 # 5. Tests de train_and_benchmark & Exportation joblib
 # -----------------------------------------------------------------------------
