@@ -30,6 +30,9 @@ Exemples d'utilisation :
 
     # Personnalisation des fenêtres et des chemins de sortie :
     $ uv run python -m scripts.train_detector --window-size 2.0 --window-step 0.5 --output-model scripts/models/activity_classifier.joblib
+
+    # Spécifier un répertoire de cache .npz personnalisé :
+    $ uv run python -m scripts.train_detector --cache-dir scripts/data/sessions
 """
 from pathlib import Path
 from dotenv import load_dotenv
@@ -218,8 +221,168 @@ def build_dataset_from_sessions(
 
 
 # -----------------------------------------------------------------------------
-# 2. CACHE LOCAL INCRÉMENTAL (PostgreSQL + DynamoDB)
+# 2. CACHE LOCAL INCRÉMENTAL — STOCKAGE .NPZ PAR SESSION
 # -----------------------------------------------------------------------------
+# Chaque session est sérialisée dans son propre fichier compressé NumPy :
+#   <cache_dir>/<session_id>.npz
+# Ce format est ~10x plus compact qu'un fichier JSON monolithique et permet
+# des opérations atomiques (ajout, mise à jour, suppression) sans réécriture
+# du dataset complet.
+#
+# Contenu de chaque fichier .npz :
+#   - signals    : ndarray float32 (N, 6) — colonnes [ax, ay, az, gx, gy, gz]
+#   - timestamps : ndarray int64   (N,)   — horodatages en microsecondes
+#   - session_id : str   — UUID unique de la session
+#   - device_id  : str   — identifiant de l'équipement (ex: "HK-1")
+#   - label      : str   — classe d'activité (ex: "walk", "idle", "fall_forward")
+#   - duration_sec : float — durée approximative en secondes
+#   - sample_count : int   — nombre d'échantillons N
+# -----------------------------------------------------------------------------
+
+_SIGNAL_COLS = ["ax", "ay", "az", "gx", "gy", "gz"]
+
+
+def save_session_npz(cache_dir: Path, session_dict: dict[str, Any]) -> Path:
+    """Sérialise une session IMU en fichier NumPy compressé (.npz) dans `cache_dir`.
+
+    `session_dict` est attendu au format interne :
+      { "session_id", "device_id", "label", "duration_sec", "sample_count", "readings" }
+    où "readings" est une liste de dicts avec les clés "ax", "ay", "az", "gx", "gy", "gz"
+    et optionnellement "timestamp".
+
+    Retourne le chemin du fichier créé ou mis à jour.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    sess_id = session_dict["session_id"]
+    readings = session_dict.get("readings", [])
+
+    # Extraction des colonnes IMU sous forme de matrices NumPy
+    n = len(readings)
+    signals = np.zeros((n, 6), dtype=np.float32)
+    timestamps = np.zeros(n, dtype=np.int64)
+    for i, r in enumerate(readings):
+        signals[i, 0] = float(r.get("ax", 0.0))
+        signals[i, 1] = float(r.get("ay", 0.0))
+        signals[i, 2] = float(r.get("az", 0.0))
+        signals[i, 3] = float(r.get("gx", 0.0))
+        signals[i, 4] = float(r.get("gy", 0.0))
+        signals[i, 5] = float(r.get("gz", 0.0))
+        timestamps[i] = int(r.get("timestamp", 0))
+
+    filepath = cache_dir / f"{sess_id}.npz"
+    np.savez_compressed(
+        filepath,
+        signals=signals,
+        timestamps=timestamps,
+        session_id=np.array(sess_id),
+        device_id=np.array(session_dict.get("device_id", "")),
+        label=np.array(session_dict.get("label", "")),
+        duration_sec=np.array(float(session_dict.get("duration_sec") or 0.0)),
+        sample_count=np.array(int(session_dict.get("sample_count", n))),
+    )
+    return filepath
+
+
+def load_session_npz(filepath: Path) -> dict[str, Any] | None:
+    """Charge un fichier .npz de session IMU et le convertit en dictionnaire interne.
+
+    Retourne `None` si le fichier est absent ou corrompu.
+    Le dictionnaire retourné est compatible avec `build_dataset_from_sessions()` :
+      { "session_id", "device_id", "label", "duration_sec", "sample_count", "readings" }
+    """
+    if not filepath.exists():
+        return None
+    try:
+        data = np.load(filepath, allow_pickle=False)
+        signals: np.ndarray = data["signals"]   # (N, 6) float32
+        timestamps: np.ndarray = data["timestamps"]  # (N,) int64
+        n = len(timestamps)
+
+        # Reconstruction de la liste de readings pour la compatibilité avec build_dataset_from_sessions
+        readings = []
+        for i in range(n):
+            readings.append({
+                "timestamp": int(timestamps[i]),
+                "ax": float(signals[i, 0]),
+                "ay": float(signals[i, 1]),
+                "az": float(signals[i, 2]),
+                "gx": float(signals[i, 3]),
+                "gy": float(signals[i, 4]),
+                "gz": float(signals[i, 5]),
+            })
+
+        return {
+            "session_id": str(data["session_id"]),
+            "device_id": str(data["device_id"]),
+            "label": str(data["label"]),
+            "duration_sec": float(data["duration_sec"]),
+            "sample_count": int(data["sample_count"]),
+            "readings": readings,
+        }
+    except Exception as err:
+        logger.warning("Fichier .npz corrompu ou illisible (%s) : %s", filepath, err)
+        return None
+
+
+def migrate_json_to_npz(json_path: Path, cache_dir: Path) -> int:
+    """Migre l'ancien cache monolithique JSON vers des fichiers .npz par session.
+
+    Lit `json_path` une seule et dernière fois, écrit chaque session dans
+    `cache_dir/<session_id>.npz`, puis archive le JSON en le renommant en .bak.
+    Retourne le nombre de sessions migrées avec succès.
+    """
+    if not json_path.exists():
+        return 0
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as err:
+        logger.warning("Migration JSON->NPZ : impossible de lire %s : %s", json_path, err)
+        return 0
+
+    if isinstance(data, dict) and "sessions" in data:
+        sessions_raw = data["sessions"].values()
+    elif isinstance(data, list):
+        sessions_raw = data
+    else:
+        logger.warning("Migration JSON->NPZ : format JSON non reconnu dans %s", json_path)
+        return 0
+
+    migrated = 0
+    for sess in sessions_raw:
+        if not isinstance(sess, dict) or "session_id" not in sess:
+            continue
+        try:
+            save_session_npz(cache_dir, sess)
+            migrated += 1
+        except Exception as err:
+            logger.warning(
+                "Migration JSON->NPZ : échec pour session %s : %s",
+                sess.get("session_id"),
+                err,
+            )
+
+    if migrated > 0:
+        bak_path = json_path.with_suffix(".json.bak")
+        try:
+            json_path.rename(bak_path)
+            logger.info(
+                "Migration terminée : %d session(s) converties en .npz. "
+                "Ancien JSON archivé sous : %s",
+                migrated,
+                bak_path,
+            )
+        except Exception:
+            logger.info(
+                "Migration terminée : %d session(s) converties en .npz. "
+                "(Impossible de renommer l'ancien JSON en .bak)",
+                migrated,
+            )
+
+    return migrated
+
+
 def _fetch_single_session(
     sess: Any,
     telemetry_service: Any,
@@ -259,43 +422,56 @@ def _fetch_single_session(
 
 
 def sync_sessions_cache(
-    cache_path: Path,
+    cache_dir: Path,
     force_refresh: bool = False,
     synthetic: bool = False,
     batch_size: int = 8,
 ) -> list[dict[str, Any]]:
-    """Synchronise le cache local avec PostgreSQL et DynamoDB de manière incrémentale et par lots.
+    """Synchronise le cache local .npz avec PostgreSQL et DynamoDB de manière incrémentale.
 
-    1. Charge les sessions déjà archivées localement dans `cache_path`.
-    2. Interroge la table PostgreSQL `StudioSession` pour identifier les nouvelles captures.
-    3. Télécharge en batch concurrent (pool de threads de taille `batch_size`) les trames
-       DynamoDB des sessions manquantes.
-    4. Réécrit le fichier JSON mis à jour de manière incrémentale à chaque lot téléchargé.
+    1. Scanne les fichiers <session_id>.npz présents dans `cache_dir`.
+    2. Si `cache_dir` est vide mais qu'un ancien `sessions_cache.json` existe dans le
+       répertoire parent, migre automatiquement les sessions vers le format .npz.
+    3. Interroge PostgreSQL pour identifier les sessions nouvelles, modifiées ou supprimées.
+    4. Purge les fichiers .npz orphelins (sessions absentes de PostgreSQL).
+    5. Met à jour le label des sessions dont le label a changé en base.
+    6. Télécharge en batch concurrent les trames DynamoDB des sessions manquantes et
+       sauvegarde chaque session individuellement dès réception (sans réécrire les autres).
     """
     if synthetic:
         logger.info("Mode synthétique activé : génération de données artificielles.")
         return generate_synthetic_sessions()
 
+    # --- 1. Chargement du cache .npz existant --------------------------------
     cached_sessions: dict[str, dict[str, Any]] = {}
 
-    if not force_refresh and cache_path.exists():
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict) and "sessions" in data:
-                    cached_sessions = data["sessions"]
-                elif isinstance(data, list):
-                    cached_sessions = {s["session_id"]: s for s in data if "session_id" in s}
-            logger.info(
-                "Cache local chargé : %d sessions trouvées dans %s",
-                len(cached_sessions),
-                cache_path,
-            )
-        except Exception as err:
-            logger.warning("Échec de lecture du cache existant (%s) : %s", cache_path, err)
-            cached_sessions = {}
+    if not force_refresh:
+        npz_files = list(cache_dir.glob("*.npz")) if cache_dir.exists() else []
 
-    # Connexion à PostgreSQL pour récupérer la liste des StudioSessions
+        # Migration automatique depuis l'ancien JSON monolithique
+        legacy_json = cache_dir.parent / "sessions_cache.json"
+        if not npz_files and legacy_json.exists():
+            logger.info(
+                "Cache .npz vide détecté. Migration automatique depuis l'ancien JSON : %s",
+                legacy_json,
+            )
+            migrated = migrate_json_to_npz(legacy_json, cache_dir)
+            if migrated > 0:
+                npz_files = list(cache_dir.glob("*.npz"))
+
+        for npz_file in npz_files:
+            sess = load_session_npz(npz_file)
+            if sess is not None:
+                cached_sessions[sess["session_id"]] = sess
+
+        if cached_sessions:
+            logger.info(
+                "Cache .npz chargé : %d session(s) trouvées dans %s",
+                len(cached_sessions),
+                cache_dir,
+            )
+
+    # --- 2. Connexion à PostgreSQL -------------------------------------------
     db_sessions = []
     try:
         from app.db.database import SessionLocal
@@ -329,64 +505,54 @@ def sync_sessions_cache(
         logger.info("Pour générer un jeu d'entraînement d'exemple, utilisez : --synthetic")
         return []
 
-    def _save_cache_to_disk() -> None:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_payload = {
-            "version": 1,
-            "last_sync": datetime.now(timezone.utc).isoformat(),
-            "sessions": cached_sessions,
-        }
-        with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump(cache_payload, f, indent=2)
-
-    # 1. Détection et purge automatique des sessions supprimées de PostgreSQL
+    # --- 3. Purge des sessions supprimées de PostgreSQL ----------------------
     active_db_session_ids = {str(sess.id).lower() for sess in db_sessions}
     deleted_session_ids = [
         sess_id
         for sess_id in list(cached_sessions.keys())
         if str(sess_id).lower() not in active_db_session_ids
     ]
-    cache_modified = False
     if deleted_session_ids:
         logger.info(
-            "Purge du dataset local : %d session(s) supprimée(s) de PostgreSQL retirée(s) du cache : %s",
+            "Purge du dataset local : %d session(s) supprimée(s) de PostgreSQL : %s",
             len(deleted_session_ids),
             deleted_session_ids,
         )
         for sess_id in deleted_session_ids:
+            npz_file = cache_dir / f"{sess_id}.npz"
+            try:
+                npz_file.unlink(missing_ok=True)
+            except Exception as del_err:
+                logger.warning("Impossible de supprimer %s : %s", npz_file, del_err)
             del cached_sessions[sess_id]
-        cache_modified = True
-        try:
-            _save_cache_to_disk()
-            logger.info("Fichier de cache %s synchronisé sur disque après suppression de %d session(s).", cache_path, len(deleted_session_ids))
-        except Exception as write_err:
-            logger.error("Impossible d'écrire le fichier de cache %s après purge : %s", cache_path, write_err)
+        logger.info("Purge terminée : %d fichier(s) .npz supprimé(s).", len(deleted_session_ids))
 
-    # 2. Filtrage des sessions à télécharger ou dont le label a été modifié
+    # --- 4. Détection des sessions à télécharger ou mettre à jour ------------
     sessions_to_download = []
     labels_updated = 0
     for sess in db_sessions:
         sess_id = str(sess.id)
         if not force_refresh and sess_id in cached_sessions:
             if cached_sessions[sess_id].get("label") != sess.label:
+                # Mise à jour du label : réécriture du seul fichier .npz concerné
                 cached_sessions[sess_id]["label"] = sess.label
-                labels_updated += 1
-                cache_modified = True
+                try:
+                    save_session_npz(cache_dir, cached_sessions[sess_id])
+                    labels_updated += 1
+                except Exception as write_err:
+                    logger.warning(
+                        "Impossible de mettre à jour le label .npz pour %s : %s", sess_id, write_err
+                    )
         else:
             sessions_to_download.append(sess)
 
-    # Si toutes les sessions sont déjà en cache
     if not sessions_to_download:
         logger.info("Toutes les %d sessions sont déjà présentes dans le cache local.", len(cached_sessions))
         if labels_updated > 0:
-            try:
-                _save_cache_to_disk()
-                logger.info("Labels mis à jour pour %d session(s) dans le cache.", labels_updated)
-            except Exception as write_err:
-                logger.error("Impossible d'écrire le fichier de cache %s : %s", cache_path, write_err)
+            logger.info("Labels mis à jour pour %d session(s).", labels_updated)
         return list(cached_sessions.values())
 
-    # Import du service de télémétrie DynamoDB
+    # --- 5. Téléchargement batch DynamoDB ------------------------------------
     try:
         from app.services.telemetry_service import TelemetryService
 
@@ -397,11 +563,6 @@ def sync_sessions_cache(
 
     if telemetry_service is None:
         logger.error("TelemetryService non disponible. Impossible de télécharger les trames DynamoDB.")
-        if cache_modified:
-            try:
-                _save_cache_to_disk()
-            except Exception as write_err:
-                logger.error("Impossible d'écrire le cache %s : %s", cache_path, write_err)
         return list(cached_sessions.values())
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -466,8 +627,15 @@ def sync_sessions_cache(
                         exc,
                     )
                 elif session_dict is not None:
-                    cached_sessions[sess_id] = session_dict
-                    downloaded_count += 1
+                    # Sauvegarde individuelle atomique dès réception — pas de réécriture globale
+                    try:
+                        save_session_npz(cache_dir, session_dict)
+                        cached_sessions[sess_id] = session_dict
+                        downloaded_count += 1
+                    except Exception as write_err:
+                        logger.error(
+                            "Impossible de sauvegarder la session %s en .npz : %s", sess_id, write_err
+                        )
                 else:
                     logger.warning(
                         "Aucune trame IMU dans DynamoDB pour la session %s (device: %s)",
@@ -475,21 +643,16 @@ def sync_sessions_cache(
                         sess_ref.device_id,
                     )
 
-        # Sauvegarde incrémentale à la fin de chaque lot
-        try:
-            _save_cache_to_disk()
-        except Exception as write_err:
-            logger.error("Impossible d'écrire le cache intermédiaire %s : %s", cache_path, write_err)
-
     logger.info(
-        "Fin du téléchargement batch : %d/%d session(s) enregistrée(s) dans %s (%d sessions totales en cache)",
+        "Fin du téléchargement batch : %d/%d session(s) sauvegardées dans %s (%d sessions totales en cache)",
         downloaded_count,
         total_to_download,
-        cache_path,
+        cache_dir,
         len(cached_sessions),
     )
 
     return list(cached_sessions.values())
+
 
 
 def is_fall_activity(label: str) -> bool:
@@ -776,10 +939,10 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Ignore le cache local et retélécharge toutes les trames depuis DynamoDB.",
     )
     parser.add_argument(
-        "--cache-path",
+        "--cache-dir",
         type=str,
-        default="scripts/data/sessions_cache.json",
-        help="Chemin du fichier JSON de cache local (défaut: scripts/data/sessions_cache.json).",
+        default="scripts/data/sessions",
+        help="Répertoire de cache .npz par session (défaut: scripts/data/sessions).",
     )
     parser.add_argument(
         "--output-model",
@@ -817,12 +980,12 @@ def main(argv: list[str] | None = None) -> int:
     """Point d'entrée principal du script d'entraînement."""
     load_project_env()
     args = parse_args(argv)
-    cache_file = Path(args.cache_path)
+    cache_file = Path(args.cache_dir)
 
     print("=" * 68)
     print("HEALTHKICKS EDGE ML - PIPELINE D'ENTRAINEMENT DU CLASSIFIEUR D'ACTIVITE")
     print("=" * 68)
-    print(f"* Cache local          : {cache_file}")
+    print(f"* Répertoire cache .npz : {cache_file}")
     print(f"* Modele de sortie     : {args.output_model}")
     print(f"* Taille de fenetre    : {args.window_size:.1f} s (pas: {args.window_step:.1f} s)")
     print(f"* Concurrence batch    : {args.batch_size} sessions simultanees")
@@ -832,7 +995,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # 1. Synchronisation incrémentale du cache (par lots concurrents)
     sessions_data = sync_sessions_cache(
-        cache_path=cache_file,
+        cache_dir=cache_file,
         force_refresh=args.force_refresh,
         synthetic=args.synthetic,
         batch_size=args.batch_size,

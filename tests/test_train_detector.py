@@ -20,11 +20,42 @@ from scripts.train_detector import (
     generate_synthetic_sessions,
     is_benign_activity,
     is_fall_activity,
+    load_session_npz,
     main,
+    migrate_json_to_npz,
     parse_args,
+    save_session_npz,
     sync_sessions_cache,
     train_and_benchmark,
 )
+
+
+# -----------------------------------------------------------------------------
+# Helpers communs aux tests
+# -----------------------------------------------------------------------------
+def _make_session(session_id: str, device_id: str = "dev-01", label: str = "walk") -> dict:
+    """Crée un dictionnaire de session IMU minimal pour les tests."""
+    return {
+        "session_id": session_id,
+        "device_id": device_id,
+        "label": label,
+        "duration_sec": 5.0,
+        "sample_count": 3,
+        "readings": [
+            {"timestamp": i * 1000, "ax": 0.0, "ay": 9.8, "az": 0.0, "gx": 0.0, "gy": 0.0, "gz": float(i)}
+            for i in range(3)
+        ],
+    }
+
+
+def _make_db_mock(session_id: str, device_id: str, label: str) -> MagicMock:
+    """Crée un mock de session PostgreSQL (StudioSession)."""
+    m = MagicMock()
+    m.id = session_id
+    m.device_id = device_id
+    m.label = label
+    m.duration_sec = 5.0
+    return m
 
 
 # -----------------------------------------------------------------------------
@@ -196,53 +227,127 @@ def test_fall_and_benign_activity_helpers():
 
 
 # -----------------------------------------------------------------------------
-# 4. Tests de sync_sessions_cache (Cache local incrémental)
+# 4. Tests de save_session_npz / load_session_npz
+# -----------------------------------------------------------------------------
+def test_save_load_session_npz_roundtrip(tmp_path: Path):
+    """Vérifie que sauvegarder puis charger un .npz préserve toutes les données de la session."""
+    sess_id = str(uuid4())
+    session = _make_session(sess_id, device_id="HK-1", label="fall_forward")
+
+    save_session_npz(tmp_path, session)
+    npz_file = tmp_path / f"{sess_id}.npz"
+    assert npz_file.exists()
+
+    loaded = load_session_npz(npz_file)
+    assert loaded is not None
+    assert loaded["session_id"] == sess_id
+    assert loaded["device_id"] == "HK-1"
+    assert loaded["label"] == "fall_forward"
+    assert abs(loaded["duration_sec"] - 5.0) < 1e-6
+    assert loaded["sample_count"] == 3
+    assert len(loaded["readings"]) == 3
+
+    # Vérification des valeurs IMU
+    for i, r in enumerate(loaded["readings"]):
+        assert abs(r["gz"] - float(i)) < 1e-4
+        assert abs(r["ay"] - 9.8) < 1e-3
+
+
+def test_load_session_npz_missing_file(tmp_path: Path):
+    """load_session_npz doit retourner None si le fichier n'existe pas."""
+    result = load_session_npz(tmp_path / "nonexistent.npz")
+    assert result is None
+
+
+def test_save_session_npz_empty_readings(tmp_path: Path):
+    """save_session_npz doit gérer une session sans lectures (N=0) sans lever d'exception."""
+    sess_id = str(uuid4())
+    session = {
+        "session_id": sess_id,
+        "device_id": "HK-0",
+        "label": "idle",
+        "duration_sec": 0.0,
+        "sample_count": 0,
+        "readings": [],
+    }
+    save_session_npz(tmp_path, session)
+    npz_file = tmp_path / f"{sess_id}.npz"
+    assert npz_file.exists()
+
+    loaded = load_session_npz(npz_file)
+    assert loaded is not None
+    assert loaded["sample_count"] == 0
+    assert loaded["readings"] == []
+
+
+# -----------------------------------------------------------------------------
+# 5. Tests de migrate_json_to_npz
+# -----------------------------------------------------------------------------
+def test_migrate_json_to_npz(tmp_path: Path):
+    """Vérifie la migration automatique d'un cache JSON monolithique vers des fichiers .npz."""
+    sess_1_id = str(uuid4())
+    sess_2_id = str(uuid4())
+
+    cache_dir = tmp_path / "sessions"
+    json_path = tmp_path / "sessions_cache.json"
+
+    legacy_data = {
+        "version": 1,
+        "sessions": {
+            sess_1_id: _make_session(sess_1_id, label="walk"),
+            sess_2_id: _make_session(sess_2_id, label="fall_forward"),
+        },
+    }
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(legacy_data, f)
+
+    migrated = migrate_json_to_npz(json_path, cache_dir)
+    assert migrated == 2
+
+    # Les deux fichiers .npz doivent exister
+    assert (cache_dir / f"{sess_1_id}.npz").exists()
+    assert (cache_dir / f"{sess_2_id}.npz").exists()
+
+    # Le JSON original doit avoir été renommé en .bak
+    assert (tmp_path / "sessions_cache.json.bak").exists()
+    assert not json_path.exists()
+
+    # Intégrité des données après migration
+    loaded = load_session_npz(cache_dir / f"{sess_1_id}.npz")
+    assert loaded is not None
+    assert loaded["label"] == "walk"
+
+
+def test_migrate_json_to_npz_missing_file(tmp_path: Path):
+    """migrate_json_to_npz doit retourner 0 si le JSON source est absent."""
+    cache_dir = tmp_path / "sessions"
+    result = migrate_json_to_npz(tmp_path / "nonexistent.json", cache_dir)
+    assert result == 0
+
+
+# -----------------------------------------------------------------------------
+# 6. Tests de sync_sessions_cache (Cache local .npz incrémental)
 # -----------------------------------------------------------------------------
 def test_sync_sessions_cache_synthetic():
     """Le mode synthetic doit retourner directement des sessions générées sans appeler DB/AWS."""
-    sessions = sync_sessions_cache(cache_path=Path("dummy.json"), synthetic=True)
+    sessions = sync_sessions_cache(cache_dir=Path("dummy_dir"), synthetic=True)
     assert len(sessions) > 0
 
 
 def test_sync_sessions_cache_delta_logic(tmp_path: Path):
-    """Vérifie la stratégie de delta sync : seules les nouvelles sessions sont interrogées."""
-    cache_file = tmp_path / "sessions_cache.json"
-
+    """Vérifie la stratégie de delta sync : seules les nouvelles sessions sont téléchargées."""
+    cache_dir = tmp_path / "sessions"
     sess_1_id = str(uuid4())
     sess_2_id = str(uuid4())
 
-    # 1. Écriture d'un cache initial contenant sess_1
-    initial_cache = {
-        "version": 1,
-        "last_sync": datetime.now(timezone.utc).isoformat(),
-        "sessions": {
-            sess_1_id: {
-                "session_id": sess_1_id,
-                "device_id": "dev-01",
-                "label": "walk",
-                "duration_sec": 5.0,
-                "sample_count": 10,
-                "readings": [{"ax": 0, "ay": 9.8, "az": 0, "gx": 0, "gy": 0, "gz": 0, "timestamp": 1}],
-            }
-        },
-    }
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(initial_cache, f)
+    # 1. Cache initial avec sess_1 pré-enregistrée en .npz
+    save_session_npz(cache_dir, _make_session(sess_1_id, label="walk"))
 
-    # 2. Mock de PostgreSQL retournant sess_1 et sess_2
-    mock_s1 = MagicMock()
-    mock_s1.id = sess_1_id
-    mock_s1.device_id = "dev-01"
-    mock_s1.label = "walk"
-    mock_s1.duration_sec = 5.0
+    # 2. PostgreSQL retourne sess_1 et sess_2
+    mock_s1 = _make_db_mock(sess_1_id, "dev-01", "walk")
+    mock_s2 = _make_db_mock(sess_2_id, "dev-02", "fall_forward")
 
-    mock_s2 = MagicMock()
-    mock_s2.id = sess_2_id
-    mock_s2.device_id = "dev-02"
-    mock_s2.label = "fall_forward"
-    mock_s2.duration_sec = 5.0
-
-    # 3. Mock de TelemetryService
+    # 3. Mock TelemetryService
     mock_reading = MagicMock()
     mock_reading.timestamp_epoch_us = 1000
     mock_reading.ax = 1.0
@@ -254,7 +359,6 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
 
     mock_resp = MagicMock()
     mock_resp.readings = [mock_reading]
-
     mock_telemetry_svc = MagicMock()
     mock_telemetry_svc.get_session_readings.return_value = mock_resp
 
@@ -264,9 +368,9 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
         mock_db.query.return_value.all.return_value = [mock_s1, mock_s2]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
-        result_sessions = sync_sessions_cache(cache_file, force_refresh=False)
+        result_sessions = sync_sessions_cache(cache_dir, force_refresh=False)
 
-    # Seul sess_2 devait être téléchargé depuis DynamoDB !
+    # Seul sess_2 devait être téléchargé depuis DynamoDB
     mock_telemetry_svc.get_session_readings.assert_called_once_with(
         device_id="dev-02",
         session_id=sess_2_id,
@@ -276,84 +380,120 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
     session_ids = {s["session_id"] for s in result_sessions}
     assert session_ids == {sess_1_id, sess_2_id}
 
-    # Vérification que le cache sur disque a bien été mis à jour
-    with open(cache_file, "r", encoding="utf-8") as f:
-        disk_data = json.load(f)
-    assert sess_2_id in disk_data["sessions"]
+    # sess_2 doit avoir été sauvegardé en .npz sur disque
+    assert (cache_dir / f"{sess_2_id}.npz").exists()
 
 
 def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
-    """Vérifie que les sessions supprimées de la base PostgreSQL sont purgées du cache et du disque."""
-    cache_file = tmp_path / "sessions_cache.json"
-
+    """Vérifie que les sessions supprimées de PostgreSQL ont leur .npz supprimé du disque."""
+    cache_dir = tmp_path / "sessions"
     sess_1_id = str(uuid4())
     sess_2_deleted_id = str(uuid4())
     sess_3_id = str(uuid4())
 
-    # Cache initial contenant 3 sessions
-    initial_cache = {
-        "version": 1,
-        "last_sync": datetime.now(timezone.utc).isoformat(),
-        "sessions": {
-            sess_1_id: {
-                "session_id": sess_1_id,
-                "device_id": "dev-01",
-                "label": "walk",
-                "readings": [{"ax": 0, "ay": 9.8, "az": 0, "gx": 0, "gy": 0, "gz": 0, "timestamp": 1}],
-            },
-            sess_2_deleted_id: {
-                "session_id": sess_2_deleted_id,
-                "device_id": "dev-01",
-                "label": "fall_forward",
-                "readings": [{"ax": 0, "ay": 9.8, "az": 0, "gx": 0, "gy": 0, "gz": 0, "timestamp": 2}],
-            },
-            sess_3_id: {
-                "session_id": sess_3_id,
-                "device_id": "dev-02",
-                "label": "idle",
-                "readings": [{"ax": 0, "ay": 9.8, "az": 0, "gx": 0, "gy": 0, "gz": 0, "timestamp": 3}],
-            },
-        },
-    }
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(initial_cache, f)
+    # Cache initial avec 3 sessions
+    for sid, label in [(sess_1_id, "walk"), (sess_2_deleted_id, "fall_forward"), (sess_3_id, "idle")]:
+        save_session_npz(cache_dir, _make_session(sid, label=label))
 
-    # Mock de PostgreSQL : sess_2 a été supprimé de la base !
-    mock_s1 = MagicMock()
-    mock_s1.id = sess_1_id
-    mock_s1.device_id = "dev-01"
-    mock_s1.label = "walk"
+    assert (cache_dir / f"{sess_2_deleted_id}.npz").exists()
 
-    mock_s3 = MagicMock()
-    mock_s3.id = sess_3_id
-    mock_s3.device_id = "dev-02"
-    mock_s3.label = "idle"
+    # PostgreSQL ne retourne plus que sess_1 et sess_3 (sess_2 supprimé)
+    mock_s1 = _make_db_mock(sess_1_id, "dev-01", "walk")
+    mock_s3 = _make_db_mock(sess_3_id, "dev-02", "idle")
 
     with patch("app.db.database.SessionLocal") as mock_session_maker:
         mock_db = MagicMock()
         mock_db.query.return_value.all.return_value = [mock_s1, mock_s3]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
-        result_sessions = sync_sessions_cache(cache_file, force_refresh=False)
+        result_sessions = sync_sessions_cache(cache_dir, force_refresh=False)
 
-    # Le résultat ne doit contenir que sess_1 et sess_3
+    # Résultat en mémoire : sess_1 et sess_3 uniquement
     assert len(result_sessions) == 2
     res_ids = {s["session_id"] for s in result_sessions}
     assert res_ids == {sess_1_id, sess_3_id}
     assert sess_2_deleted_id not in res_ids
 
-    # Vérification que le cache sur disque a été synchronisé et purgé de sess_2
-    with open(cache_file, "r", encoding="utf-8") as f:
-        disk_data = json.load(f)
+    # Vérification sur disque : le .npz de sess_2 doit avoir été supprimé
+    assert not (cache_dir / f"{sess_2_deleted_id}.npz").exists()
+    assert (cache_dir / f"{sess_1_id}.npz").exists()
+    assert (cache_dir / f"{sess_3_id}.npz").exists()
+    assert len(list(cache_dir.glob("*.npz"))) == 2
 
-    assert sess_2_deleted_id not in disk_data["sessions"]
-    assert sess_1_id in disk_data["sessions"]
-    assert sess_3_id in disk_data["sessions"]
-    assert len(disk_data["sessions"]) == 2
+
+def test_sync_sessions_cache_batch_download(tmp_path: Path):
+    """Vérifie que le téléchargement batch concurrent récupère plusieurs sessions en .npz."""
+    cache_dir = tmp_path / "sessions"
+
+    db_mocks = [_make_db_mock(f"sess-{i}", f"dev-{i}", "walk") for i in range(4)]
+
+    mock_reading = MagicMock()
+    mock_reading.timestamp_epoch_us = 1000
+    mock_reading.ax = 0.0
+    mock_reading.ay = 9.8
+    mock_reading.az = 0.0
+    mock_reading.gx = 0.0
+    mock_reading.gy = 0.0
+    mock_reading.gz = 0.0
+
+    mock_resp = MagicMock()
+    mock_resp.readings = [mock_reading]
+    mock_telemetry_svc = MagicMock()
+    mock_telemetry_svc.get_session_readings.return_value = mock_resp
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker, \
+         patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = db_mocks
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result_sessions = sync_sessions_cache(cache_dir, force_refresh=True, batch_size=2)
+
+    assert len(result_sessions) == 4
+    assert mock_telemetry_svc.get_session_readings.call_count == 4
+
+    # Tous les fichiers .npz doivent être présents sur disque
+    assert cache_dir.exists()
+    npz_files = list(cache_dir.glob("*.npz"))
+    assert len(npz_files) == 4
+
+
+def test_sync_sessions_cache_migrates_old_json(tmp_path: Path):
+    """Vérifie que sync_sessions_cache migre automatiquement un ancien cache JSON."""
+    cache_dir = tmp_path / "sessions"
+    legacy_json = tmp_path / "sessions_cache.json"
+
+    sess_id = str(uuid4())
+    legacy_data = {
+        "version": 1,
+        "sessions": {sess_id: _make_session(sess_id, label="idle")},
+    }
+    with open(legacy_json, "w", encoding="utf-8") as f:
+        json.dump(legacy_data, f)
+
+    # PostgreSQL retourne la même session (déjà migrée)
+    mock_s = _make_db_mock(sess_id, "dev-01", "idle")
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker:
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = [mock_s]
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result_sessions = sync_sessions_cache(cache_dir, force_refresh=False)
+
+    assert len(result_sessions) == 1
+    assert result_sessions[0]["session_id"] == sess_id
+    assert result_sessions[0]["label"] == "idle"
+
+    # Le fichier .npz doit avoir été créé
+    assert (cache_dir / f"{sess_id}.npz").exists()
+
+    # Le JSON original doit avoir été archivé en .bak
+    assert (tmp_path / "sessions_cache.json.bak").exists()
 
 
 # -----------------------------------------------------------------------------
-# 5. Tests de train_and_benchmark & Exportation joblib
+# 7. Tests de train_and_benchmark & Exportation joblib
 # -----------------------------------------------------------------------------
 def test_train_and_benchmark_synthetic(tmp_path: Path):
     """Vérifie l'entraînement complet sur un mini-dataset et la sérialisation joblib."""
@@ -396,12 +536,12 @@ def test_train_and_benchmark_synthetic(tmp_path: Path):
 
 
 # -----------------------------------------------------------------------------
-# 6. Tests CLI
+# 8. Tests CLI
 # -----------------------------------------------------------------------------
 def test_parse_args_defaults():
     """Vérifie les valeurs par défaut des options de la ligne de commande."""
     args = parse_args([])
-    assert args.cache_path == "scripts/data/sessions_cache.json"
+    assert args.cache_dir == "scripts/data/sessions"
     assert args.output_model == "scripts/models/activity_classifier.joblib"
     assert args.window_size == 2.0
     assert args.window_step == 0.5
@@ -416,60 +556,16 @@ def test_parse_args_custom_batch_size():
     assert args.batch_size == 16
 
 
-def test_sync_sessions_cache_batch_download(tmp_path: Path):
-    """Vérifie que le téléchargement batch concurrent récupère plusieurs sessions correctement."""
-    cache_file = tmp_path / "sessions_batch_cache.json"
-
-    sessions = []
-    for i in range(4):
-        m = MagicMock()
-        m.id = f"sess-{i}"
-        m.device_id = f"dev-{i}"
-        m.label = "walk"
-        m.duration_sec = 5.0
-        sessions.append(m)
-
-    mock_reading = MagicMock()
-    mock_reading.timestamp_epoch_us = 1000
-    mock_reading.ax = 0.0
-    mock_reading.ay = 9.8
-    mock_reading.az = 0.0
-    mock_reading.gx = 0.0
-    mock_reading.gy = 0.0
-    mock_reading.gz = 0.0
-
-    mock_resp = MagicMock()
-    mock_resp.readings = [mock_reading]
-
-    mock_telemetry_svc = MagicMock()
-    mock_telemetry_svc.get_session_readings.return_value = mock_resp
-
-    with patch("app.db.database.SessionLocal") as mock_session_maker, \
-         patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
-        mock_db = MagicMock()
-        mock_db.query.return_value.all.return_value = sessions
-        mock_session_maker.return_value.__enter__.return_value = mock_db
-
-        result_sessions = sync_sessions_cache(cache_file, force_refresh=True, batch_size=2)
-
-    assert len(result_sessions) == 4
-    assert mock_telemetry_svc.get_session_readings.call_count == 4
-    assert cache_file.exists()
-    with open(cache_file, "r", encoding="utf-8") as f:
-        disk_data = json.load(f)
-    assert len(disk_data["sessions"]) == 4
-
-
 def test_main_synthetic_execution(tmp_path: Path):
-    """Vérifie l'exécution complète du CLI en mode synthétique."""
-    cache_path = tmp_path / "cache.json"
+    """Vérifie l'exécution complète du CLI en mode synthétique avec le répertoire .npz."""
+    cache_dir = tmp_path / "sessions"
     model_path = tmp_path / "model.joblib"
 
     ret_code = main(
         [
             "--synthetic",
-            "--cache-path",
-            str(cache_path),
+            "--cache-dir",
+            str(cache_dir),
             "--output-model",
             str(model_path),
             "--window-size",
@@ -482,5 +578,3 @@ def test_main_synthetic_execution(tmp_path: Path):
     )
     assert ret_code == 0
     assert model_path.exists()
-
-
