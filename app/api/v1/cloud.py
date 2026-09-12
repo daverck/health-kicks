@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, RequireAdmin
+from app.api.v1.utils import validate_and_normalize_date_range
 from app.db.database import get_db
 from app.db.models import ActivityEvent, Device, HapticLog
 from app.schemas.cloud import (
@@ -51,29 +52,81 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
     def list_activities(
         device_id: str,
         user: CurrentUser,
+        event_type: str | None = Query(None, description="Filtre par type d'activité (ex: 'walk', 'run', ou 'falls' pour toutes les chutes)"),
+        start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
+        end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
+        request: Request = None,
     ) -> ActivityEventPage:
+        raw_end = request.query_params.get("end_date") if request is not None else None
+        norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
+
         query = db.query(ActivityEvent).filter(ActivityEvent.device_id == device_id)
+
+        if event_type is not None and isinstance(event_type, str):
+            clean_type = event_type.strip()
+            if clean_type.lower() == "falls":
+                query = query.filter(ActivityEvent.event_type.ilike("%fall%"))
+            elif clean_type and clean_type.lower() != "all":
+                query = query.filter(ActivityEvent.event_type == clean_type)
+
+        if norm_start is not None:
+            query = query.filter(ActivityEvent.timestamp_utc >= norm_start)
+        if norm_end is not None:
+            query = query.filter(ActivityEvent.timestamp_utc <= norm_end)
+
         total = query.with_entities(func.count(ActivityEvent.id)).scalar() or 0
-        events = query.order_by(ActivityEvent.timestamp_utc.desc()).offset((page - 1) * page_size).limit(page_size).all()
-        return ActivityEventPage(items=[ActivityEventResponse.model_validate(event, from_attributes=True) for event in events], page=page, page_size=page_size, total=total)
+        events = (
+            query.order_by(ActivityEvent.timestamp_utc.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return ActivityEventPage(
+            items=[ActivityEventResponse.model_validate(event, from_attributes=True) for event in events],
+            page=page,
+            page_size=page_size,
+            total=total,
+        )
 
     @router.get("/devices/{device_id}/haptic/history", response_model=HapticLogPage)
     @router.get("/devices/{device_id}/haptic/logs", response_model=HapticLogPage)
     def list_haptic_history(
         device_id: str,
         user: CurrentUser,
+        start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
+        end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
+        request: Request = None,
     ) -> HapticLogPage:
         """List haptic commands/vibrations history for a device."""
+        raw_end = request.query_params.get("end_date") if request is not None else None
+        norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
+
         query = db.query(HapticLog).filter(HapticLog.device_id == device_id)
+
+        if norm_start is not None:
+            query = query.filter(HapticLog.triggered_at_utc >= norm_start)
+        if norm_end is not None:
+            query = query.filter(HapticLog.triggered_at_utc <= norm_end)
+
         total = query.with_entities(func.count(HapticLog.id)).scalar() or 0
-        logs = query.order_by(HapticLog.triggered_at_utc.desc()).offset((page - 1) * page_size).limit(page_size).all()
-        return HapticLogPage(items=[HapticLogResponse.model_validate(log, from_attributes=True) for log in logs], page=page, page_size=page_size, total=total)
+        logs = (
+            query.order_by(HapticLog.triggered_at_utc.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return HapticLogPage(
+            items=[HapticLogResponse.model_validate(log, from_attributes=True) for log in logs],
+            page=page,
+            page_size=page_size,
+            total=total,
+        )
 
     @router.get("/health", response_model=HealthResponse)
     def health(db: Session = Depends(get_db)) -> HealthResponse:

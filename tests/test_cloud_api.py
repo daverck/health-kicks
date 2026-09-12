@@ -1,6 +1,9 @@
 """Focused tests for Cloud persistence and AWS publication."""
 
+from datetime import datetime, timezone, timedelta
 import json
+from fastapi import HTTPException
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -108,5 +111,81 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     )
     activities_page = activities_endpoint(TEST_DEVICE_ID, user=None, page=1, page_size=10, db=session)
     assert activities_page.total == 0
+
+    session.close()
+
+
+def test_list_haptic_history_date_filtering() -> None:
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    router = create_cloud_router(DummyPublisher())
+    haptic_history_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("haptic/history")
+    )
+
+    t1 = datetime(2026, 9, 10, 8, 0, 0, tzinfo=timezone.utc)
+    t2 = datetime(2026, 9, 11, 14, 0, 0, tzinfo=timezone.utc)
+    t3 = datetime(2026, 9, 12, 18, 0, 0, tzinfo=timezone.utc)
+
+    for i, t in enumerate([t1, t2, t3]):
+        session.add(
+            HapticLog(
+                device_id=TEST_DEVICE_ID,
+                intensity=50 + i * 10,
+                duration_ms=200,
+                triggered_at_utc=t,
+                triggered_by_user=True,
+            )
+        )
+    session.commit()
+
+    # Filter by start_date and end_date (date-only)
+    page = haptic_history_endpoint(
+        TEST_DEVICE_ID,
+        user=None,
+        start_date=t2,
+        end_date=t3,
+        page=1,
+        page_size=10,
+        db=session,
+    )
+    assert page.total == 2
+    assert len(page.items) == 2
+    assert page.items[0].intensity == 70  # t3 descending
+    assert page.items[1].intensity == 60  # t2
+
+    session.close()
+
+
+def test_list_haptic_history_invalid_date_range_400() -> None:
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    router = create_cloud_router(DummyPublisher())
+    haptic_history_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("haptic/history")
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        haptic_history_endpoint(
+            TEST_DEVICE_ID,
+            user=None,
+            start_date=datetime(2026, 9, 15, tzinfo=timezone.utc),
+            end_date=datetime(2026, 9, 10, tzinfo=timezone.utc),
+            page=1,
+            page_size=10,
+            db=session,
+        )
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "start_date must be before or equal to end_date"
 
     session.close()

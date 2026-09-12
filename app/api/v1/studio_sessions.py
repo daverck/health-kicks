@@ -1,13 +1,15 @@
 """FastAPI router for Studio sessions history, curation, and IMU inspection."""
 
+from datetime import datetime
 import logging
 from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
+from app.api.v1.utils import validate_and_normalize_date_range
 from app.db.database import get_db
 from app.db.models import StudioSession, User, UserRole
 from app.schemas.studio import (
@@ -83,9 +85,15 @@ def create_studio_sessions_router(
         label: str | None = Query(default=None),
         device_id: str | None = Query(default=None),
         user_id: int | None = Query(default=None),
+        start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
+        end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
         db: Session = Depends(get_db),
+        request: Request = None,
     ) -> PaginatedSessionsResponse:
         """List studio sessions with RBAC, pagination, and filters."""
+        raw_end = request.query_params.get("end_date") if request is not None else None
+        norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
+
         query = db.query(StudioSession)
 
         if not _is_admin(user):
@@ -99,6 +107,12 @@ def create_studio_sessions_router(
 
         if device_id is not None:
             query = query.filter(StudioSession.device_id == device_id)
+
+        if norm_start is not None:
+            query = query.filter(StudioSession.created_at >= norm_start)
+
+        if norm_end is not None:
+            query = query.filter(StudioSession.created_at <= norm_end)
 
         total = query.count()
         sessions = (

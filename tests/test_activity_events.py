@@ -211,3 +211,179 @@ def test_ingest_event_persists_to_activity_events(client, db_session, monkeypatc
     assert event.timestamp_utc.year == 2026
     assert not hasattr(event, "raw_imu_json")
     assert not hasattr(event, "status_enum")
+
+
+def test_list_activities_filter_by_specific_event_type(client, db_session, auth_headers):
+    """Verify event_type='walk' strictly filters only walk activities."""
+    base_time = datetime(2026, 9, 10, 10, 0, 0, tzinfo=timezone.utc)
+    for i, event_type in enumerate(["walk", "run", "walk", "fall_forward", "idle"]):
+        db_session.add(
+            ActivityEvent(
+                device_id="HK-FILTER",
+                event_type=event_type,
+                timestamp_utc=base_time + timedelta(minutes=i),
+                confidence_score=0.9,
+            )
+        )
+    db_session.commit()
+
+    resp = client.get(
+        "/api/v1/devices/HK-FILTER/events/activities?event_type=walk",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert len(data["items"]) == 2
+    assert all(item["event_type"] == "walk" for item in data["items"])
+
+
+def test_list_activities_filter_by_falls_group(client, db_session, auth_headers):
+    """Verify event_type='falls' filters all fall events (fall_forward, fall_lateral, etc.)."""
+    base_time = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    for i, event_type in enumerate(["walk", "fall_forward", "fall_lateral", "fall_backward", "idle"]):
+        db_session.add(
+            ActivityEvent(
+                device_id="HK-FALLS",
+                event_type=event_type,
+                timestamp_utc=base_time + timedelta(minutes=i),
+                confidence_score=0.88,
+            )
+        )
+    db_session.commit()
+
+    resp = client.get(
+        "/api/v1/devices/HK-FALLS/events/activities?event_type=falls",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 3
+    assert len(data["items"]) == 3
+    assert {item["event_type"] for item in data["items"]} == {
+        "fall_forward",
+        "fall_lateral",
+        "fall_backward",
+    }
+
+
+def test_list_activities_filter_all_or_empty_returns_everything(client, db_session, auth_headers):
+    """Verify event_type='all' or absent/empty applies no filtering."""
+    base_time = datetime(2026, 9, 10, 14, 0, 0, tzinfo=timezone.utc)
+    for i, event_type in enumerate(["walk", "run", "fall_forward"]):
+        db_session.add(
+            ActivityEvent(
+                device_id="HK-ALL",
+                event_type=event_type,
+                timestamp_utc=base_time + timedelta(minutes=i),
+                confidence_score=0.9,
+            )
+        )
+    db_session.commit()
+
+    resp_all = client.get(
+        "/api/v1/devices/HK-ALL/events/activities?event_type=all",
+        headers=auth_headers,
+    )
+    assert resp_all.status_code == 200
+    assert resp_all.json()["total"] == 3
+
+    resp_empty = client.get(
+        "/api/v1/devices/HK-ALL/events/activities?event_type=",
+        headers=auth_headers,
+    )
+    assert resp_empty.status_code == 200
+    assert resp_empty.json()["total"] == 3
+
+
+def test_list_activities_filter_by_date_range(client, db_session, auth_headers):
+    """Verify start_date and end_date filtering with both date-only and full timestamps."""
+    day1 = datetime(2026, 9, 11, 10, 0, 0, tzinfo=timezone.utc)
+    day2 = datetime(2026, 9, 12, 15, 0, 0, tzinfo=timezone.utc)
+    day3 = datetime(2026, 9, 13, 8, 0, 0, tzinfo=timezone.utc)
+
+    for i, ts in enumerate([day1, day2, day3]):
+        db_session.add(
+            ActivityEvent(
+                device_id="HK-DATES",
+                event_type="walk",
+                timestamp_utc=ts,
+                confidence_score=0.9,
+            )
+        )
+    db_session.commit()
+
+    # Date-only end_date includes full day up to 23:59:59
+    resp_date_only = client.get(
+        "/api/v1/devices/HK-DATES/events/activities?start_date=2026-09-12&end_date=2026-09-12",
+        headers=auth_headers,
+    )
+    assert resp_date_only.status_code == 200
+    data_date_only = resp_date_only.json()
+    assert data_date_only["total"] == 1
+    assert data_date_only["items"][0]["timestamp_utc"].startswith("2026-09-12")
+
+    # Timestamp range
+    resp_range = client.get(
+        "/api/v1/devices/HK-DATES/events/activities?start_date=2026-09-11T00:00:00Z&end_date=2026-09-12T23:59:59Z",
+        headers=auth_headers,
+    )
+    assert resp_range.status_code == 200
+    assert resp_range.json()["total"] == 2
+
+
+def test_list_activities_combined_filters_and_total_pagination(client, db_session, auth_headers):
+    """Verify combining event_type and date range, ensuring total reflects filters under pagination."""
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+
+    # 4 falls on Sept 12, 2 walks on Sept 12, 2 falls on Sept 13
+    for i in range(4):
+        db_session.add(
+            ActivityEvent(
+                device_id="HK-COMBO",
+                event_type="fall_forward",
+                timestamp_utc=base_time + timedelta(hours=i),
+                confidence_score=0.9,
+            )
+        )
+    for i in range(2):
+        db_session.add(
+            ActivityEvent(
+                device_id="HK-COMBO",
+                event_type="walk",
+                timestamp_utc=base_time + timedelta(hours=i),
+                confidence_score=0.9,
+            )
+        )
+    for i in range(2):
+        db_session.add(
+            ActivityEvent(
+                device_id="HK-COMBO",
+                event_type="fall_lateral",
+                timestamp_utc=base_time + timedelta(days=1, hours=i),
+                confidence_score=0.9,
+            )
+        )
+    db_session.commit()
+
+    # Filter: falls only on Sept 12 with page_size=2
+    resp = client.get(
+        "/api/v1/devices/HK-COMBO/events/activities?event_type=falls&start_date=2026-09-12&end_date=2026-09-12&page=1&page_size=2",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 4  # Total matching events, NOT total in table (8)
+    assert len(data["items"]) == 2
+    assert data["page"] == 1
+    assert data["page_size"] == 2
+
+
+def test_list_activities_start_date_after_end_date_400(client, auth_headers):
+    """Verify HTTP 400 error when start_date > end_date."""
+    resp = client.get(
+        "/api/v1/devices/HK-1/events/activities?start_date=2026-09-15&end_date=2026-09-10",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "start_date must be before or equal to end_date"

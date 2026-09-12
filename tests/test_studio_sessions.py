@@ -182,6 +182,41 @@ def test_list_sessions_filtering_and_pagination(client, user_a, db_session) -> N
     assert res_p1.json()["items"][0]["id"] == str(s3.id)
 
 
+def test_list_sessions_filter_by_date_range(client, user_a, db_session) -> None:
+    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 5, 1, 10, 0, tzinfo=timezone.utc))
+    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 5, 2, 14, 0, tzinfo=timezone.utc))
+    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 5, 3, 18, 0, tzinfo=timezone.utc))
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
+
+    # Filter with date-only end_date covering all of May 2
+    res = client.get(
+        "/api/v1/studio/sessions?start_date=2026-05-02&end_date=2026-05-02",
+        headers=_auth_headers(user_a),
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == str(s2.id)
+
+    # Filter full range May 1 to May 2
+    res_range = client.get(
+        "/api/v1/studio/sessions?start_date=2026-05-01T00:00:00Z&end_date=2026-05-02T23:59:59Z",
+        headers=_auth_headers(user_a),
+    )
+    assert res_range.status_code == 200
+    assert res_range.json()["total"] == 2
+
+
+def test_list_sessions_invalid_date_range_400(client, user_a) -> None:
+    res = client.get(
+        "/api/v1/studio/sessions?start_date=2026-05-10&end_date=2026-05-01",
+        headers=_auth_headers(user_a),
+    )
+    assert res.status_code == 400
+    assert res.json()["detail"] == "start_date must be before or equal to end_date"
+
+
 # ---------------------------------------------------------------------------
 # Readings Inspection Tests (GET /api/v1/studio/sessions/{session_id}/readings)
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -34,6 +34,10 @@ class Device(Base):
 
 class ActivityEvent(Base):
     __tablename__ = "activity_events"
+    __table_args__ = (
+        Index("ix_activity_events_device_id_timestamp_utc", "device_id", "timestamp_utc"),
+        Index("ix_activity_events_device_id_event_type", "device_id", "event_type"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(128), index=True)
@@ -46,6 +50,9 @@ class ActivityEvent(Base):
 
 class HapticLog(Base):
     __tablename__ = "haptic_commands_log"
+    __table_args__ = (
+        Index("ix_haptic_log_device_id_triggered_at", "device_id", "triggered_at_utc"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(128), index=True)
@@ -114,6 +121,9 @@ class StudioSession(Base):
     """Recorded IMU data capture session for ML dataset curation."""
 
     __tablename__ = "studio_sessions"
+    __table_args__ = (
+        Index("ix_studio_sessions_created_at", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
