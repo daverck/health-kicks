@@ -12,6 +12,8 @@ from sqlalchemy.pool import StaticPool
 from app.api.deps import get_current_user
 from app.api.v1.telemetry import create_telemetry_router
 from app.db.models import Base, User, UserRole
+from app.db.database import get_db
+from app.db.models import Base, StudioSession, User, UserRole
 from app.schemas.telemetry import StudioDatasetStatsResponse
 from app.services import token_service
 from app.services.telemetry_service import TelemetryService
@@ -43,6 +45,20 @@ def auth_user(db_session) -> User:
 
 
 @pytest.fixture()
+def admin_user(db_session) -> User:
+    user = User(
+        google_sub="test-sub-admin",
+        email="admin@example.com",
+        name="Admin",
+        role=UserRole.admin,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
 def auth_headers(auth_user) -> dict[str, str]:
     token = token_service.issue_access_token(auth_user)
     return {"Authorization": f"Bearer {token}"}
@@ -59,14 +75,18 @@ def telemetry_service(mock_table):
 
 
 @pytest.fixture()
-def test_client(auth_user, telemetry_service) -> TestClient:
+def test_client(auth_user, telemetry_service, db_session) -> TestClient:
     app = FastAPI()
     app.include_router(create_telemetry_router(service=telemetry_service))
 
     def override_get_current_user():
         return auth_user
 
+    def override_get_db():
+        yield db_session
+
     app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_db] = override_get_db
     return TestClient(app)
 
 
@@ -180,6 +200,7 @@ def test_get_dataset_stats_raises_on_dynamo_error(telemetry_service, mock_table)
 
 # ---------------------------------------------------------------------------
 # REST Endpoints Tests
+# REST Endpoints Tests (PostgreSQL Aurora backed)
 # ---------------------------------------------------------------------------
 
 
@@ -191,12 +212,21 @@ def test_get_device_studio_stats_endpoint(test_client, mock_table) -> None:
             {"session_id": "s2", "label": "stumble"},
         ]
     }
+def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
+    import uuid
+    s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="walk", duration_sec=5.0, sample_count=50)
+    s2 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="stumble", duration_sec=10.0, sample_count=100)
+    s3 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-999", label="walk", duration_sec=7.0, sample_count=70)
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
 
     response = test_client.get("/api/v1/devices/shoe-123/studio/stats")
     assert response.status_code == 200
     data = response.json()
     assert data["device_id"] == "shoe-123"
     assert data["total_sessions"] == 2
+    assert data["total_duration_sec"] == 15.0
+    assert data["total_samples"] == 150
     assert data["by_label"] == {"walk": 1, "stumble": 1}
 
 
@@ -208,18 +238,62 @@ def test_get_global_studio_stats_endpoint(test_client, mock_table) -> None:
             {"session_id": "s3", "label": "run"},
         ]
     }
+def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
+    import uuid
+    s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-1", label="walk", duration_sec=5.0, sample_count=50)
+    s2 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-2", label="walk", duration_sec=5.0, sample_count=50)
+    s3 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-3", label="run", duration_sec=10.0, sample_count=100)
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
 
     response = test_client.get("/api/v1/studio/stats")
     assert response.status_code == 200
     data = response.json()
     assert data["device_id"] is None
     assert data["total_sessions"] == 3
+    assert data["total_duration_sec"] == 20.0
+    assert data["total_samples"] == 200
     assert data["by_label"] == {"walk": 2, "run": 1}
 
 
-def test_studio_stats_endpoints_unauthenticated(mock_table) -> None:
+def test_studio_stats_rbac_strict_isolation(db_session, auth_user, admin_user) -> None:
+    """Non-admin only sees their own sessions, admin sees all sessions."""
+    import uuid
+    s_clinician = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="dev-1", label="walk", duration_sec=5.0, sample_count=50)
+    s_other = StudioSession(id=uuid.uuid4(), user_id=admin_user.id, device_id="dev-2", label="idle", duration_sec=10.0, sample_count=100)
+    db_session.add_all([s_clinician, s_other])
+    db_session.commit()
+
+    # Clinician client
+    app = FastAPI()
+    app.include_router(create_telemetry_router())
+    app.dependency_overrides[get_current_user] = lambda: auth_user
+    app.dependency_overrides[get_db] = lambda: db_session
+    client_clinician = TestClient(app)
+
+    res_clinician = client_clinician.get("/api/v1/studio/stats")
+    assert res_clinician.status_code == 200
+    data_clinician = res_clinician.json()
+    assert data_clinician["total_sessions"] == 1
+    assert data_clinician["by_label"] == {"walk": 1}
+    assert data_clinician["total_duration_sec"] == 5.0
+
+    # Admin client
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    client_admin = TestClient(app)
+
+    res_admin = client_admin.get("/api/v1/studio/stats")
+    assert res_admin.status_code == 200
+    data_admin = res_admin.json()
+    assert data_admin["total_sessions"] == 2
+    assert data_admin["by_label"] == {"walk": 1, "idle": 1}
+    assert data_admin["total_duration_sec"] == 15.0
+
+
+def test_studio_stats_endpoints_unauthenticated(mock_table, db_session) -> None:
     app = FastAPI()
     app.include_router(create_telemetry_router(service=TelemetryService(table=mock_table)))
+    app.dependency_overrides[get_db] = lambda: db_session
     unauth_client = TestClient(app)
 
     res_device = unauth_client.get("/api/v1/devices/shoe-123/studio/stats")
@@ -228,22 +302,4 @@ def test_studio_stats_endpoints_unauthenticated(mock_table) -> None:
     res_global = unauth_client.get("/api/v1/studio/stats")
     assert res_global.status_code == 401
 
-
-def test_studio_stats_endpoint_error_handling(test_client, mock_table) -> None:
-    mock_table.query.side_effect = ClientError(
-        {"Error": {"Code": "InternalServerError", "Message": "DynamoDB Error"}},
-        "Query",
-    )
-    mock_table.scan.side_effect = ClientError(
-        {"Error": {"Code": "InternalServerError", "Message": "DynamoDB Error"}},
-        "Scan",
-    )
-
-    res_device = test_client.get("/api/v1/devices/shoe-123/studio/stats")
-    assert res_device.status_code == 502
-    assert res_device.json()["detail"] == "Failed to retrieve studio stats from telemetry store"
-
-    res_global = test_client.get("/api/v1/studio/stats")
-    assert res_global.status_code == 502
-    assert res_global.json()["detail"] == "Failed to retrieve studio stats from telemetry store"
 

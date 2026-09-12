@@ -30,8 +30,8 @@ class StudioSessionSummary(StrictModel):
     user_id: int
     user_email: str | None = None
     label: str
-    sample_count: int
-    duration_sec: float
+    sample_count: int = 0
+    duration_sec: float = 5.0
     created_at: datetime
 
 

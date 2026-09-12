@@ -16,6 +16,8 @@ from app.api.deps import get_current_user
 from app.api.v1.telemetry import create_telemetry_router
 from app.core.config import Settings
 from app.db.models import Base, User, UserRole
+from app.db.database import get_db
+from app.db.models import Base, StudioSession, User, UserRole
 from app.main import app as main_app
 from app.services.iot_service import IotCommandService
 from app.services.telemetry_service import TelemetryService
@@ -60,18 +62,22 @@ def iot_service(mock_iot_client):
 
 
 @pytest.fixture()
-def test_client(auth_user, iot_service) -> TestClient:
+def test_client(auth_user, iot_service, db_session) -> TestClient:
     app = FastAPI()
     app.include_router(create_telemetry_router(service=MagicMock(spec=TelemetryService), iot_service=iot_service))
 
     def override_get_current_user():
         return auth_user
 
+    def override_get_db():
+        yield db_session
+
     app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_db] = override_get_db
     return TestClient(app)
 
 
-def test_start_studio_session_success_defaults(test_client, mock_iot_client) -> None:
+def test_start_studio_session_success_defaults(test_client, mock_iot_client, auth_user, db_session) -> None:
     device_id = "shoe-test-001"
     response = test_client.post(
         f"/api/v1/devices/{device_id}/commands/studio/start",
@@ -91,6 +97,15 @@ def test_start_studio_session_success_defaults(test_client, mock_iot_client) -> 
     parsed_uuid = uuid.UUID(session_id)
     assert parsed_uuid.version == 4
 
+    # Validate StudioSession was persisted in PostgreSQL
+    saved_session = db_session.query(StudioSession).filter(StudioSession.id == parsed_uuid).first()
+    assert saved_session is not None
+    assert saved_session.user_id == auth_user.id
+    assert saved_session.device_id == device_id
+    assert saved_session.label == "walk"
+    assert saved_session.duration_sec == 5.0
+    assert saved_session.sample_count == 0
+
     # Validate mock publish call
     mock_iot_client.publish.assert_called_once()
     call_kwargs = mock_iot_client.publish.call_args.kwargs
@@ -105,6 +120,7 @@ def test_start_studio_session_success_defaults(test_client, mock_iot_client) -> 
     assert payload["pulse_duration_ms"] == 150
     assert payload["pulse_pause_ms"] == 350
     assert payload["pulse_intensity"] == 210
+
 
 
 def test_start_studio_session_success_custom_parameters(test_client, mock_iot_client) -> None:

@@ -1,13 +1,18 @@
 """FastAPI router for DynamoDB IMU telemetry queries and session purge."""
 
 from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import uuid
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
+from app.db.database import get_db
+from app.db.models import StudioSession, User, UserRole
 from app.schemas.telemetry import (
     ImuReadingResponse,
     StudioDatasetStatsResponse,
@@ -19,6 +24,46 @@ from app.services.iot_service import IotCommandService
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_studio_stats(
+    db: Session,
+    user: User,
+    device_id: str | None = None,
+) -> StudioDatasetStatsResponse:
+    """Compute studio dataset metrics from PostgreSQL with strict RBAC enforcement."""
+    query = db.query(StudioSession)
+
+    if user.role != UserRole.admin:
+        query = query.filter(StudioSession.user_id == user.id)
+
+    if device_id is not None:
+        query = query.filter(StudioSession.device_id == device_id)
+
+    total_sessions = query.count()
+    total_duration = (
+        query.with_entities(func.coalesce(func.sum(StudioSession.duration_sec), 0.0)).scalar()
+        or 0.0
+    )
+    total_samples = (
+        query.with_entities(func.coalesce(func.sum(StudioSession.sample_count), 0)).scalar()
+        or 0
+    )
+
+    label_rows = (
+        query.with_entities(StudioSession.label, func.count(StudioSession.id))
+        .group_by(StudioSession.label)
+        .all()
+    )
+    by_label = {str(lbl): int(cnt) for lbl, cnt in label_rows}
+
+    return StudioDatasetStatsResponse(
+        device_id=device_id,
+        total_sessions=total_sessions,
+        total_duration_sec=round(float(total_duration), 2),
+        total_samples=int(total_samples),
+        by_label=by_label,
+    )
 
 
 def create_telemetry_router(
@@ -102,6 +147,7 @@ def create_telemetry_router(
         device_id: str,
         command: StudioStartRequest,
         user: CurrentUser,
+        db: Session = Depends(get_db),
     ) -> StudioStartResponse:
         """Trigger a remote Studio IMU recording session on an edge device."""
         session_id = str(uuid.uuid4())
@@ -132,6 +178,20 @@ def create_telemetry_router(
                 detail="Failed to dispatch command to device",
             )
 
+        # Immediate PostgreSQL persistence
+        session_record = StudioSession(
+            id=uuid.UUID(session_id),
+            user_id=user.id,
+            device_id=device_id,
+            label=command.label,
+            duration_sec=command.duration_sec,
+            sample_count=0,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(session_record)
+        db.commit()
+        db.refresh(session_record)
+
         return StudioStartResponse(
             status="command_dispatched",
             device_id=device_id,
@@ -149,20 +209,10 @@ def create_telemetry_router(
     def get_device_studio_stats(
         device_id: str,
         user: CurrentUser,
+        db: Session = Depends(get_db),
     ) -> StudioDatasetStatsResponse:
-        """Get dataset statistics (session counts by label) for a specific device."""
-        try:
-            return telemetry_service.get_dataset_stats(device_id=device_id)
-        except (BotoCoreError, ClientError) as error:
-            logger.error(
-                "DynamoDB error fetching studio stats for device %s: %s",
-                device_id,
-                error,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Failed to retrieve studio stats from telemetry store",
-            )
+        """Get dataset statistics (session counts and duration by label) for a specific device."""
+        return _compute_studio_stats(db=db, user=user, device_id=device_id)
 
     @studio_router.get(
         "/stats",
@@ -171,16 +221,10 @@ def create_telemetry_router(
     )
     def get_global_studio_stats(
         user: CurrentUser,
+        db: Session = Depends(get_db),
     ) -> StudioDatasetStatsResponse:
-        """Get dataset statistics (session counts by label) across all devices."""
-        try:
-            return telemetry_service.get_dataset_stats(device_id=None)
-        except (BotoCoreError, ClientError) as error:
-            logger.error("DynamoDB error fetching global studio stats: %s", error)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Failed to retrieve studio stats from telemetry store",
-            )
+        """Get dataset statistics (session counts and duration by label) across all devices."""
+        return _compute_studio_stats(db=db, user=user, device_id=None)
 
     root_router.include_router(devices_router)
     root_router.include_router(studio_router)

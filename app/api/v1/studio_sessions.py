@@ -62,8 +62,8 @@ def _to_summary(session: StudioSession, is_admin: bool) -> StudioSessionSummary:
         user_id=session.user_id,
         user_email=session.user.email if (is_admin and session.user) else None,
         label=session.label,
-        sample_count=session.sample_count,
-        duration_sec=session.duration_sec,
+        sample_count=session.sample_count or 0,
+        duration_sec=session.duration_sec or 5.0,
         created_at=session.created_at,
     )
 

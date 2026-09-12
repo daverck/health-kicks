@@ -60,5 +60,7 @@ class StudioDatasetStatsResponse(StrictModel):
 
     device_id: str | None = None
     total_sessions: int
+    total_duration_sec: float = 0.0
+    total_samples: int = 0
     by_label: dict[str, int]
 
