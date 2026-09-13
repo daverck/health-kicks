@@ -66,6 +66,7 @@ def _to_summary(session: StudioSession, is_admin: bool) -> StudioSessionSummary:
         label=session.label,
         sample_count=session.sample_count or 0,
         duration_sec=session.duration_sec or 5.0,
+        is_validated=bool(session.is_validated),
         created_at=session.created_at,
     )
 
@@ -85,6 +86,7 @@ def create_studio_sessions_router(
         label: str | None = Query(default=None),
         device_id: str | None = Query(default=None),
         user_id: int | None = Query(default=None),
+        is_validated: bool | None = Query(default=None, description="Filtrer par statut de validation de la session"),
         start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
         end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
         db: Session = Depends(get_db),
@@ -107,6 +109,9 @@ def create_studio_sessions_router(
 
         if device_id is not None:
             query = query.filter(StudioSession.device_id == device_id)
+
+        if is_validated is not None and isinstance(is_validated, bool):
+            query = query.filter(StudioSession.is_validated == is_validated)
 
         if norm_start is not None:
             query = query.filter(StudioSession.created_at >= norm_start)
@@ -161,6 +166,19 @@ def create_studio_sessions_router(
 
         return readings
 
+    @router.patch("/{session_id}/confirm", response_model=StudioSessionSummary)
+    def confirm_session(
+        session_id: str,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> StudioSessionSummary:
+        """Confirm and validate a studio session for dataset inclusion."""
+        session = _get_authorized_session(session_id, user, db)
+        session.is_validated = True
+        db.commit()
+        db.refresh(session)
+        return _to_summary(session, is_admin=_is_admin(user))
+
     @router.patch("/{session_id}", response_model=StudioSessionSummary)
     def update_session(
         session_id: str,
@@ -168,25 +186,30 @@ def create_studio_sessions_router(
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> StudioSessionSummary:
-        """Reclassify a studio session's activity label in PostgreSQL and DynamoDB."""
+        """Reclassify a studio session's activity label or update validation in PostgreSQL and DynamoDB."""
         session = _get_authorized_session(session_id, user, db)
 
-        session.label = payload.label
+        if payload.label is not None:
+            session.label = payload.label
+        if payload.is_validated is not None:
+            session.is_validated = payload.is_validated
+
         db.commit()
         db.refresh(session)
 
-        try:
-            telemetry_service.update_session_label(
-                device_id=session.device_id,
-                session_id=str(session.id),
-                new_label=payload.label,
-            )
-        except (BotoCoreError, ClientError) as error:
-            logger.warning(
-                "Could not propagate label update to DynamoDB for session %s: %s",
-                session.id,
-                error,
-            )
+        if payload.label is not None:
+            try:
+                telemetry_service.update_session_label(
+                    device_id=session.device_id,
+                    session_id=str(session.id),
+                    new_label=payload.label,
+                )
+            except (BotoCoreError, ClientError) as error:
+                logger.warning(
+                    "Could not propagate label update to DynamoDB for session %s: %s",
+                    session.id,
+                    error,
+                )
 
         return _to_summary(session, is_admin=_is_admin(user))
 

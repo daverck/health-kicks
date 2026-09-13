@@ -32,13 +32,21 @@ class StudioSessionSummary(StrictModel):
     label: str
     sample_count: int = 0
     duration_sec: float = 5.0
+    is_validated: bool = False
     created_at: datetime
 
 
-class StudioSessionUpdatePayload(StrictModel):
-    """Payload to update the label of a Studio recording."""
+class StudioSessionDetail(StudioSessionSummary):
+    """Detailed metadata view of a Studio capture session."""
 
-    label: str = Field(min_length=1, max_length=64, description="Reclassified activity label (e.g. idle, walk, fall_forward)")
+    pass
+
+
+class StudioSessionUpdatePayload(StrictModel):
+    """Payload to update the label or confirmation status of a Studio recording."""
+
+    label: str | None = Field(default=None, min_length=1, max_length=64, description="Reclassified activity label (e.g. idle, walk, fall_forward)")
+    is_validated: bool | None = Field(default=None, description="Validation flag for the capture session")
 
 
 class PaginatedSessionsResponse(StrictModel):

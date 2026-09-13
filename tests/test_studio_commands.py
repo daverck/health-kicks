@@ -105,6 +105,7 @@ def test_start_studio_session_success_defaults(test_client, mock_iot_client, aut
     assert saved_session.label == "walk"
     assert saved_session.duration_sec == 5.0
     assert saved_session.sample_count == 0
+    assert saved_session.is_validated is False
 
     # Validate mock publish call
     mock_iot_client.publish.assert_called_once()

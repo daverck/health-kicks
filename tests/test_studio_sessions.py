@@ -427,3 +427,121 @@ def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_ser
     # Vérification en base
     db_session.refresh(s)
     assert s.label == "idle"
+
+
+# ---------------------------------------------------------------------------
+# Session Validation / Confirmation Lifecycle Tests
+# ---------------------------------------------------------------------------
+
+
+def test_confirm_session_success(client, user_a, db_session) -> None:
+    """A user can confirm/validate their own recorded session."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    db_session.add(s)
+    db_session.commit()
+
+    res = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}/confirm",
+        headers=_auth_headers(user_a),
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["id"] == str(sess_id)
+    assert data["is_validated"] is True
+
+    db_session.refresh(s)
+    assert s.is_validated is True
+
+
+def test_confirm_session_admin_allowed(client, admin_user, user_a, db_session) -> None:
+    """An admin can confirm/validate another user's session."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    db_session.add(s)
+    db_session.commit()
+
+    res = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}/confirm",
+        headers=_auth_headers(admin_user),
+    )
+    assert res.status_code == 200
+    assert res.json()["is_validated"] is True
+
+    db_session.refresh(s)
+    assert s.is_validated is True
+
+
+def test_confirm_session_forbidden_for_other_user(client, user_a, user_b, db_session) -> None:
+    """A non-admin user cannot confirm another user's session."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    db_session.add(s)
+    db_session.commit()
+
+    res = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}/confirm",
+        headers=_auth_headers(user_b),
+    )
+    assert res.status_code == 403
+
+    db_session.refresh(s)
+    assert s.is_validated is False
+
+
+def test_confirm_session_not_found(client, user_a) -> None:
+    """Confirming a non-existent session returns 404."""
+    fake_id = uuid.uuid4()
+    res = client.patch(
+        f"/api/v1/studio/sessions/{fake_id}/confirm",
+        headers=_auth_headers(user_a),
+    )
+    assert res.status_code == 404
+
+
+def test_list_sessions_filter_by_is_validated(client, user_a, db_session) -> None:
+    """Listing sessions supports filtering by is_validated flag."""
+    s_unvalid = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    s_valid = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", is_validated=True)
+    db_session.add_all([s_unvalid, s_valid])
+    db_session.commit()
+
+    # Filter validated only
+    res_true = client.get("/api/v1/studio/sessions?is_validated=true", headers=_auth_headers(user_a))
+    assert res_true.status_code == 200
+    data_true = res_true.json()
+    assert data_true["total"] == 1
+    assert data_true["items"][0]["id"] == str(s_valid.id)
+    assert data_true["items"][0]["is_validated"] is True
+
+    # Filter unvalidated only
+    res_false = client.get("/api/v1/studio/sessions?is_validated=false", headers=_auth_headers(user_a))
+    assert res_false.status_code == 200
+    data_false = res_false.json()
+    assert data_false["total"] == 1
+    assert data_false["items"][0]["id"] == str(s_unvalid.id)
+    assert data_false["items"][0]["is_validated"] is False
+
+    # No validation filter returns both
+    res_all = client.get("/api/v1/studio/sessions", headers=_auth_headers(user_a))
+    assert res_all.status_code == 200
+    assert res_all.json()["total"] == 2
+
+
+def test_patch_session_update_is_validated_via_payload(client, user_a, db_session) -> None:
+    """PATCH /api/v1/studio/sessions/{session_id} accepts is_validated in payload."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    db_session.add(s)
+    db_session.commit()
+
+    res = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}",
+        json={"is_validated": True},
+        headers=_auth_headers(user_a),
+    )
+    assert res.status_code == 200
+    assert res.json()["is_validated"] is True
+
+    db_session.refresh(s)
+    assert s.is_validated is True

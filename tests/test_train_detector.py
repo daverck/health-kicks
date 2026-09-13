@@ -48,13 +48,14 @@ def _make_session(session_id: str, device_id: str = "dev-01", label: str = "walk
     }
 
 
-def _make_db_mock(session_id: str, device_id: str, label: str) -> MagicMock:
+def _make_db_mock(session_id: str, device_id: str, label: str, is_validated: bool = True) -> MagicMock:
     """Crée un mock de session PostgreSQL (StudioSession)."""
     m = MagicMock()
     m.id = session_id
     m.device_id = device_id
     m.label = label
     m.duration_sec = 5.0
+    m.is_validated = is_validated
     return m
 
 
@@ -365,6 +366,7 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
     with patch("app.db.database.SessionLocal") as mock_session_maker, \
          patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
         mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = [mock_s1, mock_s2]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -403,6 +405,7 @@ def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
 
     with patch("app.db.database.SessionLocal") as mock_session_maker:
         mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = [mock_s1, mock_s3]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -444,6 +447,7 @@ def test_sync_sessions_cache_batch_download(tmp_path: Path):
     with patch("app.db.database.SessionLocal") as mock_session_maker, \
          patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
         mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = db_mocks
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -476,6 +480,7 @@ def test_sync_sessions_cache_migrates_old_json(tmp_path: Path):
 
     with patch("app.db.database.SessionLocal") as mock_session_maker:
         mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = [mock_s]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -490,6 +495,43 @@ def test_sync_sessions_cache_migrates_old_json(tmp_path: Path):
 
     # Le JSON original doit avoir été archivé en .bak
     assert (tmp_path / "sessions_cache.json.bak").exists()
+
+
+def test_sync_sessions_cache_ignores_unvalidated_sessions(tmp_path: Path):
+    """Vérifie que seules les sessions is_validated=True sont interrogées depuis PostgreSQL."""
+    cache_dir = tmp_path / "sessions"
+    sess_valid_id = str(uuid4())
+    sess_unvalid_id = str(uuid4())
+
+    mock_valid = _make_db_mock(sess_valid_id, "dev-01", "walk", is_validated=True)
+
+    mock_reading = MagicMock()
+    mock_reading.timestamp_epoch_us = 1000
+    mock_reading.ax = 0.0
+    mock_reading.ay = 9.8
+    mock_reading.az = 0.0
+    mock_reading.gx = 0.0
+    mock_reading.gy = 0.0
+    mock_reading.gz = 0.0
+
+    mock_resp = MagicMock()
+    mock_resp.readings = [mock_reading]
+    mock_telemetry_svc = MagicMock()
+    mock_telemetry_svc.get_session_readings.return_value = mock_resp
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker, \
+         patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
+        mock_db = MagicMock()
+        # Le filtre is_validated.is_(True) ne retourne que la session validée
+        mock_db.query.return_value.filter.return_value.all.return_value = [mock_valid]
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result = sync_sessions_cache(cache_dir, force_refresh=False)
+
+    assert len(result) == 1
+    assert result[0]["session_id"] == sess_valid_id
+    assert (cache_dir / f"{sess_valid_id}.npz").exists()
+    assert not (cache_dir / f"{sess_unvalid_id}.npz").exists()
 
 
 # -----------------------------------------------------------------------------

@@ -87,3 +87,4 @@ def downgrade() -> None:
         existing_indices = {idx["name"] for idx in insp.get_indexes("studio_sessions")}
         if "ix_studio_sessions_created_at" in existing_indices:
             op.drop_index("ix_studio_sessions_created_at", table_name="studio_sessions")
+

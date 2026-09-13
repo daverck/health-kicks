@@ -478,8 +478,8 @@ def sync_sessions_cache(
         from app.db.models import StudioSession
 
         with SessionLocal() as db:
-            db_sessions = db.query(StudioSession).all()
-        logger.info("Interrogation PostgreSQL : %d sessions répertoriées", len(db_sessions))
+            db_sessions = db.query(StudioSession).filter(StudioSession.is_validated.is_(True)).all()
+        logger.info("Interrogation PostgreSQL : %d session(s) confirmée(s)/validée(s) répertoriée(s)", len(db_sessions))
     except Exception as db_err:
         err_msg = str(db_err)
         if isinstance(db_err, UnicodeDecodeError) or "codec can't decode byte" in err_msg:

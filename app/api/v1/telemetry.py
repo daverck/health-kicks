@@ -186,6 +186,7 @@ def create_telemetry_router(
             label=command.label,
             duration_sec=command.duration_sec,
             sample_count=0,
+            is_validated=False,
             created_at=datetime.now(timezone.utc),
         )
         db.add(session_record)
