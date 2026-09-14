@@ -283,7 +283,8 @@ def test_endpoint_azure_login_json(auth_client) -> None:
     assert "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/authorize" in data["authorization_url"]
 
     # Verify state is signed and contained in authorization_url
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    from itsdangerous import URLSafeTimedSerializer
+    serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     state_payload = serializer.loads(data["state"])
     assert state_payload["provider"] == "azure"
     assert "nonce" in state_payload and len(state_payload["nonce"]) > 0

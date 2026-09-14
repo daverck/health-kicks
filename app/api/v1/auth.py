@@ -9,8 +9,9 @@ SPA Frontend-First flow:
 
 import logging
 import secrets
+from urllib.parse import quote
 
-from itsdangerous import BadData, URLSafeSerializer
+from itsdangerous import BadData, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -24,25 +25,54 @@ from app.schemas.cloud import StrictModel
 from app.services import azure_auth_service, google_auth_service, token_service
 from app.services.aws_sts_service import AWSSTSService
 
-_state_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+_timed_serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
+_untimed_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
 logger = logging.getLogger(__name__)
 
 
-def generate_oauth_state(provider: str) -> str:
-    """Generate a signed anti-CSRF OAuth state containing a nonce and the provider name."""
-    return _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": provider})
+def generate_oauth_state(provider: str, platform: str = "web") -> str:
+    """Generate a signed anti-CSRF OAuth state containing a nonce, provider name, and platform."""
+    payload = {
+        "platform": platform,
+        "provider": provider,
+        "nonce": secrets.token_hex(16),
+    }
+    return _timed_serializer.dumps(payload)
 
 
-def verify_oauth_state(state: str, expected_provider: str) -> dict:
-    """Validate the cryptographic signature and provider of an anti-CSRF OAuth state."""
+def verify_oauth_state(state: str, expected_provider: str, max_age: int = 600) -> dict:
+    """Validate the cryptographic signature, expiration (max_age seconds), and provider."""
+    data = None
     try:
-        data = _state_serializer.loads(state)
-    except BadData as error:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
+        data = _timed_serializer.loads(state, max_age=max_age)
+    except SignatureExpired as error:
+        logger.warning("Expired OAuth state token: %s", error)
+        raise HTTPException(status_code=400, detail="Invalid OAuth state: state expired") from error
+    except BadData:
+        # Fallback to untimed serializer in case state was generated without timestamp
+        try:
+            data = _untimed_serializer.loads(state)
+        except BadData as error:
+            logger.warning("Invalid OAuth state signature: %s", error)
+            raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
 
     if not isinstance(data, dict) or data.get("provider") != expected_provider:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
     return data
+
+
+def get_state_platform(state: str | None) -> str:
+    """Extract the target platform ('mobile' or 'web') from the state payload without enforcing strict signature/expiry."""
+    if not state:
+        return "web"
+    for serializer in (_timed_serializer, _untimed_serializer):
+        try:
+            _, payload = serializer.loads_unsafe(state)
+            if isinstance(payload, dict) and "platform" in payload:
+                return str(payload["platform"])
+        except Exception:
+            pass
+    return "web"
 
 
 class UserResponse(StrictModel):
@@ -104,17 +134,87 @@ AzureCallbackRequest = OAuthCallbackRequest
 def create_auth_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
+    def _get_frontend_base() -> str:
+        return getattr(settings, "frontend_url", "https://healthkicks.duckdns.org").rstrip("/")
+
     @router.get("/google/login", response_model=GoogleLoginResponse)
-    def google_login(request: Request, redirect: bool = False):
+    def google_login(request: Request, redirect: bool = False, platform: str | None = None):
         if not settings.google_client_id or not settings.google_client_secret:
             raise HTTPException(status_code=503, detail="Google SSO is not configured")
-        state = generate_oauth_state("google")
+        target_platform = "mobile" if (redirect or platform == "mobile") else "web"
+        state = generate_oauth_state("google", platform=target_platform)
         url = google_auth_service.google_authorization_url(state)
 
         accept = request.headers.get("accept", "")
         if redirect and ("text/html" in accept or "application/json" not in accept):
             return RedirectResponse(url)
         return GoogleLoginResponse(authorization_url=url, state=state)
+
+    @router.get("/google/callback")
+    def google_callback_get(
+        request: Request,
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+        error_description: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        """Browser redirect handler for Google OAuth2.
+
+        Extracts the authorization code and state parameter, validates CSRF & expiration,
+        exchanges code for user profile, and redirects to:
+        - `healthkicks://auth/callback` if target platform is mobile
+        - `{frontend_url}/auth/google/callback` (or `/login?error=`) for web clients
+        """
+        raw_platform = get_state_platform(state)
+        is_mobile = (raw_platform == "mobile")
+        frontend_base = _get_frontend_base()
+
+        def _redirect_error(message: str) -> RedirectResponse:
+            encoded_msg = quote(message, safe="")
+            if is_mobile:
+                return RedirectResponse(f"healthkicks://auth/callback?error={encoded_msg}")
+            return RedirectResponse(f"{frontend_base}/login?error={encoded_msg}")
+
+        if error:
+            err_detail = error_description or error
+            logger.warning("Google SSO callback GET received error: %s", err_detail)
+            return _redirect_error(err_detail)
+
+        if not code or not state:
+            return _redirect_error("Paramètres d'autorisation manquants (code ou state absent)")
+
+        try:
+            state_data = verify_oauth_state(state, expected_provider="google")
+            is_mobile = (state_data.get("platform") == "mobile")
+        except HTTPException as exc:
+            return _redirect_error(exc.detail or "Paramètre state invalide ou expiré")
+
+        try:
+            claims = google_auth_service.exchange_code_for_id_token(code)
+        except google_auth_service.GoogleAuthError as err:
+            logger.error("Google SSO callback GET: token exchange failed: %s", err)
+            return _redirect_error(str(err))
+        except Exception as err:
+            logger.exception("Google SSO callback GET: unexpected error: %s", err)
+            return _redirect_error("Erreur serveur lors de l'authentification Google")
+
+        try:
+            user = google_auth_service.get_or_create_user(db, claims)
+            access_token = token_service.issue_access_token(user)
+            refresh_token = token_service.issue_refresh_token(user)
+        except Exception as err:
+            logger.exception("Google SSO callback GET: user provisioning failed: %s", err)
+            return _redirect_error("Échec de persistance de l'utilisateur")
+
+        logger.info("Google SSO callback GET: success for user id=%s (is_mobile=%s)", user.id, is_mobile)
+        if is_mobile:
+            return RedirectResponse(
+                f"healthkicks://auth/callback?access_token={access_token}&refresh_token={refresh_token}"
+            )
+        return RedirectResponse(
+            f"{frontend_base}/auth/google/callback?access_token={access_token}&refresh_token={refresh_token}"
+        )
 
     @router.post("/google/callback", response_model=TokenResponse)
     def google_callback(payload: GoogleCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
@@ -141,10 +241,11 @@ def create_auth_router() -> APIRouter:
         return TokenResponse.build(user, access_token, refresh_token)
 
     @router.get("/azure/login")
-    def azure_login(request: Request, redirect: bool = False):
+    def azure_login(request: Request, redirect: bool = False, platform: str | None = None):
         if not settings.azure_client_id or not settings.azure_client_secret:
             raise HTTPException(status_code=503, detail="Azure SSO is not configured")
-        state = generate_oauth_state("azure")
+        target_platform = "mobile" if (redirect or platform == "mobile") else "web"
+        state = generate_oauth_state("azure", platform=target_platform)
         try:
             url = azure_auth_service.azure_authorization_url(state)
         except azure_auth_service.AzureAuthError as error:
@@ -154,6 +255,72 @@ def create_auth_router() -> APIRouter:
         if redirect and ("text/html" in accept or "application/json" not in accept):
             return RedirectResponse(url)
         return AzureLoginResponse(authorization_url=url, state=state)
+
+    @router.get("/azure/callback")
+    def azure_callback_get(
+        request: Request,
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+        error_description: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        """Browser redirect handler for Azure AD / Microsoft Entra ID.
+
+        Extracts the authorization code and state parameter, validates CSRF & expiration,
+        exchanges code for user profile, and redirects to:
+        - `healthkicks://auth/callback` if target platform is mobile
+        - `{frontend_url}/auth/azure/callback` (or `/login?error=`) for web clients
+        """
+        raw_platform = get_state_platform(state)
+        is_mobile = (raw_platform == "mobile")
+        frontend_base = _get_frontend_base()
+
+        def _redirect_error(message: str) -> RedirectResponse:
+            encoded_msg = quote(message, safe="")
+            if is_mobile:
+                return RedirectResponse(f"healthkicks://auth/callback?error={encoded_msg}")
+            return RedirectResponse(f"{frontend_base}/login?error={encoded_msg}")
+
+        if error:
+            err_detail = error_description or error
+            logger.warning("Azure SSO callback GET received error: %s", err_detail)
+            return _redirect_error(err_detail)
+
+        if not code or not state:
+            return _redirect_error("Paramètres d'autorisation manquants (code ou state absent)")
+
+        try:
+            state_data = verify_oauth_state(state, expected_provider="azure")
+            is_mobile = (state_data.get("platform") == "mobile")
+        except HTTPException as exc:
+            return _redirect_error(exc.detail or "Paramètre state invalide ou expiré")
+
+        try:
+            user_info = azure_auth_service.exchange_code_for_azure_user(code)
+        except azure_auth_service.AzureAuthError as err:
+            logger.error("Azure SSO callback GET: token exchange failed: %s", err)
+            return _redirect_error(str(err))
+        except Exception as err:
+            logger.exception("Azure SSO callback GET: unexpected error: %s", err)
+            return _redirect_error("Erreur serveur lors de l'authentification Azure")
+
+        try:
+            user = azure_auth_service.get_or_create_azure_user(db, user_info)
+            access_token = token_service.issue_access_token(user)
+            refresh_token = token_service.issue_refresh_token(user)
+        except Exception as err:
+            logger.exception("Azure SSO callback GET: user provisioning failed: %s", err)
+            return _redirect_error("Échec de persistance de l'utilisateur")
+
+        logger.info("Azure SSO callback GET: success for user id=%s (is_mobile=%s)", user.id, is_mobile)
+        if is_mobile:
+            return RedirectResponse(
+                f"healthkicks://auth/callback?access_token={access_token}&refresh_token={refresh_token}"
+            )
+        return RedirectResponse(
+            f"{frontend_base}/auth/azure/callback?access_token={access_token}&refresh_token={refresh_token}"
+        )
 
     @router.post("/azure/callback", response_model=TokenResponse)
     def azure_callback(payload: AzureCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
