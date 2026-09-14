@@ -23,3 +23,4 @@ class IoTCredentialsResponse(BaseModel):
     region: str
 
     model_config = ConfigDict(extra="forbid")
+

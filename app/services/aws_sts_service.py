@@ -154,3 +154,4 @@ class AWSSTSService:
             "iot_endpoint": self._config.aws_iot_endpoint,
             "region": self._config.aws_region,
         }
+

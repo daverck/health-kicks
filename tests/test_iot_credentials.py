@@ -271,3 +271,4 @@ class TestIoTCredentialsEndpoint:
         )
         assert response.status_code == 200
         assert response.json()["access_key_id"] == "ASIA_MOCK_ACCESS_KEY"
+
