@@ -1,5 +1,6 @@
 """Tests for stateless signed OAuth state and mobile deep link redirection."""
 
+import dataclasses
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -29,6 +30,32 @@ def db_session():
     session = sessionmaker(bind=engine)()
     yield session
     session.close()
+
+
+@pytest.fixture(autouse=True)
+def mock_oauth_settings(monkeypatch):
+    """Ensure Google and Azure credentials are configured even in CI environments without .env."""
+    import app.api.v1.auth
+    import app.core.config
+    import app.services.azure_auth_service
+    import app.services.google_auth_service
+
+    current = app.core.config.settings
+    overrides = {
+        "google_client_id": current.google_client_id or "test-google-client-id",
+        "google_client_secret": current.google_client_secret or "test-google-client-secret",
+        "google_redirect_uri": current.google_redirect_uri or "http://localhost:8000/api/v1/auth/google/callback",
+        "azure_client_id": current.azure_client_id or "test-azure-client-id",
+        "azure_client_secret": current.azure_client_secret or "test-azure-client-secret",
+        "azure_tenant_id": current.azure_tenant_id or "common",
+        "azure_redirect_uri": current.azure_redirect_uri or "http://localhost:8000/auth/azure/callback",
+    }
+    new_settings = dataclasses.replace(current, **overrides)
+    monkeypatch.setattr(app.core.config, "settings", new_settings)
+    monkeypatch.setattr(app.services.google_auth_service, "settings", new_settings)
+    monkeypatch.setattr(app.services.azure_auth_service, "settings", new_settings)
+    monkeypatch.setattr(app.api.v1.auth, "settings", new_settings)
+    return new_settings
 
 
 @pytest.fixture()
@@ -200,6 +227,14 @@ class TestGoogleOAuthMobileRedirects:
 
 class TestAzureOAuthMobileRedirects:
     """Test browser redirect endpoints (/api/v1/auth/azure/callback)."""
+
+    def test_azure_login_generates_mobile_state_when_redirect_true(self, client) -> None:
+        res = client.get("/api/v1/auth/azure/login", params={"redirect": "true"}, follow_redirects=False)
+        assert res.status_code in (302, 307)
+        location = res.headers["location"]
+        query_params = parse_qs(urlparse(location).query)
+        state = query_params["state"][0]
+        assert get_state_platform(state) == "mobile"
 
     def test_azure_callback_get_success_redirects_to_mobile_deep_link(self, client) -> None:
         mobile_state = generate_oauth_state("azure", platform="mobile")
