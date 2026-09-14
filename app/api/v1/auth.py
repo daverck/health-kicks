@@ -15,12 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, get_sts_service
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import User
+from app.db.models import DeviceOwnership, User, UserRole
+from app.schemas.auth import IoTCredentialsRequest, IoTCredentialsResponse
 from app.schemas.cloud import StrictModel
 from app.services import azure_auth_service, google_auth_service, token_service
+from app.services.aws_sts_service import AWSSTSService
 
 _state_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
 logger = logging.getLogger(__name__)
@@ -195,5 +197,61 @@ def create_auth_router() -> APIRouter:
     @router.get("/me", response_model=UserResponse)
     def me(user: CurrentUser) -> UserResponse:
         return UserResponse.from_user(user)
+
+    @router.post("/iot-credentials", response_model=IoTCredentialsResponse)
+    def get_iot_credentials(
+        user: CurrentUser,
+        payload: IoTCredentialsRequest | None = None,
+        device_id: str | None = None,
+        db: Session = Depends(get_db),
+        sts_service: AWSSTSService = Depends(get_sts_service),
+    ) -> IoTCredentialsResponse:
+        """Exchange authenticated user session for temporary AWS STS IoT credentials.
+
+        Allows clients (mobile app, web dashboard) to connect directly to AWS IoT Core
+        via WebSockets SigV4, dynamically scoped to the user's bound devices.
+        """
+        requested_device_id = None
+        if payload and payload.device_id:
+            requested_device_id = payload.device_id.strip()
+        elif device_id:
+            requested_device_id = device_id.strip()
+
+        # Query user's bound devices from database
+        ownerships = (
+            db.query(DeviceOwnership)
+            .filter_by(user_id=user.id)
+            .all()
+        )
+        owned_device_ids = [o.device_id for o in ownerships]
+
+        if user.role == UserRole.admin:
+            if requested_device_id:
+                target_device_ids = [requested_device_id]
+            elif owned_device_ids:
+                target_device_ids = owned_device_ids
+            else:
+                target_device_ids = ["*"]
+        else:
+            if requested_device_id:
+                if requested_device_id not in owned_device_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="You do not own this device",
+                    )
+                target_device_ids = [requested_device_id]
+            else:
+                if not owned_device_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No devices bound to this user account",
+                    )
+                target_device_ids = owned_device_ids
+
+        credentials_data = sts_service.generate_iot_credentials(
+            user_id=user.id,
+            device_ids=target_device_ids,
+        )
+        return IoTCredentialsResponse(**credentials_data)
 
     return router

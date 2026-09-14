@@ -9,6 +9,8 @@ migrate_on_start: true
 aws_iot:
   endpoint: a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com
   haptic_command_topic: healthkicks/v1/{device_id}/commands/haptic
+  role_arn: ""
+  session_duration: 3600
 
 
 # Google and Microsoft Entra ID SSO / JWT authentication.

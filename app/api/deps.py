@@ -53,3 +53,11 @@ def require_roles(*roles: UserRole):
 
 
 RequireAdmin = Annotated[User, Depends(require_roles(UserRole.admin))]
+
+
+def get_sts_service():
+    """Dependency provider for AWSSTSService."""
+    from app.services.aws_sts_service import AWSSTSService
+
+    return AWSSTSService()
+
