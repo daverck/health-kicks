@@ -141,9 +141,10 @@ def create_auth_router() -> APIRouter:
     def google_login(request: Request, redirect: bool = False, platform: str | None = None):
         if not settings.google_client_id or not settings.google_client_secret:
             raise HTTPException(status_code=503, detail="Google SSO is not configured")
-        target_platform = "mobile" if (redirect or platform == "mobile") else "web"
+        is_mobile = (redirect or platform == "mobile")
+        target_platform = "mobile" if is_mobile else "web"
         state = generate_oauth_state("google", platform=target_platform)
-        url = google_auth_service.google_authorization_url(state)
+        url = google_auth_service.google_authorization_url(state, is_mobile=is_mobile)
 
         accept = request.headers.get("accept", "")
         if redirect and ("text/html" in accept or "application/json" not in accept):
@@ -191,7 +192,7 @@ def create_auth_router() -> APIRouter:
             return _redirect_error(exc.detail or "Paramètre state invalide ou expiré")
 
         try:
-            claims = google_auth_service.exchange_code_for_id_token(code)
+            claims = google_auth_service.exchange_code_for_id_token(code, is_mobile=is_mobile)
         except google_auth_service.GoogleAuthError as err:
             logger.error("Google SSO callback GET: token exchange failed: %s", err)
             return _redirect_error(str(err))
@@ -218,10 +219,11 @@ def create_auth_router() -> APIRouter:
 
     @router.post("/google/callback", response_model=TokenResponse)
     def google_callback(payload: GoogleCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        verify_oauth_state(payload.state, expected_provider="google")
+        state_data = verify_oauth_state(payload.state, expected_provider="google")
+        is_mobile = (state_data.get("platform") == "mobile")
 
         try:
-            claims = google_auth_service.exchange_code_for_id_token(payload.code)
+            claims = google_auth_service.exchange_code_for_id_token(payload.code, is_mobile=is_mobile)
         except google_auth_service.GoogleAuthError as error:
             logger.error("Google SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error
@@ -244,10 +246,11 @@ def create_auth_router() -> APIRouter:
     def azure_login(request: Request, redirect: bool = False, platform: str | None = None):
         if not settings.azure_client_id or not settings.azure_client_secret:
             raise HTTPException(status_code=503, detail="Azure SSO is not configured")
-        target_platform = "mobile" if (redirect or platform == "mobile") else "web"
+        is_mobile = (redirect or platform == "mobile")
+        target_platform = "mobile" if is_mobile else "web"
         state = generate_oauth_state("azure", platform=target_platform)
         try:
-            url = azure_auth_service.azure_authorization_url(state)
+            url = azure_auth_service.azure_authorization_url(state, is_mobile=is_mobile)
         except azure_auth_service.AzureAuthError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -297,7 +300,7 @@ def create_auth_router() -> APIRouter:
             return _redirect_error(exc.detail or "Paramètre state invalide ou expiré")
 
         try:
-            user_info = azure_auth_service.exchange_code_for_azure_user(code)
+            user_info = azure_auth_service.exchange_code_for_azure_user(code, is_mobile=is_mobile)
         except azure_auth_service.AzureAuthError as err:
             logger.error("Azure SSO callback GET: token exchange failed: %s", err)
             return _redirect_error(str(err))
@@ -324,10 +327,11 @@ def create_auth_router() -> APIRouter:
 
     @router.post("/azure/callback", response_model=TokenResponse)
     def azure_callback(payload: AzureCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        verify_oauth_state(payload.state, expected_provider="azure")
+        state_data = verify_oauth_state(payload.state, expected_provider="azure")
+        is_mobile = (state_data.get("platform") == "mobile")
 
         try:
-            user_info = azure_auth_service.exchange_code_for_azure_user(payload.code)
+            user_info = azure_auth_service.exchange_code_for_azure_user(payload.code, is_mobile=is_mobile)
         except azure_auth_service.AzureAuthError as error:
             logger.error("Azure SSO callback: token exchange failed: %s", error)
             raise HTTPException(status_code=401, detail=str(error)) from error

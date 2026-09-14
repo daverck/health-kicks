@@ -32,11 +32,18 @@ class GoogleAuthError(Exception):
     """Raised when the Google ID token cannot be trusted."""
 
 
-def google_authorization_url(state: str) -> str:
+def google_authorization_url(
+    state: str, is_mobile: bool = False, redirect_uri: str | None = None
+) -> str:
     """Build the Google consent redirect (Authorization Code + OIDC scopes)."""
+    target_redirect_uri = redirect_uri or (
+        settings.google_mobile_redirect_uri
+        if is_mobile and settings.google_mobile_redirect_uri
+        else settings.google_redirect_uri
+    )
     params = {
         "client_id": settings.google_client_id,
-        "redirect_uri": settings.google_redirect_uri,
+        "redirect_uri": target_redirect_uri,
         "response_type": "code",
         "scope": "openid email profile",
         "state": state,
@@ -47,10 +54,17 @@ def google_authorization_url(state: str) -> str:
     return f"{GOOGLE_AUTH_ENDPOINT}?{query}"
 
 
-def exchange_code_for_id_token(code: str) -> dict[str, Any]:
+def exchange_code_for_id_token(
+    code: str, is_mobile: bool = False, redirect_uri: str | None = None
+) -> dict[str, Any]:
     """Exchange the authorization code and verify the returned Google ID token."""
     if not settings.google_client_id or not settings.google_client_secret:
         raise GoogleAuthError("Google OAuth credentials are not configured")
+    target_redirect_uri = redirect_uri or (
+        settings.google_mobile_redirect_uri
+        if is_mobile and settings.google_mobile_redirect_uri
+        else settings.google_redirect_uri
+    )
     try:
         response = httpx.post(
             GOOGLE_TOKEN_ENDPOINT,
@@ -58,7 +72,7 @@ def exchange_code_for_id_token(code: str) -> dict[str, Any]:
                 "code": code,
                 "client_id": settings.google_client_id,
                 "client_secret": settings.google_client_secret,
-                "redirect_uri": settings.google_redirect_uri,
+                "redirect_uri": target_redirect_uri,
                 "grant_type": "authorization_code",
             },
             timeout=10.0,

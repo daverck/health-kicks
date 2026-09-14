@@ -60,7 +60,9 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert settings.azure_client_secret == ""
     assert settings.azure_tenant_id == "common"
     assert settings.azure_redirect_uri == ""
+    assert settings.azure_mobile_redirect_uri == "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
     assert settings.google_redirect_uri == "http://localhost:4200/auth/google/callback"
+    assert settings.google_mobile_redirect_uri == "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback"
     assert settings.refresh_token_expire_days == 7
     assert settings.dynamodb_telemetry_table == "healthkicks_telemetry"
     assert settings.aws_iot_studio_start_topic == "healthkicks/v1/{device_id}/commands/studio/start"
@@ -76,18 +78,22 @@ def test_azure_environment_overrides(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "test-client-secret")
     monkeypatch.setenv("AZURE_TENANT_ID", "test-tenant-id")
     monkeypatch.setenv("AZURE_REDIRECT_URI", "https://healthkicks.duckdns.org/auth/azure/callback")
+    monkeypatch.setenv("AZURE_MOBILE_REDIRECT_URI", "https://custom.backend:8443/api/v1/auth/azure/callback")
 
     settings = load_settings(tmp_path / "missing.yaml")
     assert settings.azure_client_id == "test-client-id"
     assert settings.azure_client_secret == "test-client-secret"
     assert settings.azure_tenant_id == "test-tenant-id"
     assert settings.azure_redirect_uri == "https://healthkicks.duckdns.org/auth/azure/callback"
+    assert settings.azure_mobile_redirect_uri == "https://custom.backend:8443/api/v1/auth/azure/callback"
 
 
 def test_google_environment_overrides(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://healthkicks.duckdns.org/auth/google/callback")
+    monkeypatch.setenv("GOOGLE_MOBILE_REDIRECT_URI", "https://custom.backend:8443/api/v1/auth/google/callback")
     settings = load_settings(tmp_path / "missing.yaml")
     assert settings.google_redirect_uri == "https://healthkicks.duckdns.org/auth/google/callback"
+    assert settings.google_mobile_redirect_uri == "https://custom.backend:8443/api/v1/auth/google/callback"
 
 
 def test_refresh_token_expire_days_environment_override(tmp_path: Path, monkeypatch) -> None:

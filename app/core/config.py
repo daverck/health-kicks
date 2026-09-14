@@ -34,6 +34,7 @@ class Settings:
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:4200/auth/google/callback"
+    google_mobile_redirect_uri: str = "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback"
     jwt_secret: str = "dev-only-insecure-secret"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
@@ -46,6 +47,7 @@ class Settings:
     azure_client_secret: str = ""
     azure_tenant_id: str = "common"
     azure_redirect_uri: str = ""
+    azure_mobile_redirect_uri: str = "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
     # Frontend application URL for OAuth redirects
     frontend_url: str = "https://healthkicks.duckdns.org"
     # DynamoDB Telemetry (Studio mode)
@@ -123,6 +125,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "google_client_id": _nested_value(yaml_values, "auth", "google_client_id", defaults.google_client_id),
         "google_client_secret": _nested_value(yaml_values, "auth", "google_client_secret", defaults.google_client_secret),
         "google_redirect_uri": _nested_value(yaml_values, "auth", "google_redirect_uri", defaults.google_redirect_uri),
+        "google_mobile_redirect_uri": _nested_value(yaml_values, "auth", "google_mobile_redirect_uri", defaults.google_mobile_redirect_uri),
         "jwt_secret": _nested_value(yaml_values, "auth", "jwt_secret", defaults.jwt_secret),
         "jwt_algorithm": _nested_value(yaml_values, "auth", "jwt_algorithm", defaults.jwt_algorithm),
         "access_token_expire_minutes": int(
@@ -143,6 +146,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "azure_client_secret": _nested_value(yaml_values, "auth", "azure_client_secret", defaults.azure_client_secret),
         "azure_tenant_id": _nested_value(yaml_values, "auth", "azure_tenant_id", defaults.azure_tenant_id),
         "azure_redirect_uri": _nested_value(yaml_values, "auth", "azure_redirect_uri", defaults.azure_redirect_uri),
+        "azure_mobile_redirect_uri": _nested_value(yaml_values, "auth", "azure_mobile_redirect_uri", defaults.azure_mobile_redirect_uri),
         "frontend_url": yaml_values.get(
             "frontend_url",
             _nested_value(yaml_values, "auth", "frontend_url", defaults.frontend_url),
@@ -201,6 +205,13 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             ),
             str,
         ),
+        "google_mobile_redirect_uri": (
+            (
+                "HEALTHKICKS_GOOGLE_MOBILE_REDIRECT_URI",
+                "GOOGLE_MOBILE_REDIRECT_URI",
+            ),
+            str,
+        ),
         "jwt_secret": (("HEALTHKICKS_JWT_SECRET", "JWT_SECRET"), str),
         "jwt_algorithm": (("HEALTHKICKS_JWT_ALGORITHM",), str),
         "access_token_expire_minutes": (("HEALTHKICKS_ACCESS_TOKEN_EXPIRE_MINUTES",), int),
@@ -213,6 +224,13 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "azure_client_secret": (("HEALTHKICKS_AZURE_CLIENT_SECRET", "AZURE_CLIENT_SECRET"), str),
         "azure_tenant_id": (("HEALTHKICKS_AZURE_TENANT_ID", "AZURE_TENANT_ID"), str),
         "azure_redirect_uri": (("HEALTHKICKS_AZURE_REDIRECT_URI", "AZURE_REDIRECT_URI"), str),
+        "azure_mobile_redirect_uri": (
+            (
+                "HEALTHKICKS_AZURE_MOBILE_REDIRECT_URI",
+                "AZURE_MOBILE_REDIRECT_URI",
+            ),
+            str,
+        ),
         "frontend_url": (("HEALTHKICKS_FRONTEND_URL", "FRONTEND_URL"), str),
         # DynamoDB Telemetry (Studio mode)
         "dynamodb_telemetry_table": (

@@ -19,16 +19,23 @@ class AzureAuthError(Exception):
     """Raised when Microsoft Entra ID authentication fails."""
 
 
-def azure_authorization_url(state: str) -> str:
+def azure_authorization_url(
+    state: str, is_mobile: bool = False, redirect_uri: str | None = None
+) -> str:
     """Build the Microsoft Entra ID authorization redirect URL."""
     if not settings.azure_client_id or not settings.azure_client_secret:
         raise AzureAuthError("Microsoft Azure OAuth credentials are not configured")
     tenant_id = settings.azure_tenant_id or "common"
     base_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+    target_redirect_uri = redirect_uri or (
+        settings.azure_mobile_redirect_uri
+        if is_mobile and settings.azure_mobile_redirect_uri
+        else settings.azure_redirect_uri
+    )
     params = {
         "client_id": settings.azure_client_id,
         "response_type": "code",
-        "redirect_uri": settings.azure_redirect_uri,
+        "redirect_uri": target_redirect_uri,
         "response_mode": "query",
         "scope": "openid profile email User.Read",
         "state": state,
@@ -37,12 +44,19 @@ def azure_authorization_url(state: str) -> str:
     return f"{base_url}?{query}"
 
 
-def exchange_code_for_azure_user(code: str) -> dict[str, Any]:
+def exchange_code_for_azure_user(
+    code: str, is_mobile: bool = False, redirect_uri: str | None = None
+) -> dict[str, Any]:
     """Exchange the authorization code for tokens and retrieve the Microsoft user profile."""
     if not settings.azure_client_id or not settings.azure_client_secret:
         raise AzureAuthError("Microsoft Azure OAuth credentials are not configured")
     tenant_id = settings.azure_tenant_id or "common"
     token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    target_redirect_uri = redirect_uri or (
+        settings.azure_mobile_redirect_uri
+        if is_mobile and settings.azure_mobile_redirect_uri
+        else settings.azure_redirect_uri
+    )
 
     try:
         response = httpx.post(
@@ -52,7 +66,7 @@ def exchange_code_for_azure_user(code: str) -> dict[str, Any]:
                 "client_secret": settings.azure_client_secret,
                 "code": code,
                 "grant_type": "authorization_code",
-                "redirect_uri": settings.azure_redirect_uri,
+                "redirect_uri": target_redirect_uri,
             },
             timeout=10.0,
         )
