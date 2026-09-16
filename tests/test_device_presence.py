@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core import config as config_module
 from app.db.database import get_db
-from app.db.models import Base, Device, DeviceStatus
+from app.db.models import Base, Device, DeviceOwnership, DeviceStatus, User
 from app.main import app
 
 INGEST_TOKEN = "secret-test-ingest-token"
@@ -218,3 +218,77 @@ def test_support_for_x_healthkicks_ingest_token_alias(client, seeded_device) -> 
     response = client.post("/api/v1/internal/device-presence", json=payload, headers=headers)
     assert response.status_code == 200
     assert response.json()["device_status"] == "online"
+
+
+def test_lambda_style_payload_with_state_and_no_timestamp(client, seeded_device) -> None:
+    payload = {
+        "device_id": TEST_DEVICE_ID,
+        "state": "online",
+    }
+    headers = {"X-Ingest-Token": INGEST_TOKEN}
+    response = client.post("/api/v1/internal/device-presence", json=payload, headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "device_id": TEST_DEVICE_ID,
+        "device_status": "online",
+    }
+
+
+def test_lwt_user_id_bulk_offline(client, db_session) -> None:
+    # 1. Create a user and two devices
+    user = User(id=42, email="runner@example.com")
+    dev1 = Device(device_id="HK-DEV-1", status=DeviceStatus.online)
+    dev2 = Device(device_id="HK-DEV-2", status=DeviceStatus.online)
+    own1 = DeviceOwnership(user_id=42, device_id="HK-DEV-1")
+    own2 = DeviceOwnership(user_id=42, device_id="HK-DEV-2")
+
+    db_session.add_all([user, dev1, dev2, own1, own2])
+    db_session.commit()
+
+    # 2. Send user_id LWT disconnect
+    payload = {
+        "user_id": 42,
+        "state": "offline",
+    }
+    headers = {"X-Ingest-Token": INGEST_TOKEN}
+    response = client.post("/api/v1/internal/device-presence", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["device_status"] == "offline"
+
+    # 3. Check that both devices are now offline
+    db_session.refresh(dev1)
+    db_session.refresh(dev2)
+    assert dev1.status == DeviceStatus.offline
+    assert dev2.status == DeviceStatus.offline
+
+
+def test_lwt_user_id_string_id_or_sso_sub(client, db_session) -> None:
+    user = User(id=99, google_sub="google-sub-xyz", email="sso@example.com")
+    dev = Device(device_id="HK-DEV-SSO", status=DeviceStatus.online)
+    own = DeviceOwnership(user_id=99, device_id="HK-DEV-SSO")
+    db_session.add_all([user, dev, own])
+    db_session.commit()
+
+    # user_id passed as google_sub string
+    payload = {
+        "user_id": "google-sub-xyz",
+        "state": "offline",
+    }
+    headers = {"X-Ingest-Token": INGEST_TOKEN}
+    response = client.post("/api/v1/internal/device-presence", json=payload, headers=headers)
+    assert response.status_code == 200
+
+    db_session.refresh(dev)
+    assert dev.status == DeviceStatus.offline
+
+
+def test_missing_both_device_id_and_user_id_fails_validation(client) -> None:
+    payload = {
+        "state": "offline",
+    }
+    headers = {"X-Ingest-Token": INGEST_TOKEN}
+    response = client.post("/api/v1/internal/device-presence", json=payload, headers=headers)
+    assert response.status_code == 422

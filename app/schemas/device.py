@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, model_validator
 
 from app.db.models import DeviceStatus
 from app.schemas.cloud import StrictModel
@@ -30,7 +30,9 @@ class DeviceResponse(BaseModel):
     bound_at_utc: datetime
 
 
-def _parse_timestamp(value: object) -> datetime:
+def _parse_timestamp(value: object) -> datetime | None:
+    if value is None:
+        return None
     if isinstance(value, datetime):
         return value
     if isinstance(value, str):
@@ -38,21 +40,36 @@ def _parse_timestamp(value: object) -> datetime:
     raise ValueError("timestamp must be an ISO-8601 datetime")
 
 
-Timestamp = Annotated[datetime, BeforeValidator(_parse_timestamp)]
+Timestamp = Annotated[datetime | None, BeforeValidator(_parse_timestamp)]
 
 
 class DevicePresencePayload(StrictModel):
     """Payload sent by AWS Lambda IoT presence lifecycle event handler."""
 
-    device_id: str
-    status: str
-    timestamp: Timestamp
+    device_id: str | None = None
+    user_id: int | str | None = None
+    status: str | None = None
+    state: str | None = None
+    timestamp: Timestamp = None
+
+    @property
+    def effective_state(self) -> str:
+        val = self.state or self.status or "offline"
+        return val.lower().strip()
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "DevicePresencePayload":
+        if not self.device_id and self.user_id is None:
+            raise ValueError("Either device_id or user_id must be provided")
+        if not self.status and not self.state:
+            raise ValueError("Either state or status must be provided")
+        return self
 
 
 class DevicePresenceResponse(StrictModel):
     """Response returned after processing device presence update."""
 
     status: str
-    device_id: str
-    device_status: DeviceStatus
+    device_id: str | None = None
+    device_status: DeviceStatus | None = None
 
