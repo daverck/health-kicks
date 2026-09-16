@@ -54,9 +54,13 @@ class AWSSTSService:
             ]
             topic_resources = [
                 f"arn:aws:iot:{region}:{account_id}:topic/healthkicks/v1/{dev_id}/*" for dev_id in device_ids
+            ] + [
+                f"arn:aws:iot:{region}:{account_id}:topic/healthkicks/v1/users/{clean_user_id}/*",
             ]
             topicfilter_resources = [
                 f"arn:aws:iot:{region}:{account_id}:topicfilter/healthkicks/v1/{dev_id}/*" for dev_id in device_ids
+            ] + [
+                f"arn:aws:iot:{region}:{account_id}:topicfilter/healthkicks/v1/users/{clean_user_id}/*",
             ]
 
         policy = {

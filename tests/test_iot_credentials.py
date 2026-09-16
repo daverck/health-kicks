@@ -125,10 +125,12 @@ class TestAWSSTSServiceUnit:
         # Publish and Receive statement
         pub_stmt = next(s for s in statements if s["Action"] == ["iot:Publish", "iot:Receive"])
         assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/HK-1/*" in pub_stmt["Resource"]
+        assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/users/42/*" in pub_stmt["Resource"]
 
         # Subscribe statement
         sub_stmt = next(s for s in statements if s["Action"] == ["iot:Subscribe"])
         assert "arn:aws:iot:eu-north-1:123456789012:topicfilter/healthkicks/v1/HK-1/*" in sub_stmt["Resource"]
+        assert "arn:aws:iot:eu-north-1:123456789012:topicfilter/healthkicks/v1/users/42/*" in sub_stmt["Resource"]
 
     def test_build_session_policy_wildcard_admin(self, sts_service):
         policy_str = sts_service.build_session_policy(user_id="admin", device_ids=["*"])
