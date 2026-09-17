@@ -119,18 +119,24 @@ class TestAWSSTSServiceUnit:
 
         # Connect statement
         connect_stmt = next(s for s in statements if s["Action"] == ["iot:Connect"])
-        assert any("client/*HK-1*" in r for r in connect_stmt["Resource"])
-        assert any("client/42-*" in r for r in connect_stmt["Resource"])
+        assert connect_stmt["Resource"] == [
+            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-42-*",
+            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-session-42-*",
+        ]
 
         # Publish and Receive statement
         pub_stmt = next(s for s in statements if s["Action"] == ["iot:Publish", "iot:Receive"])
         assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/HK-1/*" in pub_stmt["Resource"]
         assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/users/42/*" in pub_stmt["Resource"]
+        # Global users/* wildcard must NOT be present
+        assert not any(r.endswith(":topic/healthkicks/v1/users/*") for r in pub_stmt["Resource"])
 
         # Subscribe statement
         sub_stmt = next(s for s in statements if s["Action"] == ["iot:Subscribe"])
         assert "arn:aws:iot:eu-north-1:123456789012:topicfilter/healthkicks/v1/HK-1/*" in sub_stmt["Resource"]
         assert "arn:aws:iot:eu-north-1:123456789012:topicfilter/healthkicks/v1/users/42/*" in sub_stmt["Resource"]
+        # Global users/* wildcard must NOT be present
+        assert not any(r.endswith(":topicfilter/healthkicks/v1/users/*") for r in sub_stmt["Resource"])
 
     def test_build_session_policy_wildcard_admin(self, sts_service):
         policy_str = sts_service.build_session_policy(user_id="admin", device_ids=["*"])
@@ -147,6 +153,7 @@ class TestAWSSTSServiceUnit:
         assert creds["session_token"] == "mock_session_token_xyz"
         assert creds["iot_endpoint"] == "a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com"
         assert creds["region"] == "eu-north-1"
+        assert creds["user_id"] == "10"
 
         mock_sts_client.assume_role.assert_called_once()
         call_kwargs = mock_sts_client.assume_role.call_args[1]

@@ -21,6 +21,7 @@ class IoTCredentialsResponse(BaseModel):
     expiration: datetime
     iot_endpoint: str
     region: str
+    user_id: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 

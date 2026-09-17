@@ -47,9 +47,7 @@ class AWSSTSService:
             topicfilter_resources = [f"arn:aws:iot:{region}:{account_id}:topicfilter/healthkicks/v1/*"]
         else:
             client_resources = [
-                f"arn:aws:iot:{region}:{account_id}:client/*{dev_id}*" for dev_id in device_ids
-            ] + [
-                f"arn:aws:iot:{region}:{account_id}:client/{clean_user_id}-*",
+                f"arn:aws:iot:{region}:{account_id}:client/healthkicks-mobile-{clean_user_id}-*",
                 f"arn:aws:iot:{region}:{account_id}:client/healthkicks-session-{clean_user_id}-*",
             ]
             topic_resources = [
@@ -157,5 +155,6 @@ class AWSSTSService:
             "expiration": creds["Expiration"],
             "iot_endpoint": self._config.aws_iot_endpoint,
             "region": self._config.aws_region,
+            "user_id": str(user_id),
         }
 
