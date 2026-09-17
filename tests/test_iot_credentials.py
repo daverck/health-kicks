@@ -120,8 +120,8 @@ class TestAWSSTSServiceUnit:
         # Connect statement
         connect_stmt = next(s for s in statements if s["Action"] == ["iot:Connect"])
         assert connect_stmt["Resource"] == [
-            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-42-*",
-            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-session-42-*",
+            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-42",
+            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-session-42",
         ]
 
         # Publish and Receive statement
