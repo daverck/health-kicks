@@ -14,6 +14,7 @@ from app.db.database import get_db
 from app.db.models import StudioSession, User, UserRole
 from app.schemas.studio import (
     PaginatedSessionsResponse,
+    StudioSessionDetail,
     StudioSessionSummary,
     StudioSessionUpdatePayload,
 )
@@ -134,6 +135,16 @@ def create_studio_sessions_router(
             page=page,
             size=size,
         )
+
+    @router.get("/{session_id}", response_model=StudioSessionDetail)
+    def get_session_detail(
+        session_id: str,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> StudioSessionDetail:
+        """Fetch studio session metadata from Aurora DB (including sample_count)."""
+        session = _get_authorized_session(session_id, user, db)
+        return _to_summary(session, is_admin=_is_admin(user))
 
     @router.get("/{session_id}/readings", response_model=StudioSessionReadingsResponse)
     def get_session_readings(

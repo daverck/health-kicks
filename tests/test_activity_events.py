@@ -387,3 +387,56 @@ def test_list_activities_start_date_after_end_date_400(client, auth_headers):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"] == "start_date must be before or equal to end_date"
+
+
+def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session, monkeypatch):
+    """Verify /api/v1/ingest/telemetry/raw webhook updates sample_count in StudioSession table."""
+    import uuid
+    from app.db.models import StudioSession, User, UserRole
+
+    monkeypatch.setattr(
+        "app.api.v1.ingestion.settings",
+        ingestion_settings.__class__(ingest_token="secret-test-token", environment="production"),
+    )
+
+    user = User(
+        google_sub="sub-ingest-user",
+        email="ingest@example.com",
+        name="Ingest User",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    sess_id = uuid.uuid4()
+    session_rec = StudioSession(
+        id=sess_id,
+        user_id=user.id,
+        device_id="HK-TEST",
+        label="walk",
+        sample_count=0,
+        duration_sec=5.0,
+    )
+    db_session.add(session_rec)
+    db_session.commit()
+
+    raw_batch_payload = {
+        "device_id": "HK-TEST",
+        "session_id": str(sess_id),
+        "label": "walk",
+        "sample_count": 94,
+        "readings": [{"timestamp": 1726224000.0 + (i * 0.053), "ax": 0.1, "ay": 0.9, "az": -0.1} for i in range(94)],
+    }
+
+    headers = {"X-HealthKicks-Ingest-Token": "secret-test-token"}
+    res = client.post("/api/v1/ingest/telemetry/raw", json=raw_batch_payload, headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ingested"
+    assert data["session_id"] == str(sess_id)
+    assert data["sample_count"] == 94
+
+    db_session.refresh(session_rec)
+    assert session_rec.sample_count == 94
+

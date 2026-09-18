@@ -2,11 +2,12 @@
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import ActivityEvent, Device, DeviceStatus, ProcessedMessage
+from app.db.models import ActivityEvent, Device, DeviceOwnership, DeviceStatus, ProcessedMessage, StudioSession, User
 from app.schemas.ingestion import DeviceStatusEvent, IngestionEvent
 
 
@@ -118,3 +119,59 @@ def ingest_device_status(
     session.commit()
     session.refresh(device)
     return device
+
+
+def ingest_raw_telemetry(
+    session: Session,
+    message: dict[str, Any],
+    headers: dict[str, Any] | None = None,
+) -> StudioSession | None:
+    """Ingest a raw IMU telemetry batch and update the StudioSession sample_count in Aurora DB."""
+    header, payload = _parts(message, headers)
+    device_id = str(payload.get("device_id") or header.get("device_id") or "")
+    session_id_raw = payload.get("session_id") or header.get("session_id")
+    if not session_id_raw:
+        return None
+
+    try:
+        sess_uuid = UUID(str(session_id_raw))
+    except (ValueError, TypeError):
+        return None
+
+    readings = payload.get("readings") or []
+    sample_count = int(payload.get("sample_count", len(readings)))
+
+    studio_session = session.query(StudioSession).filter_by(id=sess_uuid).first()
+    if studio_session is not None:
+        studio_session.sample_count = sample_count
+        if "label" in payload and payload["label"]:
+            studio_session.label = payload["label"]
+        session.commit()
+        session.refresh(studio_session)
+        return studio_session
+
+    # If session record does not exist yet in Aurora, create it
+    user_id = 1
+    if device_id:
+        ownership = session.query(DeviceOwnership).filter_by(device_id=device_id).first()
+        if ownership:
+            user_id = ownership.user_id
+        else:
+            first_user = session.query(User).first()
+            if first_user:
+                user_id = first_user.id
+
+    studio_session = StudioSession(
+        id=sess_uuid,
+        user_id=user_id,
+        device_id=device_id or "unknown",
+        label=str(payload.get("label", "unlabeled")),
+        sample_count=sample_count,
+        duration_sec=float(payload.get("duration_sec", 5.0)),
+        is_validated=False,
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(studio_session)
+    session.commit()
+    session.refresh(studio_session)
+    return studio_session

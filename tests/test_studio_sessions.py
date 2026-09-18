@@ -545,3 +545,45 @@ def test_patch_session_update_is_validated_via_payload(client, user_a, db_sessio
 
     db_session.refresh(s)
     assert s.is_validated is True
+
+
+def test_get_session_detail_returns_aurora_sample_count(client, user_a, db_session) -> None:
+    """GET /api/v1/studio/sessions/{session_id} directly returns Aurora metadata and sample_count."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(
+        id=sess_id,
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        sample_count=94,
+        duration_sec=5.0,
+        is_validated=True,
+    )
+    db_session.add(s)
+    db_session.commit()
+
+    res = client.get(f"/api/v1/studio/sessions/{sess_id}", headers=_auth_headers(user_a))
+    assert res.status_code == 200
+    data = res.json()
+    assert data["id"] == str(sess_id)
+    assert data["sample_count"] == 94
+    assert data["label"] == "walk"
+    assert data["is_validated"] is True
+
+
+def test_get_session_detail_forbidden_for_other_user(client, user_a, user_b, db_session) -> None:
+    """GET /api/v1/studio/sessions/{session_id} returns 403 for unauthorized users."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(
+        id=sess_id,
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        sample_count=94,
+    )
+    db_session.add(s)
+    db_session.commit()
+
+    res = client.get(f"/api/v1/studio/sessions/{sess_id}", headers=_auth_headers(user_b))
+    assert res.status_code == 403
+
