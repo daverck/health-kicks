@@ -24,3 +24,4 @@ class TelemetryIngestionService:
 
 
 __all__ = ["TelemetryIngestionService", "ingest_raw_telemetry"]
+

@@ -37,43 +37,6 @@ def _get_device(session: Session, device_id: str, seen_at: datetime) -> Device:
     return device
 
 
-def ingest_fall_event(
-    session: Session,
-    message: dict[str, Any],
-    headers: dict[str, Any] | None = None,
-) -> ActivityEvent | None:
-    """Normalize and persist an activity event, returning ``None`` for a duplicate msg_id."""
-    header, payload = _parts(message, headers)
-    device_id = str(header.get("device_id") or payload["device_id"])
-    seen_at = _timestamp(header.get("timestamp_utc", payload.get("timestamp_utc")))
-    msg_id = header.get("msg_id", payload.get("msg_id"))
-    if msg_id is not None:
-        if session.query(ProcessedMessage).filter_by(msg_id=str(msg_id)).first():
-            return None
-        session.add(ProcessedMessage(msg_id=str(msg_id)))
-    _get_device(session, device_id, seen_at)
-    event = ActivityEvent(
-        device_id=device_id,
-        event_type=payload.get("event_type", "fall"),
-        timestamp_utc=_timestamp(payload.get("timestamp_utc", header.get("timestamp_utc"))),
-        confidence_score=(
-            float(payload.get("confidence_score", payload.get("confidence")))
-            if payload.get("confidence_score", payload.get("confidence")) is not None
-            else None
-        ),
-    )
-    session.add(event)
-    try:
-        session.commit()
-    except IntegrityError:
-        session.rollback()
-        if msg_id is not None and session.query(ProcessedMessage).filter_by(msg_id=str(msg_id)).first():
-            return None
-        raise
-    session.refresh(event)
-    return event
-
-
 def ingest_event(session: Session, message: dict[str, Any]) -> ActivityEvent | None:
     """Validate and persist one AWS IoT Rule event with idempotent delivery."""
     contract = IngestionEvent.model_validate(message)
@@ -174,4 +137,4 @@ def ingest_raw_telemetry(
     session.add(studio_session)
     session.commit()
     session.refresh(studio_session)
-    return studio_session
+    return studio_session
