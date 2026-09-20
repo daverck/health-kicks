@@ -103,7 +103,7 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     if payload.get("aud") != settings.google_client_id:
         raise GoogleAuthError("Google token audience mismatch")
 
-    # Marge de tolérance de 10 secondes pour éviter l'erreur de décalage d'horloge
+    # 10-second clock skew tolerance leeway
     leeway = 10
     now = datetime.now(timezone.utc).timestamp()
     exp = payload.get("exp")

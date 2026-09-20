@@ -393,7 +393,7 @@ def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_ser
     db_session.add(s)
     db_session.commit()
 
-    # 1. Listing avec filtre ?label=idle
+    # 1. Listing with filter ?label=idle
     res_idle = client.get("/api/v1/studio/sessions?label=idle", headers=_auth_headers(user_a))
     assert res_idle.status_code == 200
     data_idle = res_idle.json()
@@ -401,12 +401,12 @@ def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_ser
     assert data_idle["items"][0]["id"] == str(sess_id)
     assert data_idle["items"][0]["label"] == "idle"
 
-    # 2. Listing avec filtre ?label=walk (ne doit pas inclure idle)
+    # 2. Listing with filter ?label=walk (must not include idle)
     res_walk = client.get("/api/v1/studio/sessions?label=walk", headers=_auth_headers(user_a))
     assert res_walk.status_code == 200
     assert res_walk.json()["total"] == 0
 
-    # 3. Modification du label vers 'stairs'
+    # 3. Relabel to 'stairs'
     res_patch = client.patch(
         f"/api/v1/studio/sessions/{sess_id}",
         json={"label": "stairs"},
@@ -415,7 +415,7 @@ def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_ser
     assert res_patch.status_code == 200
     assert res_patch.json()["label"] == "stairs"
 
-    # 4. Modification de retour vers 'idle'
+    # 4. Relabel back to 'idle'
     res_patch_idle = client.patch(
         f"/api/v1/studio/sessions/{sess_id}",
         json={"label": "idle"},
@@ -424,7 +424,7 @@ def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_ser
     assert res_patch_idle.status_code == 200
     assert res_patch_idle.json()["label"] == "idle"
 
-    # Vérification en base
+    # Database verification
     db_session.refresh(s)
     assert s.label == "idle"
 

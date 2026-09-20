@@ -68,7 +68,7 @@ def create_internal_router() -> APIRouter:
             else:
                 device.status = DeviceStatus.offline
                 logger.info("Device '%s' marked offline", device.device_id)
-                # Ne pas écraser last_seen_utc lors d'une déconnexion afin de conserver la date du dernier signal reçu
+                # Do not overwrite last_seen_utc on disconnect in order to preserve timestamp of last received heartbeat
 
             db.commit()
             db.refresh(device)

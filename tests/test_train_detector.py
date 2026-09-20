@@ -1,4 +1,4 @@
-"""Tests unitaires et d'intégration pour le script scripts/train_detector.py."""
+"""Unit and integration tests for scripts/train_detector.py."""
 
 from datetime import datetime, timezone
 import json
@@ -31,10 +31,10 @@ from scripts.train_detector import (
 
 
 # -----------------------------------------------------------------------------
-# Helpers communs aux tests
+# Common Test Helpers
 # -----------------------------------------------------------------------------
 def _make_session(session_id: str, device_id: str = "dev-01", label: str = "walk") -> dict:
-    """Crée un dictionnaire de session IMU minimal pour les tests."""
+    """Creates a minimal IMU session dictionary for tests."""
     return {
         "session_id": session_id,
         "device_id": device_id,
@@ -49,7 +49,7 @@ def _make_session(session_id: str, device_id: str = "dev-01", label: str = "walk
 
 
 def _make_db_mock(session_id: str, device_id: str, label: str, is_validated: bool = True) -> MagicMock:
-    """Crée un mock de session PostgreSQL (StudioSession)."""
+    """Creates a mock PostgreSQL session (StudioSession)."""
     m = MagicMock()
     m.id = session_id
     m.device_id = device_id
@@ -60,11 +60,11 @@ def _make_db_mock(session_id: str, device_id: str, label: str, is_validated: boo
 
 
 # -----------------------------------------------------------------------------
-# 1. Tests de compute_window_features
+# 1. compute_window_features Tests
 # -----------------------------------------------------------------------------
 def test_compute_window_features_keys_and_values():
-    """Vérifie que compute_window_features extrait l'ensemble des indicateurs biomécaniques."""
-    # Simulation d'un capteur stationnaire orienté sur l'axe Y
+    """Verifies that compute_window_features extracts all biomechanical features."""
+    # Simulation of a stationary sensor aligned on the Y axis
     n_samples = 50
     df = pd.DataFrame(
         {
@@ -108,11 +108,11 @@ def test_compute_window_features_keys_and_values():
 
 
 # -----------------------------------------------------------------------------
-# 2. Tests de build_dataset_from_sessions
+# 2. build_dataset_from_sessions Tests
 # -----------------------------------------------------------------------------
 def test_build_dataset_from_sessions_temporal_windowing():
-    """Vérifie le découpage temporel basé sur les timestamps en microsecondes."""
-    # 5 secondes à 50 Hz = 250 points (dt = 20_000 µs)
+    """Verifies temporal slicing based on microsecond timestamps."""
+    # 5 seconds at 50 Hz = 250 points (dt = 20_000 µs)
     base_us = 1_700_000_000_000_000
     readings = []
     for i in range(250):
@@ -137,8 +137,8 @@ def test_build_dataset_from_sessions_temporal_windowing():
         }
     ]
 
-    # Avec window=2.0s et step=0.5s sur 5.0s :
-    # Départs possibles : 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0 (7 fenêtres)
+    # With window=2.0s and step=0.5s over 5.0s:
+    # Possible starts: 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0 (7 windows)
     X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
 
     assert isinstance(X, pd.DataFrame)
@@ -149,7 +149,7 @@ def test_build_dataset_from_sessions_temporal_windowing():
 
 
 def test_build_dataset_from_sessions_fallback_no_timestamps():
-    """Vérifie le découpage de repli lorsque les timestamps ne sont pas renseignés."""
+    """Verifies fallback slicing when timestamps are missing."""
     readings = [
         {"ax": 0.1, "ay": 9.8, "az": 0.1, "gx": 0.0, "gy": 0.0, "gz": 0.0}
         for _ in range(100)
@@ -170,7 +170,7 @@ def test_build_dataset_from_sessions_fallback_no_timestamps():
 
 
 def test_build_dataset_from_sessions_short_session():
-    """Vérifie qu'une session courte avec >= 5 points produit au moins une fenêtre."""
+    """Verifies that a short session with >= 5 points produces at least one window."""
     readings = [
         {"ax": 0.1, "ay": 9.8, "az": 0.1, "gx": 0.0, "gy": 0.0, "gz": 0.0}
         for _ in range(8)
@@ -183,7 +183,7 @@ def test_build_dataset_from_sessions_short_session():
 
 
 def test_build_dataset_from_sessions_empty_or_invalid():
-    """Vérifie la robustesse face aux données manquantes ou invalides."""
+    """Verifies robustness against missing or invalid data."""
     sessions = [
         {"session_id": "sess-empty", "label": "walk", "readings": []},
         {"session_id": "sess-no-label", "readings": [{"ax": 1, "ay": 2}]},
@@ -195,10 +195,10 @@ def test_build_dataset_from_sessions_empty_or_invalid():
 
 
 # -----------------------------------------------------------------------------
-# 3. Tests de generate_synthetic_sessions
+# 3. generate_synthetic_sessions Tests
 # -----------------------------------------------------------------------------
 def test_generate_synthetic_sessions():
-    """Vérifie la cohérence du générateur de sessions synthétiques."""
+    """Verifies consistency of the synthetic session generator."""
     sessions = generate_synthetic_sessions(n_per_class=5)
     assert len(sessions) == 25  # 5 classes * 5
 
@@ -213,7 +213,7 @@ def test_generate_synthetic_sessions():
 
 
 def test_fall_and_benign_activity_helpers():
-    """Vérifie le classement correct des activités bénignes (dont idle) vs chutes critiques."""
+    """Verifies classification of benign (including idle) vs critical falls."""
     assert is_benign_activity("idle")
     assert not is_fall_activity("idle")
 
@@ -228,10 +228,10 @@ def test_fall_and_benign_activity_helpers():
 
 
 # -----------------------------------------------------------------------------
-# 4. Tests de save_session_npz / load_session_npz
+# 4. save_session_npz / load_session_npz Tests
 # -----------------------------------------------------------------------------
 def test_save_load_session_npz_roundtrip(tmp_path: Path):
-    """Vérifie que sauvegarder puis charger un .npz préserve toutes les données de la session."""
+    """Verifies that saving and loading .npz preserves all session data."""
     sess_id = str(uuid4())
     session = _make_session(sess_id, device_id="HK-1", label="fall_forward")
 
@@ -248,20 +248,20 @@ def test_save_load_session_npz_roundtrip(tmp_path: Path):
     assert loaded["sample_count"] == 3
     assert len(loaded["readings"]) == 3
 
-    # Vérification des valeurs IMU
+    # Verify IMU values
     for i, r in enumerate(loaded["readings"]):
         assert abs(r["gz"] - float(i)) < 1e-4
         assert abs(r["ay"] - 9.8) < 1e-3
 
 
 def test_load_session_npz_missing_file(tmp_path: Path):
-    """load_session_npz doit retourner None si le fichier n'existe pas."""
+    """load_session_npz must return None if file does not exist."""
     result = load_session_npz(tmp_path / "nonexistent.npz")
     assert result is None
 
 
 def test_save_session_npz_empty_readings(tmp_path: Path):
-    """save_session_npz doit gérer une session sans lectures (N=0) sans lever d'exception."""
+    """save_session_npz must handle a session with zero readings (N=0) without error."""
     sess_id = str(uuid4())
     session = {
         "session_id": sess_id,
@@ -282,10 +282,10 @@ def test_save_session_npz_empty_readings(tmp_path: Path):
 
 
 # -----------------------------------------------------------------------------
-# 5. Tests de migrate_json_to_npz
+# 5. migrate_json_to_npz Tests
 # -----------------------------------------------------------------------------
 def test_migrate_json_to_npz(tmp_path: Path):
-    """Vérifie la migration automatique d'un cache JSON monolithique vers des fichiers .npz."""
+    """Verifies automatic migration from monolithic JSON cache to .npz files."""
     sess_1_id = str(uuid4())
     sess_2_id = str(uuid4())
 
@@ -305,46 +305,46 @@ def test_migrate_json_to_npz(tmp_path: Path):
     migrated = migrate_json_to_npz(json_path, cache_dir)
     assert migrated == 2
 
-    # Les deux fichiers .npz doivent exister
+    # Both .npz files must exist
     assert (cache_dir / f"{sess_1_id}.npz").exists()
     assert (cache_dir / f"{sess_2_id}.npz").exists()
 
-    # Le JSON original doit avoir été renommé en .bak
+    # Original JSON must have been renamed to .bak
     assert (tmp_path / "sessions_cache.json.bak").exists()
     assert not json_path.exists()
 
-    # Intégrité des données après migration
+    # Data integrity after migration
     loaded = load_session_npz(cache_dir / f"{sess_1_id}.npz")
     assert loaded is not None
     assert loaded["label"] == "walk"
 
 
 def test_migrate_json_to_npz_missing_file(tmp_path: Path):
-    """migrate_json_to_npz doit retourner 0 si le JSON source est absent."""
+    """migrate_json_to_npz must return 0 if source JSON is missing."""
     cache_dir = tmp_path / "sessions"
     result = migrate_json_to_npz(tmp_path / "nonexistent.json", cache_dir)
     assert result == 0
 
 
 # -----------------------------------------------------------------------------
-# 6. Tests de sync_sessions_cache (Cache local .npz incrémental)
+# 6. sync_sessions_cache Tests (Incremental local .npz cache)
 # -----------------------------------------------------------------------------
 def test_sync_sessions_cache_synthetic():
-    """Le mode synthetic doit retourner directement des sessions générées sans appeler DB/AWS."""
+    """Synthetic mode must return generated sessions directly without calling DB/AWS."""
     sessions = sync_sessions_cache(cache_dir=Path("dummy_dir"), synthetic=True)
     assert len(sessions) > 0
 
 
 def test_sync_sessions_cache_delta_logic(tmp_path: Path):
-    """Vérifie la stratégie de delta sync : seules les nouvelles sessions sont téléchargées."""
+    """Verifies delta sync strategy: only new sessions are downloaded."""
     cache_dir = tmp_path / "sessions"
     sess_1_id = str(uuid4())
     sess_2_id = str(uuid4())
 
-    # 1. Cache initial avec sess_1 pré-enregistrée en .npz
+    # 1. Initial cache with sess_1 pre-saved as .npz
     save_session_npz(cache_dir, _make_session(sess_1_id, label="walk"))
 
-    # 2. PostgreSQL retourne sess_1 et sess_2
+    # 2. PostgreSQL returns sess_1 and sess_2
     mock_s1 = _make_db_mock(sess_1_id, "dev-01", "walk")
     mock_s2 = _make_db_mock(sess_2_id, "dev-02", "fall_forward")
 
@@ -372,7 +372,7 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
 
         result_sessions = sync_sessions_cache(cache_dir, force_refresh=False)
 
-    # Seul sess_2 devait être téléchargé depuis DynamoDB
+    # Only sess_2 should be downloaded from DynamoDB
     mock_telemetry_svc.get_session_readings.assert_called_once_with(
         device_id="dev-02",
         session_id=sess_2_id,
@@ -382,24 +382,24 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
     session_ids = {s["session_id"] for s in result_sessions}
     assert session_ids == {sess_1_id, sess_2_id}
 
-    # sess_2 doit avoir été sauvegardé en .npz sur disque
+    # sess_2 must have been saved as .npz on disk
     assert (cache_dir / f"{sess_2_id}.npz").exists()
 
 
 def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
-    """Vérifie que les sessions supprimées de PostgreSQL ont leur .npz supprimé du disque."""
+    """Verifies that sessions deleted from PostgreSQL have their .npz deleted from disk."""
     cache_dir = tmp_path / "sessions"
     sess_1_id = str(uuid4())
     sess_2_deleted_id = str(uuid4())
     sess_3_id = str(uuid4())
 
-    # Cache initial avec 3 sessions
+    # Initial cache with 3 sessions
     for sid, label in [(sess_1_id, "walk"), (sess_2_deleted_id, "fall_forward"), (sess_3_id, "idle")]:
         save_session_npz(cache_dir, _make_session(sid, label=label))
 
     assert (cache_dir / f"{sess_2_deleted_id}.npz").exists()
 
-    # PostgreSQL ne retourne plus que sess_1 et sess_3 (sess_2 supprimé)
+    # PostgreSQL only returns sess_1 and sess_3 (sess_2 deleted)
     mock_s1 = _make_db_mock(sess_1_id, "dev-01", "walk")
     mock_s3 = _make_db_mock(sess_3_id, "dev-02", "idle")
 
@@ -411,13 +411,13 @@ def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
 
         result_sessions = sync_sessions_cache(cache_dir, force_refresh=False)
 
-    # Résultat en mémoire : sess_1 et sess_3 uniquement
+    # In-memory result: sess_1 and sess_3 only
     assert len(result_sessions) == 2
     res_ids = {s["session_id"] for s in result_sessions}
     assert res_ids == {sess_1_id, sess_3_id}
     assert sess_2_deleted_id not in res_ids
 
-    # Vérification sur disque : le .npz de sess_2 doit avoir été supprimé
+    # On-disk check: sess_2 .npz must have been removed
     assert not (cache_dir / f"{sess_2_deleted_id}.npz").exists()
     assert (cache_dir / f"{sess_1_id}.npz").exists()
     assert (cache_dir / f"{sess_3_id}.npz").exists()
@@ -425,7 +425,7 @@ def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
 
 
 def test_sync_sessions_cache_batch_download(tmp_path: Path):
-    """Vérifie que le téléchargement batch concurrent récupère plusieurs sessions en .npz."""
+    """Verifies that concurrent batch download fetches multiple sessions as .npz."""
     cache_dir = tmp_path / "sessions"
 
     db_mocks = [_make_db_mock(f"sess-{i}", f"dev-{i}", "walk") for i in range(4)]
@@ -456,14 +456,14 @@ def test_sync_sessions_cache_batch_download(tmp_path: Path):
     assert len(result_sessions) == 4
     assert mock_telemetry_svc.get_session_readings.call_count == 4
 
-    # Tous les fichiers .npz doivent être présents sur disque
+    # All .npz files must be present on disk
     assert cache_dir.exists()
     npz_files = list(cache_dir.glob("*.npz"))
     assert len(npz_files) == 4
 
 
 def test_sync_sessions_cache_migrates_old_json(tmp_path: Path):
-    """Vérifie que sync_sessions_cache migre automatiquement un ancien cache JSON."""
+    """Verifies that sync_sessions_cache automatically migrates a legacy JSON cache."""
     cache_dir = tmp_path / "sessions"
     legacy_json = tmp_path / "sessions_cache.json"
 
@@ -475,7 +475,7 @@ def test_sync_sessions_cache_migrates_old_json(tmp_path: Path):
     with open(legacy_json, "w", encoding="utf-8") as f:
         json.dump(legacy_data, f)
 
-    # PostgreSQL retourne la même session (déjà migrée)
+    # PostgreSQL returns the same session (already migrated)
     mock_s = _make_db_mock(sess_id, "dev-01", "idle")
 
     with patch("app.db.database.SessionLocal") as mock_session_maker:
@@ -490,15 +490,15 @@ def test_sync_sessions_cache_migrates_old_json(tmp_path: Path):
     assert result_sessions[0]["session_id"] == sess_id
     assert result_sessions[0]["label"] == "idle"
 
-    # Le fichier .npz doit avoir été créé
+    # .npz file must have been created
     assert (cache_dir / f"{sess_id}.npz").exists()
 
-    # Le JSON original doit avoir été archivé en .bak
+    # Original JSON must have been archived to .bak
     assert (tmp_path / "sessions_cache.json.bak").exists()
 
 
 def test_sync_sessions_cache_ignores_unvalidated_sessions(tmp_path: Path):
-    """Vérifie que seules les sessions is_validated=True sont interrogées depuis PostgreSQL."""
+    """Verifies that only is_validated=True sessions are queried from PostgreSQL."""
     cache_dir = tmp_path / "sessions"
     sess_valid_id = str(uuid4())
     sess_unvalid_id = str(uuid4())
@@ -522,7 +522,7 @@ def test_sync_sessions_cache_ignores_unvalidated_sessions(tmp_path: Path):
     with patch("app.db.database.SessionLocal") as mock_session_maker, \
          patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
         mock_db = MagicMock()
-        # Le filtre is_validated.is_(True) ne retourne que la session validée
+        # Filter is_validated.is_(True) returns only validated session
         mock_db.query.return_value.filter.return_value.all.return_value = [mock_valid]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -535,10 +535,10 @@ def test_sync_sessions_cache_ignores_unvalidated_sessions(tmp_path: Path):
 
 
 # -----------------------------------------------------------------------------
-# 7. Tests de train_and_benchmark & Exportation joblib
+# 7. train_and_benchmark & joblib Export Tests
 # -----------------------------------------------------------------------------
 def test_train_and_benchmark_synthetic(tmp_path: Path):
-    """Vérifie l'entraînement complet sur un mini-dataset et la sérialisation joblib."""
+    """Verifies complete training on a mini-dataset and joblib serialization."""
     sessions = generate_synthetic_sessions(n_per_class=6)
     X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=1.0)
 
@@ -551,7 +551,7 @@ def test_train_and_benchmark_synthetic(tmp_path: Path):
         window_size_sec=2.0,
     )
 
-    # Vérification du dictionnaire de package
+    # Check package dictionary
     assert "model_name" in package
     assert "estimator" in package
     assert "feature_names" in package
@@ -564,13 +564,13 @@ def test_train_and_benchmark_synthetic(tmp_path: Path):
     assert "metrics" in package
     assert package["window_size_sec"] == 2.0
 
-    # Vérification du fichier sur disque
+    # Check file on disk
     assert model_out.exists()
     loaded_pkg = joblib.load(model_out)
     assert loaded_pkg["model_name"] == package["model_name"]
     assert "idle" in loaded_pkg["benign_classes"]
 
-    # Test d'inférence avec l'estimateur rechargé
+    # Test inference with reloaded estimator
     preds = loaded_pkg["estimator"].predict(X.iloc[:5])
     assert len(preds) == 5
     for p in preds:
@@ -578,10 +578,10 @@ def test_train_and_benchmark_synthetic(tmp_path: Path):
 
 
 # -----------------------------------------------------------------------------
-# 8. Tests CLI
+# 8. CLI Tests
 # -----------------------------------------------------------------------------
 def test_parse_args_defaults():
-    """Vérifie les valeurs par défaut des options de la ligne de commande."""
+    """Verifies default values for command line options."""
     args = parse_args([])
     assert args.cache_dir == "scripts/data/sessions"
     assert args.output_model == "scripts/models/activity_classifier.joblib"
@@ -593,13 +593,13 @@ def test_parse_args_defaults():
 
 
 def test_parse_args_custom_batch_size():
-    """Vérifie la personnalisation de la taille de lot concurrent."""
+    """Verifies customization of concurrent batch size."""
     args = parse_args(["--batch-size", "16"])
     assert args.batch_size == 16
 
 
 def test_main_synthetic_execution(tmp_path: Path):
-    """Vérifie l'exécution complète du CLI en mode synthétique avec le répertoire .npz."""
+    """Verifies full CLI execution in synthetic mode with .npz directory."""
     cache_dir = tmp_path / "sessions"
     model_path = tmp_path / "model.joblib"
 
