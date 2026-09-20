@@ -29,37 +29,30 @@ postgresql+psycopg2://<user>:<password>@<endpoint>:5432/healthkicks?sslmode=requ
 
 ## 3. Running migrations against RDS
 
-The application image ships with Alembic and all migrations, so you can apply them from your machine without installing anything locally:
+The application image ships with Alembic and all migrations, so you can apply them directly:
 
 ```powershell
-# PowerShell
-.\scripts\run_migrations.ps1 upgrade -Url "postgresql+psycopg2://user:pass@healthkicks.xxxx.eu-north-1.rds.amazonaws.com:5432/healthkicks?sslmode=require"
-.\scripts\run_migrations.ps1 current -Url "..."
-.\scripts\run_migrations.ps1 downgrade -1 -Url "..."
+# Using uv locally with DATABASE_URL
+$env:DATABASE_URL="postgresql+psycopg2://user:pass@healthkicks.xxxx.eu-north-1.rds.amazonaws.com:5432/healthkicks?sslmode=require"
+uv run alembic upgrade head
 ```
 
 ```bash
 # Bash
-DATABASE_URL="postgresql+psycopg2://user:pass@...?sslmode=require" ./scripts/run_migrations.sh upgrade
+DATABASE_URL="postgresql+psycopg2://user:pass@healthkicks.xxxx.eu-north-1.rds.amazonaws.com:5432/healthkicks?sslmode=require" uv run alembic upgrade head
 ```
-
-Both scripts:
-
-- default to the `migrate` compose service (runs inside the same image that ships to production),
-- support `-Service local` / `MIGRATION_SERVICE=local` to use the host `uv` venv instead of Docker,
-- refuse to hit a remote Postgres without TLS (auto-append `sslmode=require`).
 
 **Network access:** your machine needs to reach RDS on 5432. Either whitelist your IP in the RDS security group temporarily, or tunnel via SSM:
 
 ```powershell
 aws ssm start-session --target <bastion-instance-id> --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["healthkicks.xxxx.eu-north-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["5432"]}'
-# then point the script at localhost:5432
+# then point the migration at localhost:5432
 ```
 
 **Release flow (recommended):**
 
 1. Build & push image → `docker build -t healthkicks-api . && docker tag ... && docker push ...`
-2. Run `scripts/run_migrations.ps1 upgrade` against RDS (migrations are backward compatible).
+2. Run `alembic upgrade head` against RDS (migrations are backward compatible).
 3. Deploy the new image to App Runner (`aws apprunner start-deployment`).
 
 This keeps migrations ahead of the code, so the old revision keeps working during rollout.
@@ -69,8 +62,8 @@ This keeps migrations ahead of the code, so the old revision keeps working durin
 After the first user signs in via Google SSO, promote them:
 
 ```powershell
-# From your machine, using the migrate service as a DB-capable container:
-.\scripts\run_migrations.ps1 -Command "upgrade" # (ensure migrations are applied first)
+# Apply migrations first:
+uv run alembic upgrade head
 
 docker compose run --rm -e DATABASE_URL="<RDS url>" migrate python -m app.cli promote-admin --first
 # or by email:
