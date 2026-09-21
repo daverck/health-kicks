@@ -6,6 +6,10 @@ cache to minimize network calls, extracts biomechanical and temporal features
 from the IMU, benchmarks several Edge-adapted classifiers via cross-validation
 (Stratified 5-Fold), and serializes the champion model as a joblib artifact.
 
+By default, candidate models are strictly constrained to m2cgen-compatible
+estimators (RandomForest, ExtraTrees, LogisticRegression) with depths tailored
+for ESP32-S3 Flash memory footprint.
+
 Prerequisites:
     1. Data science dependencies are isolated in the optional 'ml' group:
        $ uv sync --group ml
@@ -15,8 +19,11 @@ Prerequisites:
        Note: '--synthetic' flag allows skipping AWS for offline training.
 
 Usage examples:
-    # Standard training with incremental local cache (batch download):
+    # Standard training with m2cgen-compatible models by default:
     $ uv run python -m scripts.train_detector
+
+    # Include non-C transpilable models (e.g., HistGradientBoosting) for research:
+    $ uv run python -m scripts.train_detector --include-unsupported-c
 
     # Batch download with custom concurrency (e.g., 12 workers):
     $ uv run python -m scripts.train_detector --batch-size 12
@@ -26,12 +33,6 @@ Usage examples:
 
     # Development / offline demo mode with synthetic dataset (no AWS access needed):
     $ uv run python -m scripts.train_detector --synthetic
-
-    # Custom sliding windows and output paths:
-    $ uv run python -m scripts.train_detector --window-size 2.0 --window-step 0.5 --output-model scripts/models/activity_classifier.joblib
-
-    # Specify custom .npz cache directory:
-    $ uv run python -m scripts.train_detector --cache-dir scripts/data/sessions
 """
 from pathlib import Path
 from dotenv import load_dotenv
@@ -128,11 +129,7 @@ def build_dataset_from_sessions(
     window_size_sec: float = 2.0,
     step_sec: float = 0.5,
 ) -> tuple[pd.DataFrame, np.ndarray]:
-    """Splits each session into sliding windows and extracts features.
-
-    Handles time-based windowing using sample timestamps (DynamoDB microseconds
-    or milliseconds), with fallback to sample count if timestamps are unavailable.
-    """
+    """Splits each session into sliding windows and extracts features."""
     X_rows: list[dict[str, float]] = []
     y_labels: list[str] = []
 
@@ -161,10 +158,9 @@ def build_dataset_from_sessions(
             ts_vals = df[ts_col].to_numpy(dtype=float)
             delta_ts = ts_vals[-1] - ts_vals[0]
 
-            # Timestamp scale detection (Unix epoch or relative timestamp)
             t0 = ts_vals[0]
             if t0 > 1e14 or delta_ts > 100_000:
-                scale = 1e6  # Microseconds (standard DynamoDB format)
+                scale = 1e6  # Microseconds
             elif t0 > 1e11 or delta_ts > 100:
                 scale = 1e3  # Milliseconds
             elif delta_ts > 0:
@@ -177,7 +173,6 @@ def build_dataset_from_sessions(
         total_samples = len(df)
         windows_extracted = 0
 
-        # Strict temporal windowing if timestamps are valid
         if scale and scale > 0 and (delta_ts / scale) >= window_size_sec:
             t_sec = (ts_vals - ts_vals[0]) / scale
             max_t = t_sec[-1]
@@ -193,7 +188,6 @@ def build_dataset_from_sessions(
                     windows_extracted += 1
                 curr_t += step_sec
         else:
-            # Fallback to sample count slicing based on estimated sample rate
             duration_hint = float(session.get("duration_sec", 5.0) or 5.0)
             samples_per_sec = max(total_samples / max(duration_hint, 0.5), 10.0)
             window_samples = max(int(window_size_sec * samples_per_sec), 5)
@@ -206,7 +200,6 @@ def build_dataset_from_sessions(
                 y_labels.append(label)
                 windows_extracted += 1
 
-        # If session was short but contains enough points, extract at least 1 window
         if windows_extracted == 0 and total_samples >= 5:
             feat = compute_window_features(df)
             X_rows.append(feat)
@@ -221,39 +214,15 @@ def build_dataset_from_sessions(
 # -----------------------------------------------------------------------------
 # 2. INCREMENTAL LOCAL CACHE — .NPZ STORAGE PER SESSION
 # -----------------------------------------------------------------------------
-# Each session is serialized into its own compressed NumPy file:
-#   <cache_dir>/<session_id>.npz
-# This format is ~10x more compact than a monolithic JSON file and enables
-# atomic operations (add, update, delete) without rewriting the full dataset.
-#
-# Content of each .npz file:
-#   - signals    : ndarray float32 (N, 6) — columns [ax, ay, az, gx, gy, gz]
-#   - timestamps : ndarray int64   (N,)   — timestamps in microseconds
-#   - session_id : str   — unique session UUID
-#   - device_id  : str   — device identifier (e.g., "HK-1")
-#   - label      : str   — activity label (e.g., "walk", "idle", "fall_forward")
-#   - duration_sec : float — approximate duration in seconds
-#   - sample_count : int   — number of samples N
-# -----------------------------------------------------------------------------
-
 _SIGNAL_COLS = ["ax", "ay", "az", "gx", "gy", "gz"]
 
 
 def save_session_npz(cache_dir: Path, session_dict: dict[str, Any]) -> Path:
-    """Serializes an IMU session into a compressed NumPy file (.npz) in `cache_dir`.
-
-    `session_dict` is expected in internal format:
-      { "session_id", "device_id", "label", "duration_sec", "sample_count", "readings" }
-    where "readings" is a list of dicts with keys "ax", "ay", "az", "gx", "gy", "gz"
-    and optionally "timestamp".
-
-    Returns the path to the created or updated file.
-    """
+    """Serializes an IMU session into a compressed NumPy file (.npz)."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     sess_id = session_dict["session_id"]
     readings = session_dict.get("readings", [])
 
-    # Extract IMU columns as NumPy arrays
     n = len(readings)
     signals = np.zeros((n, 6), dtype=np.float32)
     timestamps = np.zeros(n, dtype=np.int64)
@@ -281,21 +250,15 @@ def save_session_npz(cache_dir: Path, session_dict: dict[str, Any]) -> Path:
 
 
 def load_session_npz(filepath: Path) -> dict[str, Any] | None:
-    """Loads an IMU session .npz file and converts it into an internal dictionary.
-
-    Returns `None` if the file is missing or corrupted.
-    The returned dictionary is compatible with `build_dataset_from_sessions()`:
-      { "session_id", "device_id", "label", "duration_sec", "sample_count", "readings" }
-    """
+    """Loads an IMU session .npz file and converts it into an internal dictionary."""
     if not filepath.exists():
         return None
     try:
         data = np.load(filepath, allow_pickle=False)
-        signals: np.ndarray = data["signals"]   # (N, 6) float32
-        timestamps: np.ndarray = data["timestamps"]  # (N,) int64
+        signals: np.ndarray = data["signals"]
+        timestamps: np.ndarray = data["timestamps"]
         n = len(timestamps)
 
-        # Reconstruct readings list for compatibility with build_dataset_from_sessions
         readings = []
         for i in range(n):
             readings.append({
@@ -322,12 +285,7 @@ def load_session_npz(filepath: Path) -> dict[str, Any] | None:
 
 
 def migrate_json_to_npz(json_path: Path, cache_dir: Path) -> int:
-    """Migrates legacy monolithic JSON cache to per-session .npz files.
-
-    Reads `json_path` one final time, writes each session to
-    `cache_dir/<session_id>.npz`, then archives the JSON by renaming to .bak.
-    Returns the count of successfully migrated sessions.
-    """
+    """Migrates legacy monolithic JSON cache to per-session .npz files."""
     if not json_path.exists():
         return 0
 
@@ -365,17 +323,12 @@ def migrate_json_to_npz(json_path: Path, cache_dir: Path) -> int:
         try:
             json_path.rename(bak_path)
             logger.info(
-                "Migration completed: %d session(s) converted to .npz. "
-                "Old JSON archived under: %s",
+                "Migration completed: %d session(s) converted to .npz. Old JSON archived under: %s",
                 migrated,
                 bak_path,
             )
         except Exception:
-            logger.info(
-                "Migration completed: %d session(s) converted to .npz. "
-                "(Unable to rename old JSON to .bak)",
-                migrated,
-            )
+            logger.info("Migration completed: %d session(s) converted to .npz.", migrated)
 
     return migrated
 
@@ -384,7 +337,7 @@ def _fetch_single_session(
     sess: Any,
     telemetry_service: Any,
 ) -> tuple[str, dict[str, Any] | None, Exception | None]:
-    """Downloads IMU frames of a session from DynamoDB (executed in a worker thread)."""
+    """Downloads IMU frames of a session from DynamoDB."""
     sess_id = str(sess.id)
     try:
         readings_resp = telemetry_service.get_session_readings(
@@ -424,28 +377,16 @@ def sync_sessions_cache(
     synthetic: bool = False,
     batch_size: int = 8,
 ) -> list[dict[str, Any]]:
-    """Synchronizes local .npz cache with PostgreSQL and DynamoDB incrementally.
-
-    1. Scans <session_id>.npz files in `cache_dir`.
-    2. If `cache_dir` is empty and legacy `sessions_cache.json` exists in parent dir,
-       migrates sessions to .npz format automatically.
-    3. Queries PostgreSQL to identify new, updated, or deleted sessions.
-    4. Purges orphaned .npz files (sessions removed from PostgreSQL).
-    5. Updates session label if changed in PostgreSQL.
-    6. Batch downloads missing DynamoDB frames concurrently and saves each session
-       individually on receipt.
-    """
+    """Synchronizes local .npz cache with PostgreSQL and DynamoDB incrementally."""
     if synthetic:
         logger.info("Synthetic mode enabled: generating artificial dataset.")
         return generate_synthetic_sessions()
 
-    # --- 1. Load existing .npz cache -----------------------------------------
     cached_sessions: dict[str, dict[str, Any]] = {}
 
     if not force_refresh:
         npz_files = list(cache_dir.glob("*.npz")) if cache_dir.exists() else []
 
-        # Automatic migration from legacy monolithic JSON
         legacy_json = cache_dir.parent / "sessions_cache.json"
         if not npz_files and legacy_json.exists():
             logger.info(
@@ -468,7 +409,6 @@ def sync_sessions_cache(
                 cache_dir,
             )
 
-    # --- 2. PostgreSQL connection --------------------------------------------
     db_sessions = []
     try:
         from app.db.database import SessionLocal
@@ -480,31 +420,21 @@ def sync_sessions_cache(
     except Exception as db_err:
         err_msg = str(db_err)
         if isinstance(db_err, UnicodeDecodeError) or "codec can't decode byte" in err_msg:
-            logger.warning(
-                "PostgreSQL connection failed: authentication error on local server. "
-                "Check DATABASE_URL in your .env file or start PostgreSQL Docker container."
-            )
+            logger.warning("PostgreSQL connection failed: authentication error on local server.")
         else:
             logger.warning("PostgreSQL connection failed: %s", db_err)
         if cached_sessions:
             logger.info("Exclusively using %d sessions from local cache.", len(cached_sessions))
             return list(cached_sessions.values())
         logger.error("No sessions in cache and database unreachable.")
-        logger.info("To test training without database access, run with: --synthetic")
         return []
 
-    if not db_sessions:
-        logger.warning("Aucune session trouvée dans la base PostgreSQL.")
-        if cached_sessions:
-            return list(cached_sessions.values())
     if not db_sessions:
         logger.warning("No sessions found in PostgreSQL database.")
         if cached_sessions:
             return list(cached_sessions.values())
-        logger.info("To generate an example training dataset, use: --synthetic")
         return []
 
-    # --- 3. Purge deleted sessions from PostgreSQL ---------------------------
     active_db_session_ids = {str(sess.id).lower() for sess in db_sessions}
     deleted_session_ids = [
         sess_id
@@ -513,9 +443,8 @@ def sync_sessions_cache(
     ]
     if deleted_session_ids:
         logger.info(
-            "Purging local dataset: %d session(s) deleted from PostgreSQL: %s",
+            "Purging local dataset: %d session(s) deleted from PostgreSQL",
             len(deleted_session_ids),
-            deleted_session_ids,
         )
         for sess_id in deleted_session_ids:
             npz_file = cache_dir / f"{sess_id}.npz"
@@ -524,24 +453,19 @@ def sync_sessions_cache(
             except Exception as del_err:
                 logger.warning("Unable to delete %s: %s", npz_file, del_err)
             del cached_sessions[sess_id]
-        logger.info("Purge complete: %d .npz file(s) deleted.", len(deleted_session_ids))
 
-    # --- 4. Detect sessions to download or update ----------------------------
     sessions_to_download = []
     labels_updated = 0
     for sess in db_sessions:
         sess_id = str(sess.id)
         if not force_refresh and sess_id in cached_sessions:
             if cached_sessions[sess_id].get("label") != sess.label:
-                # Update label: rewrite only the impacted .npz file
                 cached_sessions[sess_id]["label"] = sess.label
                 try:
                     save_session_npz(cache_dir, cached_sessions[sess_id])
                     labels_updated += 1
                 except Exception as write_err:
-                    logger.warning(
-                        "Unable to update .npz label for %s: %s", sess_id, write_err
-                    )
+                    logger.warning("Unable to update .npz label for %s: %s", sess_id, write_err)
         else:
             sessions_to_download.append(sess)
 
@@ -551,7 +475,6 @@ def sync_sessions_cache(
             logger.info("Labels updated for %d session(s).", labels_updated)
         return list(cached_sessions.values())
 
-    # --- 5. Batch DynamoDB download ------------------------------------------
     try:
         from app.services.telemetry_service import TelemetryService
 
@@ -608,50 +531,25 @@ def sync_sessions_cache(
                         or "UnrecognizedClientException" in exc_str
                         or "AccessDenied" in exc_str
                     ):
-                        logger.error(
-                            "\n" + "=" * 70 + "\n"
-                            "⚠️  AWS AUTHENTICATION REQUIRED FOR DYNAMODB\n"
-                            "AWS credentials missing, invalid or expired.\n"
-                            "To use real DynamoDB sessions, log in via AWS CLI:\n"
-                            "    $ aws sso login    (or 'aws login' / 'aws configure')\n\n"
-                            "Tip: for offline training without AWS, run:\n"
-                            "    $ uv run python -m scripts.train_detector --synthetic\n"
-                            + "=" * 70
-                        )
+                        logger.error("AWS credentials missing, invalid or expired.")
                         aws_auth_error_notified = True
-                    logger.error(
-                        "DynamoDB error for session %s (device: %s): %s",
-                        sess_id,
-                        sess_ref.device_id,
-                        exc,
-                    )
+                    logger.error("DynamoDB error for session %s: %s", sess_id, exc)
                 elif session_dict is not None:
-                    # Individual atomic save upon receipt — no full dataset rewrite
                     try:
                         save_session_npz(cache_dir, session_dict)
                         cached_sessions[sess_id] = session_dict
                         downloaded_count += 1
                     except Exception as write_err:
-                        logger.error(
-                            "Unable to save session %s to .npz: %s", sess_id, write_err
-                        )
-                else:
-                    logger.warning(
-                        "No IMU frames in DynamoDB for session %s (device: %s)",
-                        sess_id,
-                        sess_ref.device_id,
-                    )
+                        logger.error("Unable to save session %s to .npz: %s", sess_id, write_err)
 
     logger.info(
-        "Batch download complete: %d/%d session(s) saved to %s (%d total sessions in cache)",
+        "Batch download complete: %d/%d session(s) saved (%d total in cache)",
         downloaded_count,
         total_to_download,
-        cache_dir,
         len(cached_sessions),
     )
 
     return list(cached_sessions.values())
-
 
 
 def is_fall_activity(label: str) -> bool:
@@ -660,7 +558,7 @@ def is_fall_activity(label: str) -> bool:
 
 
 def is_benign_activity(label: str) -> bool:
-    """Returns True if label corresponds to normal activity or resting ('idle', 'walk', etc.)."""
+    """Returns True if label corresponds to normal activity or resting."""
     return not is_fall_activity(label)
 
 
@@ -668,19 +566,10 @@ def is_benign_activity(label: str) -> bool:
 # 3. SYNTHETIC SESSION GENERATOR (Tests & Demo)
 # -----------------------------------------------------------------------------
 def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
-    """Generates a synthetic IMU biomechanical dataset with typical physical signatures.
-
-    Simulated classes:
-    - 'walk': harmonic oscillations at 1.8 Hz, magnitude ~9.8 m/s² ± 2.5 m/s².
-    - 'idle': resting state / motionless (static 1g gravity ~9.8 m/s², minimal noise).
-    - 'fall_forward': free-fall phase (norm close to 0), impact peak (> 25 m/s²),
-      strong angular velocity (> 6 rad/s).
-    - 'stairs': wider, asymmetrical rhythmic steps.
-    - 'stumble_recover': sudden jerk followed by stabilization without critical impact peak.
-    """
+    """Generates a synthetic IMU biomechanical dataset."""
     np.random.seed(42)
     sessions: list[dict[str, Any]] = []
-    sampling_freq = 50.0  # 50 Hz
+    sampling_freq = 50.0
     duration = 5.0
     n_points = int(duration * sampling_freq)
     t = np.linspace(0, duration, n_points)
@@ -701,7 +590,6 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
                 gz = 0.4 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
 
             elif label == "idle":
-                # Stationary / resting state (static 1g gravity on Y axis, zero net dynamic accel/gyro)
                 ax = np.random.normal(0, 0.04, n_points)
                 ay = 9.8 + np.random.normal(0, 0.04, n_points)
                 az = np.random.normal(0, 0.04, n_points)
@@ -710,7 +598,6 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
                 gz = np.random.normal(0, 0.01, n_points)
 
             elif label == "fall_forward":
-                # Fall occurring around t = 2.5s
                 fall_start = int(2.2 * sampling_freq)
                 impact_idx = int(2.6 * sampling_freq)
                 rest_idx = int(3.0 * sampling_freq)
@@ -722,17 +609,14 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
                 gy = np.random.normal(0, 0.1, n_points)
                 gz = np.random.normal(0, 0.1, n_points)
 
-                # Free-fall
                 ay[fall_start:impact_idx] *= 0.1
                 ax[fall_start:impact_idx] *= 0.1
                 az[fall_start:impact_idx] *= 0.1
 
-                # Impact peak
                 ay[impact_idx : impact_idx + 4] = 28.0 + np.random.normal(0, 2.0, 4)
                 ax[impact_idx : impact_idx + 4] = 15.0 + np.random.normal(0, 1.5, 4)
                 gx[impact_idx - 5 : impact_idx + 5] = 7.5 + np.random.normal(0, 0.5, 10)
 
-                # Post-fall resting on ground
                 ay[rest_idx:] = 0.2 + np.random.normal(0, 0.05, n_points - rest_idx)
                 az[rest_idx:] = 9.7 + np.random.normal(0, 0.05, n_points - rest_idx)
                 gx[rest_idx:] = np.random.normal(0, 0.02, n_points - rest_idx)
@@ -745,7 +629,7 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
                 gy = 0.3 * np.sin(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.1, n_points)
                 gz = 0.5 * np.cos(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.1, n_points)
 
-            else:  # stumble_recover
+            else:
                 ax = 0.8 * np.sin(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.2, n_points)
                 ay = 9.8 + 2.0 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.3, n_points)
                 az = 0.5 * np.sin(2 * np.pi * 1.8 * t + 0.5) + np.random.normal(0, 0.2, n_points)
@@ -753,7 +637,6 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
                 gy = 0.2 * np.sin(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
                 gz = 0.4 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
 
-                # Stumble jerk at t=2.0s
                 jerk_idx = int(2.0 * sampling_freq)
                 ay[jerk_idx : jerk_idx + 6] = 16.0 + np.random.normal(0, 1.0, 6)
                 gx[jerk_idx : jerk_idx + 6] = 3.5 + np.random.normal(0, 0.5, 6)
@@ -793,11 +676,12 @@ def train_and_benchmark(
     y: np.ndarray,
     output_model_path: str = "scripts/models/activity_classifier.joblib",
     window_size_sec: float = 2.0,
+    include_unsupported_c: bool = False,
 ) -> dict[str, Any]:
-    """Compares several Edge-adapted ML classifiers using 5-Fold Stratified CV,
+    """Compares candidate classifiers using 5-Fold Stratified CV.
 
-    selects best model based on macro F1-score, trains it on 100% of data,
-    and exports the artifact as a joblib file.
+    By default, only m2cgen-compatible models configured for ESP32 constraints
+    are evaluated. If include_unsupported_c is True, HistGradientBoosting is added.
     """
     if len(X) == 0 or len(y) == 0:
         raise ValueError("Window dataset is empty. Cannot start training.")
@@ -807,6 +691,7 @@ def train_and_benchmark(
     print("=" * 68)
     print(f"Total extracted windows : {len(X)}")
     print(f"Matrix X dimensions     : {X.shape[0]} rows x {X.shape[1]} features")
+    print(f"Target profile          : {'RESEARCH (All Models)' if include_unsupported_c else 'EDGE EMBEDDED (m2cgen C compatible)'}")
     print("Class distribution :")
     for lbl, count in pd.Series(y).value_counts().items():
         pct = (count / len(y)) * 100
@@ -814,16 +699,16 @@ def train_and_benchmark(
         print(f"  * {lbl:<18} : {count:4d} windows ({pct:5.1f} %) [{cat_tag}]")
     print("=" * 68 + "\n")
 
-    # Edge candidate classifier definitions
-    models = {
-        "RandomForest": RandomForestClassifier(
-            n_estimators=100, max_depth=8, random_state=42, n_jobs=-1
+    # Base candidate models: 100% compatible m2cgen & optimized for ESP32 flash memory
+    models: dict[str, Any] = {
+        "RandomForest_Light": RandomForestClassifier(
+            n_estimators=25, max_depth=6, random_state=42, n_jobs=-1
         ),
-        "ExtraTrees": ExtraTreesClassifier(
-            n_estimators=100, max_depth=8, random_state=42, n_jobs=-1
+        "ExtraTrees_Light": ExtraTreesClassifier(
+            n_estimators=25, max_depth=6, random_state=42, n_jobs=-1
         ),
-        "HistGradientBoosting": HistGradientBoostingClassifier(
-            max_iter=100, max_depth=5, random_state=42
+        "RandomForest_Standard": RandomForestClassifier(
+            n_estimators=40, max_depth=7, random_state=42, n_jobs=-1
         ),
         "LogisticRegression": Pipeline(
             [
@@ -833,7 +718,12 @@ def train_and_benchmark(
         ),
     }
 
-    # Determine fold count adapted to smallest class count
+    # Include non-transpilable models only when explicitly requested
+    if include_unsupported_c:
+        models["HistGradientBoosting"] = HistGradientBoostingClassifier(
+            max_iter=100, max_depth=5, random_state=42
+        )
+
     min_class_samples = pd.Series(y).value_counts().min()
     n_splits = max(min(5, min_class_samples), 2)
 
@@ -876,7 +766,6 @@ def train_and_benchmark(
 
     print("-" * len(header))
 
-    # Select best model based on macro F1-score (critical for class imbalance)
     best_name = max(scores_summary, key=lambda k: scores_summary[k]["f1_macro"])
     best_info = scores_summary[best_name]
     best_clf = best_info["estimator"]
@@ -887,11 +776,9 @@ def train_and_benchmark(
     print(f"   Recall (macro)       : {best_info['recall_macro']*100:.2f} %")
     print(f"   Global Accuracy      : {best_info['accuracy']*100:.2f} %")
 
-    # Final training of champion model on 100% of data
     print("\n[TRAINING] Retraining champion model on 100% of dataset...")
     best_clf.fit(X, y)
 
-    # Prepare and save joblib artifact
     out_path = Path(output_model_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -908,6 +795,7 @@ def train_and_benchmark(
         "benign_classes": benign_classes,
         "window_size_sec": float(window_size_sec),
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
+        "is_m2cgen_compatible": (best_name != "HistGradientBoosting"),
         "metrics": {
             "f1_macro": best_info["f1_macro"],
             "accuracy": best_info["accuracy"],
@@ -972,6 +860,11 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Generates an example synthetic dataset (useful without active AWS or DB).",
     )
+    parser.add_argument(
+        "--include-unsupported-c",
+        action="store_true",
+        help="Include non-m2cgen models (HistGradientBoosting) in CV benchmark.",
+    )
     return parser.parse_args(args)
 
 
@@ -990,9 +883,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Batch concurrency    : {args.batch_size} concurrent sessions")
     print(f"* Force refresh        : {'YES' if args.force_refresh else 'NO'}")
     print(f"* Synthetic data       : {'YES' if args.synthetic else 'NO'}")
+    print(f"* Only m2cgen models   : {'NO (all models)' if args.include_unsupported_c else 'YES (default)'}")
     print("=" * 68 + "\n")
 
-    # 1. Incremental cache synchronization (concurrent batches)
+    # 1. Incremental cache synchronization
     sessions_data = sync_sessions_cache(
         cache_dir=cache_file,
         force_refresh=args.force_refresh,
@@ -1023,6 +917,7 @@ def main(argv: list[str] | None = None) -> int:
             y=y,
             output_model_path=args.output_model,
             window_size_sec=args.window_size,
+            include_unsupported_c=args.include_unsupported_c,
         )
     except Exception as exc:
         logger.error("Error during training and benchmark: %s", exc)
