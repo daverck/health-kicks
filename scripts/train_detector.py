@@ -3,8 +3,14 @@
 This script connects to project databases (Aurora PostgreSQL and DynamoDB) to
 retrieve validated Studio recording sessions, maintains an incremental local
 cache to minimize network calls, extracts biomechanical and temporal features
-from the IMU, benchmarks several Edge-adapted classifiers via cross-validation
-(Stratified 5-Fold), and serializes the champion model as a joblib artifact.
+from the IMU across sliding windows (duration: --window-size, default 3.0s;
+step/overlap: --window-step, default 0.5s), benchmarks several Edge-adapted
+classifiers via cross-validation (Stratified 5-Fold), and serializes the
+champion model as a joblib artifact.
+
+Windowing parameters:
+    - window-size: duration of raw signal accumulation for feature extraction (3.0s).
+    - window-step: temporal advance / stride between successive sliding windows (0.5s).
 
 By default, candidate models are strictly constrained to m2cgen-compatible
 estimators (RandomForest, ExtraTrees, LogisticRegression) with depths tailored
@@ -675,7 +681,7 @@ def train_and_benchmark(
     X: pd.DataFrame,
     y: np.ndarray,
     output_model_path: str = "scripts/models/activity_classifier.joblib",
-    window_size_sec: float = 2.0,
+    window_size_sec: float = 3.0,
     include_unsupported_c: bool = False,
 ) -> dict[str, Any]:
     """Compares candidate classifiers using 5-Fold Stratified CV.
@@ -840,14 +846,14 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--window-size",
         type=float,
-        default=2.0,
-        help="Sliding time window duration in seconds (default: 2.0s).",
+        default=3.0,
+        help="Duration of raw signal accumulation in seconds used to extract temporal & biomechanical features (default: 3.0s).",
     )
     parser.add_argument(
         "--window-step",
         type=float,
         default=0.5,
-        help="Window step duration in seconds (default: 0.5s).",
+        help="Sliding step / temporal shift between successive extracted windows in seconds, defining the overlap (default: 0.5s).",
     )
     parser.add_argument(
         "--batch-size",

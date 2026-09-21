@@ -585,7 +585,7 @@ def test_parse_args_defaults():
     args = parse_args([])
     assert args.cache_dir == "scripts/data/sessions"
     assert args.output_model == "scripts/models/activity_classifier.joblib"
-    assert args.window_size == 2.0
+    assert args.window_size == 3.0
     assert args.window_step == 0.5
     assert args.batch_size == 8
     assert not args.force_refresh
