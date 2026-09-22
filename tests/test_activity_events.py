@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.v1.ingestion import settings as ingestion_settings
 from app.db.database import get_db
-from app.db.models import ActivityEvent, Base, Device, User, UserRole
+from app.db.models import ActivityEvent, Base, Device, DeviceOwnership, User, UserRole
 from app.main import app
 from app.services import token_service
 
@@ -42,11 +42,19 @@ def test_user(db_session) -> User:
         google_sub="sub-activity-user",
         email="activity_user@example.com",
         name="Activity Tester",
-        role=UserRole.user,
+        role=UserRole.clinician,
+        is_active=True,
     )
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
+
+    db_session.add_all([
+        DeviceOwnership(user_id=user.id, device_id="HK-1"),
+        DeviceOwnership(user_id=user.id, device_id="HK-2"),
+        DeviceOwnership(user_id=user.id, device_id="HK-99"),
+    ])
+    db_session.commit()
     return user
 
 
@@ -179,12 +187,15 @@ def test_list_activities_pagination_and_sorting(client, db_session, auth_headers
     assert data_empty["items"] == []
 
 
-def test_ingest_event_persists_to_activity_events(client, db_session, monkeypatch):
-    """Verify ingestion webhook inserts into activity_events table correctly without raw_imu_json."""
+def test_ingest_event_persists_to_activity_events(client, db_session, test_user, monkeypatch):
+    """Verify ingestion webhook inserts into activity_events table correctly for bound devices."""
     monkeypatch.setattr(
         "app.api.v1.ingestion.settings",
         ingestion_settings.__class__(ingest_token="secret-test-token", environment="production"),
     )
+
+    db_session.add(DeviceOwnership(user_id=test_user.id, device_id="HK-3"))
+    db_session.commit()
 
     ingest_payload = {
         "header": {
@@ -211,6 +222,31 @@ def test_ingest_event_persists_to_activity_events(client, db_session, monkeypatc
     assert event.timestamp_utc.year == 2026
     assert not hasattr(event, "raw_imu_json")
     assert not hasattr(event, "status_enum")
+
+
+def test_ingest_event_unowned_device_forbidden(client, db_session, monkeypatch):
+    """Verify ingestion webhook rejects events from devices not bound to any user with 403."""
+    monkeypatch.setattr(
+        "app.api.v1.ingestion.settings",
+        ingestion_settings.__class__(ingest_token="secret-test-token", environment="production"),
+    )
+
+    ingest_payload = {
+        "header": {
+            "device_id": "HK-UNOWNED-DEV",
+            "msg_id": "msg-act-unowned",
+            "timestamp": "2026-03-30T12:00:00Z",
+        },
+        "payload": {
+            "event_type": "walk",
+            "confidence_score": 0.90,
+            "raw_imu_snapshot": {"ax": 0.0, "ay": 0.0, "az": 9.81},
+        },
+    }
+
+    headers = {"X-HealthKicks-Ingest-Token": "secret-test-token"}
+    res = client.post("/api/v1/ingest/event", json=ingest_payload, headers=headers)
+    assert res.status_code == 403
 
 
 def test_list_activities_filter_by_specific_event_type(client, db_session, auth_headers):
@@ -409,6 +445,9 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
     db_session.add(user)
     db_session.commit()
 
+    db_session.add(DeviceOwnership(user_id=user.id, device_id="HK-TEST"))
+    db_session.commit()
+
     sess_id = uuid.uuid4()
     session_rec = StudioSession(
         id=sess_id,
@@ -439,4 +478,121 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
 
     db_session.refresh(session_rec)
     assert session_rec.sample_count == 94
+
+
+def test_ingest_raw_telemetry_device_mismatch_forbidden(client, db_session, monkeypatch):
+    """Verify /api/v1/ingest/telemetry/raw returns 403 when device does not belong to non-admin session owner."""
+    import uuid
+    from app.db.models import StudioSession, User, UserRole
+
+    monkeypatch.setattr(
+        "app.api.v1.ingestion.settings",
+        ingestion_settings.__class__(ingest_token="secret-test-token", environment="production"),
+    )
+
+    user = User(
+        google_sub="sub-mismatch-user",
+        email="mismatch@example.com",
+        name="Mismatch User",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    # User owns HK-OWNED, but telemetry is for HK-FOREIGN
+    db_session.add(DeviceOwnership(user_id=user.id, device_id="HK-OWNED"))
+    db_session.commit()
+
+    sess_id = uuid.uuid4()
+    session_rec = StudioSession(
+        id=sess_id,
+        user_id=user.id,
+        device_id="HK-OWNED",
+        label="walk",
+        sample_count=0,
+        duration_sec=5.0,
+    )
+    db_session.add(session_rec)
+    db_session.commit()
+
+    raw_batch_payload = {
+        "device_id": "HK-FOREIGN",
+        "session_id": str(sess_id),
+        "label": "walk",
+        "sample_count": 50,
+        "readings": [],
+    }
+
+    headers = {"X-HealthKicks-Ingest-Token": "secret-test-token"}
+    res = client.post("/api/v1/ingest/telemetry/raw", json=raw_batch_payload, headers=headers)
+    assert res.status_code == 403
+
+
+def test_ingest_raw_telemetry_admin_allowed_any_device(client, db_session, monkeypatch):
+    """Verify /api/v1/ingest/telemetry/raw succeeds for any device if session owner is admin."""
+    import uuid
+    from app.db.models import StudioSession, User, UserRole
+
+    monkeypatch.setattr(
+        "app.api.v1.ingestion.settings",
+        ingestion_settings.__class__(ingest_token="secret-test-token", environment="production"),
+    )
+
+    admin = User(
+        google_sub="sub-admin-raw-telemetry",
+        email="admin_raw@example.com",
+        name="Admin Raw",
+        role=UserRole.admin,
+        is_active=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    sess_id = uuid.uuid4()
+    session_rec = StudioSession(
+        id=sess_id,
+        user_id=admin.id,
+        device_id="HK-ADMIN-SHOES",
+        label="walk",
+        sample_count=0,
+        duration_sec=5.0,
+    )
+    db_session.add(session_rec)
+    db_session.commit()
+
+    raw_batch_payload = {
+        "device_id": "HK-ANY-DEVICE",
+        "session_id": str(sess_id),
+        "label": "run",
+        "sample_count": 80,
+        "readings": [],
+    }
+
+    headers = {"X-HealthKicks-Ingest-Token": "secret-test-token"}
+    # Test with both route paths
+    res = client.post("/api/v1/ingest/event/telemetry/raw", json=raw_batch_payload, headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ingested"
+    assert data["sample_count"] == 80
+
+
+def test_list_activities_unowned_device_forbidden(client, db_session) -> None:
+    """Querying activities of an unowned device returns 403 Forbidden for regular users."""
+    reg = User(
+        google_sub="sub-regular-act",
+        email="reg_act@example.com",
+        name="Regular Act",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(reg)
+    db_session.commit()
+    token = token_service.issue_access_token(reg)
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.get("/api/v1/devices/HK-UNOWNED/events/activities", headers=headers)
+    assert res.status_code == 403
+
+
 

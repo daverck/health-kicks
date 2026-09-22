@@ -102,6 +102,16 @@ class User(Base):
     )
     last_login_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    @property
+    def is_admin(self) -> bool:
+        """Check if user has admin privileges."""
+        return self.role == UserRole.admin
+
+    @property
+    def is_clinician_or_admin(self) -> bool:
+        """Check if user has clinician or admin privileges."""
+        return self.role in (UserRole.admin, UserRole.clinician)
+
 
 class DeviceOwnership(Base):
     """Binding between a user account and an IoT device (future phase)."""

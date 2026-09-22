@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import get_db
-from app.db.models import Base, DailyActivityStep, User, UserRole
+from app.db.models import Base, DailyActivityStep, DeviceOwnership, User, UserRole
 from app.main import app
 from app.services import token_service
 
@@ -49,6 +49,12 @@ def regular_user(db_session) -> User:
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
+
+    db_session.add_all([
+        DeviceOwnership(user_id=user.id, device_id="HK-SHOE-001"),
+        DeviceOwnership(user_id=user.id, device_id="HK-SHARED-DEV"),
+    ])
+    db_session.commit()
     return user
 
 
@@ -64,6 +70,11 @@ def other_user(db_session) -> User:
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
+
+    db_session.add_all([
+        DeviceOwnership(user_id=user.id, device_id="HK-SHARED-DEV"),
+    ])
+    db_session.commit()
     return user
 
 

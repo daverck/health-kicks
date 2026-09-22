@@ -14,6 +14,7 @@ from app.schemas.steps import (
     DailyStepsSyncPayload,
     DailyStepsSyncResponse,
 )
+from app.services.device_service import verify_device_ownership
 from app.services.steps_service import get_steps_history, sync_daily_steps
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ def create_steps_router() -> APIRouter:
         db: Session = Depends(get_db),
     ) -> DailyStepsSyncResponse:
         """Upsert daily activity step snapshots recorded by the edge device or mobile application."""
+        verify_device_ownership(db=db, user=user, device_id=payload.device_id, allow_clinician=False)
         synced = sync_daily_steps(db=db, user_id=user.id, payload=payload)
         return DailyStepsSyncResponse(status="synchronized", synced_records=synced)
 
@@ -52,6 +54,8 @@ def create_steps_router() -> APIRouter:
         db: Session = Depends(get_db),
     ) -> DailyStepsHistoryResponse:
         """Fetch step counts history grouped by day and activity type."""
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+
         today = datetime.now(timezone.utc).date()
 
         if to_date is None:
@@ -80,4 +84,3 @@ def create_steps_router() -> APIRouter:
         )
 
     return router
-

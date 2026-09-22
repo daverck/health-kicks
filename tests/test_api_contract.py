@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.ingestion import settings as ingestion_settings
 from app.db.database import get_db
-from app.db.models import ActivityEvent, Base
+from app.db.models import ActivityEvent, Base, DeviceOwnership, User, UserRole
 from app.main import app
 from app.schemas.ingestion import IngestionEvent
 
@@ -40,6 +40,10 @@ def test_ingestion_route_auth_and_idempotence(monkeypatch) -> None:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        session.add(User(id=1, email="test@example.com", name="Test", role=UserRole.user, is_active=True))
+        session.add(DeviceOwnership(user_id=1, device_id="shoe-1"))
+        session.commit()
     def override_db():
         session = session_factory()
         try:

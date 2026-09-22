@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.cloud import create_cloud_router
-from app.db.models import ActivityEvent, Base, DeviceStatus, HapticLog
+from app.db.models import ActivityEvent, Base, DeviceOwnership, DeviceStatus, HapticLog, User, UserRole
 from app.schemas.cloud import HapticTrigger
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.ingestion_service import ingest_device_status
@@ -49,9 +49,10 @@ def test_haptic_failure_is_logged() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
+    admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
     endpoint = next(route.endpoint for route in create_cloud_router(FailedPublisher()).routes if route.path.endswith("haptic/trigger"))
     try:
-        endpoint("shoe-3", HapticTrigger(intensity=80), user=None, db=session)
+        endpoint("shoe-3", HapticTrigger(intensity=80), user=admin, db=session)
     except Exception as error:
         assert getattr(error, "status_code", None) == 503
     else:
@@ -70,13 +71,14 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     session = sessionmaker(bind=engine)()
     router = create_cloud_router(SuccessfulPublisher())
 
+    admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
     trigger_endpoint = next(
         route.endpoint for route in router.routes if route.path.endswith("haptic/trigger")
     )
     result = trigger_endpoint(
         TEST_DEVICE_ID,
         HapticTrigger(intensity=120, duration_ms=600),
-        user=None,
+        user=admin,
         db=session,
     )
     assert result["status"] == "command_sent"
@@ -99,7 +101,7 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     haptic_history_endpoint = next(
         route.endpoint for route in router.routes if route.path.endswith("haptic/history")
     )
-    history_page = haptic_history_endpoint(TEST_DEVICE_ID, user=None, page=1, page_size=10, db=session)
+    history_page = haptic_history_endpoint(TEST_DEVICE_ID, user=admin, page=1, page_size=10, db=session)
     assert history_page.total == 1
     assert history_page.items[0].device_id == TEST_DEVICE_ID
     assert history_page.items[0].intensity == 120
@@ -109,7 +111,7 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     activities_endpoint = next(
         route.endpoint for route in router.routes if route.path.endswith("events/activities")
     )
-    activities_page = activities_endpoint(TEST_DEVICE_ID, user=None, page=1, page_size=10, db=session)
+    activities_page = activities_endpoint(TEST_DEVICE_ID, user=admin, page=1, page_size=10, db=session)
     assert activities_page.total == 0
 
     session.close()
@@ -123,6 +125,7 @@ def test_list_haptic_history_date_filtering() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
+    admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
     router = create_cloud_router(DummyPublisher())
     haptic_history_endpoint = next(
         route.endpoint for route in router.routes if route.path.endswith("haptic/history")
@@ -147,7 +150,7 @@ def test_list_haptic_history_date_filtering() -> None:
     # Filter by start_date and end_date (date-only)
     page = haptic_history_endpoint(
         TEST_DEVICE_ID,
-        user=None,
+        user=admin,
         start_date=t2,
         end_date=t3,
         page=1,
@@ -170,6 +173,7 @@ def test_list_haptic_history_invalid_date_range_400() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
+    admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
     router = create_cloud_router(DummyPublisher())
     haptic_history_endpoint = next(
         route.endpoint for route in router.routes if route.path.endswith("haptic/history")
@@ -178,7 +182,7 @@ def test_list_haptic_history_invalid_date_range_400() -> None:
     with pytest.raises(HTTPException) as exc_info:
         haptic_history_endpoint(
             TEST_DEVICE_ID,
-            user=None,
+            user=admin,
             start_date=datetime(2026, 9, 15, tzinfo=timezone.utc),
             end_date=datetime(2026, 9, 10, tzinfo=timezone.utc),
             page=1,
@@ -188,4 +192,32 @@ def test_list_haptic_history_invalid_date_range_400() -> None:
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "start_date must be before or equal to end_date"
 
+    session.close()
+
+
+def test_haptic_trigger_unowned_device_forbidden() -> None:
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    regular = User(id=2, email="reg@test.com", name="Regular", role=UserRole.user)
+    session.add(regular)
+    session.commit()
+
+    router = create_cloud_router(DummyPublisher())
+    trigger_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("haptic/trigger")
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        trigger_endpoint(
+            "unowned-device",
+            HapticTrigger(intensity=100),
+            user=regular,
+            db=session,
+        )
+    assert exc_info.value.status_code == 403
     session.close()

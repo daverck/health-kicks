@@ -259,6 +259,9 @@ def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) ->
 def test_studio_stats_rbac_strict_isolation(db_session, auth_user, admin_user) -> None:
     """Non-admin only sees their own sessions, admin sees all sessions."""
     import uuid
+    db_session.query(StudioSession).delete()
+    db_session.commit()
+
     s_clinician = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="dev-1", label="walk", duration_sec=5.0, sample_count=50)
     s_other = StudioSession(id=uuid.uuid4(), user_id=admin_user.id, device_id="dev-2", label="idle", duration_sec=10.0, sample_count=100)
     db_session.add_all([s_clinician, s_other])

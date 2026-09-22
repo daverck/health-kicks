@@ -1,13 +1,12 @@
-"""Callable ingestion boundaries for IoT Rule, SQS, or worker messages."""
-
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import ActivityEvent, Device, DeviceOwnership, DeviceStatus, ProcessedMessage, StudioSession, User
+from app.db.models import ActivityEvent, Device, DeviceOwnership, DeviceStatus, ProcessedMessage, StudioSession, User, UserRole
 from app.schemas.ingestion import DeviceStatusEvent, IngestionEvent
 
 
@@ -38,10 +37,19 @@ def _get_device(session: Session, device_id: str, seen_at: datetime) -> Device:
 
 
 def ingest_event(session: Session, message: dict[str, Any]) -> ActivityEvent | None:
-    """Validate and persist one AWS IoT Rule event with idempotent delivery."""
+    """Validate and persist one AWS IoT Rule event with idempotent delivery and device ownership check."""
     contract = IngestionEvent.model_validate(message)
     header = contract.header
     payload = contract.payload
+
+    # Verify device ownership
+    ownership = session.query(DeviceOwnership).filter_by(device_id=header.device_id).first()
+    if ownership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: device not bound to any user",
+        )
+
     if session.query(ProcessedMessage).filter_by(msg_id=header.msg_id).first():
         return None
     session.add(ProcessedMessage(msg_id=header.msg_id))
@@ -106,6 +114,22 @@ def ingest_raw_telemetry(
 
     studio_session = session.query(StudioSession).filter_by(id=sess_uuid).first()
     if studio_session is not None:
+        session_user = session.query(User).filter_by(id=studio_session.user_id).first()
+        is_admin = session_user is not None and session_user.role == UserRole.admin
+
+        if not is_admin:
+            # Non-admin: verify device belongs to the session user
+            ownership = (
+                session.query(DeviceOwnership)
+                .filter_by(user_id=studio_session.user_id, device_id=device_id)
+                .first()
+            )
+            if ownership is None and studio_session.device_id != device_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: device does not belong to session user",
+                )
+
         studio_session.sample_count = sample_count
         if "label" in payload and payload["label"]:
             studio_session.label = payload["label"]
@@ -113,16 +137,15 @@ def ingest_raw_telemetry(
         session.refresh(studio_session)
         return studio_session
 
-    # If session record does not exist yet in Aurora, create it
-    user_id = 1
-    if device_id:
-        ownership = session.query(DeviceOwnership).filter_by(device_id=device_id).first()
-        if ownership:
-            user_id = ownership.user_id
-        else:
-            first_user = session.query(User).first()
-            if first_user:
-                user_id = first_user.id
+    # If session record does not exist yet in Aurora, verify device ownership
+    ownership = session.query(DeviceOwnership).filter_by(device_id=device_id).first() if device_id else None
+    if ownership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: device not bound to any user",
+        )
+
+    user_id = ownership.user_id
 
     studio_session = StudioSession(
         id=sess_uuid,

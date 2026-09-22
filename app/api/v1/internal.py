@@ -7,26 +7,13 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.deps import verify_ingest_token
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import Device, DeviceOwnership, DeviceStatus, User
 from app.schemas.internal import DevicePresencePayload, DevicePresenceResponse
 
 logger = logging.getLogger("healthkicks.internal")
-
-
-def verify_ingest_token(
-    x_ingest_token: str | None = Header(default=None, alias="X-Ingest-Token"),
-    x_hk_ingest_token: str | None = Header(default=None, alias="X-HealthKicks-Ingest-Token"),
-) -> None:
-    """Verify that the request comes from an authorized caller using the ingest token."""
-    token = x_ingest_token or x_hk_ingest_token
-    expected = settings.ingest_token
-    if not token or not expected or not compare_digest(token, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing ingestion token",
-        )
 
 
 def create_internal_router() -> APIRouter:

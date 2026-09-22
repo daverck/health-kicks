@@ -1,6 +1,5 @@
 """FastAPI router for DynamoDB IMU telemetry queries and session purge."""
 
-from datetime import datetime
 from datetime import datetime, timezone
 import logging
 import uuid
@@ -10,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, RequireClinicianOrAdmin
 from app.db.database import get_db
 from app.db.models import StudioSession, User, UserRole
 from app.schemas.telemetry import (
@@ -20,50 +19,12 @@ from app.schemas.telemetry import (
     StudioStartRequest,
     StudioStartResponse,
 )
+from app.services.device_service import verify_device_ownership
 from app.services.iot_service import IotCommandService
+from app.services.studio_service import compute_studio_stats
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
-
-
-def _compute_studio_stats(
-    db: Session,
-    user: User,
-    device_id: str | None = None,
-) -> StudioDatasetStatsResponse:
-    """Compute studio dataset metrics from PostgreSQL with strict RBAC enforcement."""
-    query = db.query(StudioSession)
-
-    if user.role != UserRole.admin:
-        query = query.filter(StudioSession.user_id == user.id)
-
-    if device_id is not None:
-        query = query.filter(StudioSession.device_id == device_id)
-
-    total_sessions = query.count()
-    total_duration = (
-        query.with_entities(func.coalesce(func.sum(StudioSession.duration_sec), 0.0)).scalar()
-        or 0.0
-    )
-    total_samples = (
-        query.with_entities(func.coalesce(func.sum(StudioSession.sample_count), 0)).scalar()
-        or 0
-    )
-
-    label_rows = (
-        query.with_entities(StudioSession.label, func.count(StudioSession.id))
-        .group_by(StudioSession.label)
-        .all()
-    )
-    by_label = {str(lbl): int(cnt) for lbl, cnt in label_rows}
-
-    return StudioDatasetStatsResponse(
-        device_id=device_id,
-        total_sessions=total_sessions,
-        total_duration_sec=round(float(total_duration), 2),
-        total_samples=int(total_samples),
-        by_label=by_label,
-    )
 
 
 def create_telemetry_router(
@@ -84,12 +45,15 @@ def create_telemetry_router(
     def get_telemetry(
         device_id: str,
         user: CurrentUser,
+        db: Session = Depends(get_db),
         session_id: str | None = Query(default=None),
         start_time: datetime | None = Query(default=None),
         end_time: datetime | None = Query(default=None),
         limit: int = Query(default=1000, ge=1, le=2500),
     ) -> StudioSessionReadingsResponse | list[ImuReadingResponse]:
         """Query IMU telemetry by Studio session_id or by time range."""
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+
         if session_id is not None:
             result = telemetry_service.get_session_readings(
                 device_id=device_id,
@@ -129,9 +93,11 @@ def create_telemetry_router(
     def delete_session_telemetry(
         device_id: str,
         session_id: str,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
+        db: Session = Depends(get_db),
     ) -> Response:
         """Purge all telemetry points associated with a Studio session."""
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
         telemetry_service.delete_session_readings(
             device_id=device_id,
             session_id=session_id,
@@ -146,10 +112,12 @@ def create_telemetry_router(
     def start_studio_session(
         device_id: str,
         command: StudioStartRequest,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioStartResponse:
         """Trigger a remote Studio IMU recording session on an edge device."""
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+
         session_id = str(uuid.uuid4())
         try:
             topic = command_service.send_studio_start(
@@ -209,11 +177,12 @@ def create_telemetry_router(
     )
     def get_device_studio_stats(
         device_id: str,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioDatasetStatsResponse:
         """Get dataset statistics (session counts and duration by label) for a specific device."""
-        return _compute_studio_stats(db=db, user=user, device_id=device_id)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        return compute_studio_stats(db=db, user=user, device_id=device_id)
 
     @studio_router.get(
         "/stats",
@@ -221,14 +190,12 @@ def create_telemetry_router(
         status_code=status.HTTP_200_OK,
     )
     def get_global_studio_stats(
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioDatasetStatsResponse:
         """Get dataset statistics (session counts and duration by label) across all devices."""
-        return _compute_studio_stats(db=db, user=user, device_id=None)
+        return compute_studio_stats(db=db, user=user, device_id=None)
 
     root_router.include_router(devices_router)
     root_router.include_router(studio_router)
     return root_router
-
-

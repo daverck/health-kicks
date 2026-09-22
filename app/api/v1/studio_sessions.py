@@ -8,7 +8,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser
+from app.api.deps import RequireClinicianOrAdmin
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.db.database import get_db
 from app.db.models import StudioSession, User, UserRole
@@ -19,57 +19,10 @@ from app.schemas.studio import (
     StudioSessionUpdatePayload,
 )
 from app.schemas.telemetry import StudioSessionReadingsResponse
+from app.services.studio_service import get_authorized_session, to_session_summary
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
-
-
-def _is_admin(user: User) -> bool:
-    return user.role == UserRole.admin
-
-
-def _parse_uuid(session_id: str) -> UUID:
-    try:
-        return UUID(str(session_id))
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Studio session '{session_id}' not found",
-        )
-
-
-def _get_authorized_session(
-    session_id: str,
-    user: User,
-    db: Session,
-) -> StudioSession:
-    sess_uuid = _parse_uuid(session_id)
-    session = db.query(StudioSession).filter(StudioSession.id == sess_uuid).one_or_none()
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Studio session '{session_id}' not found",
-        )
-    if not _is_admin(user) and session.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: access to this studio session is denied",
-        )
-    return session
-
-
-def _to_summary(session: StudioSession, is_admin: bool) -> StudioSessionSummary:
-    return StudioSessionSummary(
-        id=session.id,
-        device_id=session.device_id,
-        user_id=session.user_id,
-        user_email=session.user.email if (is_admin and session.user) else None,
-        label=session.label,
-        sample_count=session.sample_count or 0,
-        duration_sec=session.duration_sec or 5.0,
-        is_validated=bool(session.is_validated),
-        created_at=session.created_at,
-    )
 
 
 def create_studio_sessions_router(
@@ -81,7 +34,7 @@ def create_studio_sessions_router(
 
     @router.get("", response_model=PaginatedSessionsResponse)
     def list_sessions(
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         page: int = Query(default=1, ge=1),
         size: int = Query(default=20, ge=1, le=100),
         label: str | None = Query(default=None),
@@ -99,11 +52,10 @@ def create_studio_sessions_router(
 
         query = db.query(StudioSession)
 
-        if not _is_admin(user):
+        if user.role != UserRole.admin:
             query = query.filter(StudioSession.user_id == user.id)
-        else:
-            if user_id is not None:
-                query = query.filter(StudioSession.user_id == user_id)
+        elif user_id is not None:
+            query = query.filter(StudioSession.user_id == user_id)
 
         if label is not None:
             query = query.filter(StudioSession.label == label)
@@ -128,7 +80,7 @@ def create_studio_sessions_router(
             .all()
         )
 
-        items = [_to_summary(s, is_admin=_is_admin(user)) for s in sessions]
+        items = [to_session_summary(s, is_admin=user.is_admin) for s in sessions]
         return PaginatedSessionsResponse(
             items=items,
             total=total,
@@ -139,21 +91,21 @@ def create_studio_sessions_router(
     @router.get("/{session_id}", response_model=StudioSessionDetail)
     def get_session_detail(
         session_id: str,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionDetail:
         """Fetch studio session metadata from Aurora DB (including sample_count)."""
-        session = _get_authorized_session(session_id, user, db)
-        return _to_summary(session, is_admin=_is_admin(user))
+        session = get_authorized_session(db, session_id, user)
+        return to_session_summary(session, is_admin=user.is_admin)
 
     @router.get("/{session_id}/readings", response_model=StudioSessionReadingsResponse)
     def get_session_readings(
         session_id: str,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionReadingsResponse:
         """Fetch raw IMU readings for an authorized studio session from DynamoDB."""
-        session = _get_authorized_session(session_id, user, db)
+        session = get_authorized_session(db, session_id, user)
         try:
             readings = telemetry_service.get_session_readings(
                 device_id=session.device_id,
@@ -180,25 +132,25 @@ def create_studio_sessions_router(
     @router.patch("/{session_id}/confirm", response_model=StudioSessionSummary)
     def confirm_session(
         session_id: str,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionSummary:
         """Confirm and validate a studio session for dataset inclusion."""
-        session = _get_authorized_session(session_id, user, db)
+        session = get_authorized_session(db, session_id, user)
         session.is_validated = True
         db.commit()
         db.refresh(session)
-        return _to_summary(session, is_admin=_is_admin(user))
+        return to_session_summary(session, is_admin=user.is_admin)
 
     @router.patch("/{session_id}", response_model=StudioSessionSummary)
     def update_session(
         session_id: str,
         payload: StudioSessionUpdatePayload,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionSummary:
         """Reclassify a studio session's activity label or update validation in PostgreSQL and DynamoDB."""
-        session = _get_authorized_session(session_id, user, db)
+        session = get_authorized_session(db, session_id, user)
 
         if payload.label is not None:
             session.label = payload.label
@@ -222,16 +174,16 @@ def create_studio_sessions_router(
                     error,
                 )
 
-        return _to_summary(session, is_admin=_is_admin(user))
+        return to_session_summary(session, is_admin=user.is_admin)
 
     @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_session(
         session_id: str,
-        user: CurrentUser,
+        user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> Response:
         """Purge a studio session from PostgreSQL and delete all raw IMU frames in DynamoDB."""
-        session = _get_authorized_session(session_id, user, db)
+        session = get_authorized_session(db, session_id, user)
 
         try:
             telemetry_service.delete_session_readings(

@@ -14,6 +14,8 @@ class UserUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    name: str | None = None
+    avatar_url: str | None = None
     role: UserRole | None = None
     is_active: bool | None = None
 

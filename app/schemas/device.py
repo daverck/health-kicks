@@ -14,6 +14,7 @@ class DeviceCreate(BaseModel):
 
     device_id: str
     name: str | None = None
+    user_id: int | None = None
 
 
 class DeviceResponse(BaseModel):
@@ -72,4 +73,3 @@ class DevicePresenceResponse(StrictModel):
     status: str
     device_id: str | None = None
     device_status: DeviceStatus | None = None
-

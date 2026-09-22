@@ -1,3 +1,5 @@
+"""Cloud endpoints for haptics, activities and device logs."""
+
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -19,6 +21,7 @@ from app.schemas.cloud import (
     HapticTrigger,
 )
 from app.services.aws_iot_service import AWSIoTPublishService
+from app.services.device_service import verify_device_ownership
 
 
 def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
@@ -27,6 +30,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
 
     @router.post("/devices/{device_id}/haptic/trigger")
     def trigger_haptic(device_id: str, command: HapticTrigger, user: CurrentUser, db: Session = Depends(get_db)) -> dict[str, str | int]:
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
         device = db.query(Device).filter_by(device_id=device_id).one_or_none()
         if device is None:
             db.add(Device(device_id=device_id))
@@ -60,6 +64,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         db: Session = Depends(get_db),
         request: Request = None,
     ) -> ActivityEventPage:
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
         raw_end = request.query_params.get("end_date") if request is not None else None
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
@@ -104,6 +109,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         request: Request = None,
     ) -> HapticLogPage:
         """List haptic commands/vibrations history for a device."""
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
         raw_end = request.query_params.get("end_date") if request is not None else None
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 

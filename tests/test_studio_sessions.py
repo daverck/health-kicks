@@ -37,7 +37,7 @@ def user_a(db_session) -> User:
         google_sub="sub-user-a",
         email="alice@example.com",
         name="Alice",
-        role=UserRole.user,
+        role=UserRole.clinician,
         is_active=True,
     )
     db_session.add(user)
@@ -52,6 +52,21 @@ def user_b(db_session) -> User:
         google_sub="sub-user-b",
         email="bob@example.com",
         name="Bob",
+        role=UserRole.clinician,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
+def regular_user(db_session) -> User:
+    user = User(
+        google_sub="sub-regular-user",
+        email="regular@example.com",
+        name="Regular",
         role=UserRole.user,
         is_active=True,
     )
@@ -586,4 +601,21 @@ def test_get_session_detail_forbidden_for_other_user(client, user_a, user_b, db_
 
     res = client.get(f"/api/v1/studio/sessions/{sess_id}", headers=_auth_headers(user_b))
     assert res.status_code == 403
+
+
+def test_regular_user_forbidden_on_all_studio_endpoints(client, regular_user, user_a, db_session) -> None:
+    """Regular users without clinician/admin role receive 403 Forbidden across studio session endpoints."""
+    sess_id = uuid.uuid4()
+    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", sample_count=50)
+    db_session.add(s)
+    db_session.commit()
+
+    headers = _auth_headers(regular_user)
+    assert client.get("/api/v1/studio/sessions", headers=headers).status_code == 403
+    assert client.get(f"/api/v1/studio/sessions/{sess_id}", headers=headers).status_code == 403
+    assert client.get(f"/api/v1/studio/sessions/{sess_id}/readings", headers=headers).status_code == 403
+    assert client.patch(f"/api/v1/studio/sessions/{sess_id}", json={"label": "run"}, headers=headers).status_code == 403
+    assert client.patch(f"/api/v1/studio/sessions/{sess_id}/confirm", headers=headers).status_code == 403
+    assert client.delete(f"/api/v1/studio/sessions/{sess_id}", headers=headers).status_code == 403
+
 

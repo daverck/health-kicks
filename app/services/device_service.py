@@ -7,26 +7,42 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Device, DeviceOwnership
+from app.db.models import Device, DeviceOwnership, User, UserRole
 from app.schemas.device import DeviceCreate, DeviceResponse
 
 logger = logging.getLogger(__name__)
 
 
+def verify_device_ownership(
+    db: Session,
+    user: User,
+    device_id: str,
+    allow_clinician: bool = False,
+) -> None:
+    """Verify that a user is authorized to access/operate on a device.
+
+    Admins are always authorized. Clinicians are authorized if allow_clinician is True.
+    Regular users must have an active DeviceOwnership record for the device.
+    """
+    if user.role == UserRole.admin:
+        return
+    if allow_clinician and user.role == UserRole.clinician:
+        return
+
+    ownership = (
+        db.query(DeviceOwnership)
+        .filter_by(user_id=user.id, device_id=device_id)
+        .first()
+    )
+    if ownership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: device not bound to user",
+        )
+
+
 def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceResponse:
-    """
-    Bind a factory-registered device to a user account:
-    1. Verify that the device exists in the factory inventory (devices table).
-       If absent, raise HTTP 404.
-    2. Check existing ownership for this device:
-       a. If already bound to the current user, raise HTTP 400.
-       b. If bound to another user, check the last activity (connection / telemetry):
-          - If inactive (> device_inactivity_days from config, default 30 days),
-            automatically unbind the previous owner and bind to the new user.
-          - Otherwise, reject with HTTP 400 and log the event.
-    3. Update the device nickname if payload.name is provided.
-    4. Create the new DeviceOwnership entry and return DeviceResponse.
-    """
+    """Bind a factory-registered device to a user account."""
     device = db.query(Device).filter_by(device_id=payload.device_id).one_or_none()
     if device is None:
         raise HTTPException(
@@ -141,6 +157,34 @@ def list_user_devices(
     ]
 
 
+def list_all_devices(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[DeviceResponse]:
+    """Retrieve all registered devices for administrator overview."""
+    rows = (
+        db.query(Device, DeviceOwnership.bound_at_utc)
+        .outerjoin(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
+        .order_by(Device.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return [
+        DeviceResponse(
+            id=device.id,
+            device_id=device.device_id,
+            name=device.name,
+            status=device.status,
+            last_seen_utc=device.last_seen_utc,
+            created_at=device.created_at,
+            bound_at_utc=bound_at_utc or device.created_at,
+        )
+        for device, bound_at_utc in rows
+    ]
+
+
 def unbind_device(db: Session, user_id: int, device_id: str) -> None:
     """Remove device ownership for the given user and device."""
     ownership = (
@@ -154,4 +198,17 @@ def unbind_device(db: Session, user_id: int, device_id: str) -> None:
             detail="Device not bound to this user",
         )
     db.delete(ownership)
+    db.commit()
+
+
+def unbind_device_admin(db: Session, device_id: str) -> None:
+    """Remove all device ownerships for a device as an administrator."""
+    ownerships = db.query(DeviceOwnership).filter_by(device_id=device_id).all()
+    if not ownerships:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not bound to any user",
+        )
+    for o in ownerships:
+        db.delete(o)
     db.commit()
