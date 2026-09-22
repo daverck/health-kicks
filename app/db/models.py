@@ -1,10 +1,10 @@
 """SQLAlchemy persistence models for the Cloud API."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -134,6 +134,31 @@ class StudioSession(Base):
     is_validated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship("User", lazy="joined")
+
+
+class DailyActivityStep(Base):
+    """Daily step counts aggregated per activity type and device."""
+
+    __tablename__ = "daily_activity_steps"
+    __table_args__ = (
+        UniqueConstraint("device_id", "date", "activity_type", name="uq_device_date_activity"),
+        Index("ix_daily_activity_steps_user_date", "user_id", "date"),
+        Index("ix_daily_activity_steps_device_date", "device_id", "date"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    activity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     user: Mapped["User"] = relationship("User", lazy="joined")
