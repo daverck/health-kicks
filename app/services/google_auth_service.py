@@ -5,9 +5,9 @@ flow, the ID token is verified against Google's JWKS, and the account is
 auto-provisioned on first sign-in (JIT).
 """
 
-from datetime import datetime, timezone
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -105,7 +105,7 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
 
     # 10-second clock skew tolerance leeway
     leeway = 10
-    now = datetime.now(timezone.utc).timestamp()
+    now = datetime.now(UTC).timestamp()
     exp = payload.get("exp")
     if not exp or now > (float(exp) + leeway):
         raise GoogleAuthError("Google token expired")

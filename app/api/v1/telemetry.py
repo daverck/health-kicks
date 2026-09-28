@@ -1,17 +1,16 @@
 """FastAPI router for DynamoDB IMU telemetry queries and session purge."""
 
-from datetime import datetime, timezone
 import logging
 import uuid
+from datetime import UTC, datetime
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, RequireClinicianOrAdmin
 from app.db.database import get_db
-from app.db.models import StudioSession, User, UserRole
+from app.db.models import StudioSession
 from app.schemas.telemetry import (
     ImuReadingResponse,
     StudioDatasetStatsResponse,
@@ -134,7 +133,7 @@ def create_telemetry_router(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to dispatch command to device",
-            )
+            ) from error
         except Exception as error:
             logger.exception(
                 "Unexpected error dispatching studio start to %s: %s",
@@ -144,7 +143,7 @@ def create_telemetry_router(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to dispatch command to device",
-            )
+            ) from error
 
         # Immediate PostgreSQL persistence
         session_record = StudioSession(
@@ -155,7 +154,7 @@ def create_telemetry_router(
             duration_sec=command.duration_sec,
             sample_count=0,
             is_validated=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(session_record)
         db.commit()

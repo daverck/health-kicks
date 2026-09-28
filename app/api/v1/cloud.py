@@ -1,14 +1,13 @@
 """Cloud endpoints for haptics, activities and device logs."""
 
-from datetime import datetime, timezone
-from typing import Annotated
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, RequireAdmin
+from app.api.deps import CurrentUser
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.db.database import get_db
 from app.db.models import ActivityEvent, Device, HapticLog
@@ -17,8 +16,8 @@ from app.schemas.cloud import (
     ActivityEventResponse,
     HapticLogPage,
     HapticLogResponse,
-    HealthResponse,
     HapticTrigger,
+    HealthResponse,
 )
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.device_service import verify_device_ownership
@@ -34,7 +33,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         device = db.query(Device).filter_by(device_id=device_id).one_or_none()
         if device is None:
             db.add(Device(device_id=device_id))
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         try:
             published = publisher.publish_haptic(device_id, command)
             db.add(HapticLog(
@@ -45,9 +44,9 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
                 triggered_at_utc=now,
             ))
             db.commit()
-        except SQLAlchemyError:
+        except SQLAlchemyError as err:
             db.rollback()
-            raise HTTPException(status_code=500, detail="Unable to persist haptic command")
+            raise HTTPException(status_code=500, detail="Unable to persist haptic command") from err
         if not published:
             raise HTTPException(status_code=503, detail="AWS IoT publish unavailable")
         return {"status": "command_sent", "device_id": device_id, "intensity": command.intensity, "duration_ms": command.duration_ms}

@@ -1,6 +1,7 @@
 """Telemetry ingestion service for processing raw IMU batches and updating Aurora DB."""
 
 from typing import Any
+
 from sqlalchemy.orm import Session
 
 from app.db.models import StudioSession

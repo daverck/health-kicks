@@ -1,8 +1,7 @@
 """FastAPI router for Studio sessions history, curation, and IMU inspection."""
 
-from datetime import datetime
 import logging
-from uuid import UUID
+from datetime import datetime
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import RequireClinicianOrAdmin
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.db.database import get_db
-from app.db.models import StudioSession, User, UserRole
+from app.db.models import StudioSession, UserRole
 from app.schemas.studio import (
     PaginatedSessionsResponse,
     StudioSessionDetail,
@@ -116,7 +115,7 @@ def create_studio_sessions_router(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to retrieve studio session readings from telemetry store",
-            )
+            ) from error
 
         if readings is None:
             return StudioSessionReadingsResponse(

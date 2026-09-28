@@ -1,6 +1,5 @@
 """Unit and integration tests for scripts/train_detector.py."""
 
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch

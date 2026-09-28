@@ -64,17 +64,18 @@ def verify_ingest_token(
     """Verify that the request comes from an authorized caller using the ingest token."""
     import sys
     from hmac import compare_digest
+
     from app.core.config import settings
 
     cfg = settings
     if request is not None and request.url.path.startswith("/api/v1/internal"):
         mod = sys.modules.get("app.api.v1.internal")
         if mod is not None and hasattr(mod, "settings"):
-            cfg = getattr(mod, "settings")
+            cfg = mod.settings
     elif request is not None and request.url.path.startswith("/api/v1/ingest"):
         mod = sys.modules.get("app.api.v1.ingestion")
         if mod is not None and hasattr(mod, "settings"):
-            cfg = getattr(mod, "settings")
+            cfg = mod.settings
 
     expected = cfg.ingest_token
     token = x_hk_ingest_token or x_ingest_token

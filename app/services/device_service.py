@@ -1,7 +1,7 @@
 """Service layer for device management and user-device association."""
 
-from datetime import datetime, timedelta, timezone
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -69,10 +69,10 @@ def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceRespo
         timestamps = [device.last_seen_utc] + [o.bound_at_utc for o in existing_ownerships if o.bound_at_utc]
         valid_timestamps = [t for t in timestamps if t is not None]
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if valid_timestamps:
             last_activity = max(
-                t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+                t if t.tzinfo is not None else t.replace(tzinfo=UTC)
                 for t in valid_timestamps
             )
         else:

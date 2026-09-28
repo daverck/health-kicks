@@ -4,9 +4,8 @@ import logging
 import sqlite3
 from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
 import psycopg2
-import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 
@@ -52,8 +51,8 @@ def test_iam_connection_creator_regenerates_fresh_token_and_sets_keepalives() ->
     mock_rds.generate_db_auth_token.side_effect = ["fresh-token-1", "fresh-token-2"]
 
     with patch("boto3.client", return_value=mock_rds), patch("psycopg2.connect") as mock_connect:
-        conn1 = _connect_with_iam(cfg)
-        conn2 = _connect_with_iam(cfg)
+        _connect_with_iam(cfg)
+        _connect_with_iam(cfg)
 
         assert mock_rds.generate_db_auth_token.call_count == 2
         assert mock_connect.call_count == 2

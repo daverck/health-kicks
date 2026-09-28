@@ -11,9 +11,9 @@ import logging
 import secrets
 from urllib.parse import quote
 
-from itsdangerous import BadData, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
+from itsdangerous import BadData, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_sts_service

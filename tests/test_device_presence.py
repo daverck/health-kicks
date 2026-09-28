@@ -1,10 +1,10 @@
 """Tests for /api/v1/internal/device-presence endpoint."""
 
 import dataclasses
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -144,7 +144,7 @@ def test_offline_transition_updates_status_without_overwriting_last_seen(
     client, db_session, seeded_device
 ) -> None:
     # 1. First bring online to establish last_seen_utc
-    online_timestamp = datetime(2026, 9, 3, 18, 0, 0, tzinfo=timezone.utc)
+    online_timestamp = datetime(2026, 9, 3, 18, 0, 0, tzinfo=UTC)
     seeded_device.status = DeviceStatus.online
     seeded_device.last_seen_utc = online_timestamp
     db_session.commit()
@@ -176,7 +176,7 @@ def test_offline_transition_updates_status_without_overwriting_last_seen(
 def test_disconnected_alias_updates_status_without_overwriting_last_seen(
     client, db_session, seeded_device
 ) -> None:
-    online_timestamp = datetime(2026, 9, 3, 18, 5, 0, tzinfo=timezone.utc)
+    online_timestamp = datetime(2026, 9, 3, 18, 5, 0, tzinfo=UTC)
     seeded_device.status = DeviceStatus.online
     seeded_device.last_seen_utc = online_timestamp
     db_session.commit()

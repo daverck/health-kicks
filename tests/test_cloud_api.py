@@ -1,14 +1,15 @@
 """Focused tests for Cloud persistence and AWS publication."""
 
-from datetime import datetime, timezone, timedelta
 import json
-from fastapi import HTTPException
+from datetime import UTC, datetime
+
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.cloud import create_cloud_router
-from app.db.models import ActivityEvent, Base, DeviceOwnership, DeviceStatus, HapticLog, User, UserRole
+from app.db.models import ActivityEvent, Base, DeviceStatus, HapticLog, User, UserRole
 from app.schemas.cloud import HapticTrigger
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.ingestion_service import ingest_device_status
@@ -131,9 +132,9 @@ def test_list_haptic_history_date_filtering() -> None:
         route.endpoint for route in router.routes if route.path.endswith("haptic/history")
     )
 
-    t1 = datetime(2026, 9, 10, 8, 0, 0, tzinfo=timezone.utc)
-    t2 = datetime(2026, 9, 11, 14, 0, 0, tzinfo=timezone.utc)
-    t3 = datetime(2026, 9, 12, 18, 0, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
+    t2 = datetime(2026, 9, 11, 14, 0, 0, tzinfo=UTC)
+    t3 = datetime(2026, 9, 12, 18, 0, 0, tzinfo=UTC)
 
     for i, t in enumerate([t1, t2, t3]):
         session.add(
@@ -183,8 +184,8 @@ def test_list_haptic_history_invalid_date_range_400() -> None:
         haptic_history_endpoint(
             TEST_DEVICE_ID,
             user=admin,
-            start_date=datetime(2026, 9, 15, tzinfo=timezone.utc),
-            end_date=datetime(2026, 9, 10, tzinfo=timezone.utc),
+            start_date=datetime(2026, 9, 15, tzinfo=UTC),
+            end_date=datetime(2026, 9, 10, tzinfo=UTC),
             page=1,
             page_size=10,
             db=session,

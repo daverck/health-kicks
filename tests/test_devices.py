@@ -1,7 +1,7 @@
 """Integration tests for device association, listing, and dissociation endpoints."""
 
-from datetime import datetime, timedelta, timezone
 import logging
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -168,7 +168,7 @@ def test_bind_device_owned_by_another_user_recent_activity_rejected(
     client, auth_headers_a, user_b, db_session, caplog
 ) -> None:
     # Device bound to user B with recent connection / telemetry (2 days ago)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recent_activity = now - timedelta(days=2)
     device = Device(device_id="shoe-active-01", last_seen_utc=recent_activity)
     db_session.add(device)
@@ -205,7 +205,7 @@ def test_bind_device_owned_by_another_user_inactive_auto_unbinds_and_rebinds(
     client, auth_headers_a, user_a, user_b, db_session, caplog
 ) -> None:
     # Device bound to user B, but inactive for 45 days (> default 30 days)
-    old_time = datetime.now(timezone.utc) - timedelta(days=45)
+    old_time = datetime.now(UTC) - timedelta(days=45)
     device = Device(device_id="shoe-inactive-01", last_seen_utc=old_time, name="Old Name")
     db_session.add(device)
     db_session.commit()

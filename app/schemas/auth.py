@@ -1,6 +1,7 @@
 """Pydantic contracts for Authentication and AWS STS IoT credentials."""
 
 from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 

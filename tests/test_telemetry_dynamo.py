@@ -1,8 +1,9 @@
 """Tests for DynamoDB IMU telemetry service and REST endpoints."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,7 +14,6 @@ from sqlalchemy.pool import StaticPool
 from app.api.deps import get_current_user
 from app.api.v1.telemetry import create_telemetry_router
 from app.db.models import Base, User, UserRole
-from app.schemas.telemetry import ImuReadingResponse, StudioSessionReadingsResponse
 from app.services import token_service
 from app.services.telemetry_service import TelemetryService
 
@@ -121,7 +121,7 @@ def test_get_session_readings_success(telemetry_service, mock_table) -> None:
     assert response.readings[0].az == 9.81
     # Verify timestamp ISO
     assert response.readings[0].timestamp_iso == datetime.fromtimestamp(
-        1700000000, tz=timezone.utc
+        1700000000, tz=UTC
     )
 
 

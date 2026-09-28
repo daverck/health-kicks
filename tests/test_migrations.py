@@ -1,11 +1,12 @@
 """Tests for Alembic migration execution, baseline auto-stamping, and factory device seeding."""
 
 from pathlib import Path
+
 import pytest
 import sqlalchemy as sa
-from alembic import command
 from alembic.config import Config
 
+from alembic import command
 from app.db.models import Base
 
 

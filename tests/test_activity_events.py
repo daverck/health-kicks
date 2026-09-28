@@ -1,15 +1,16 @@
 """Tests for ActivityEvent model, database schema, and activity events API endpoints."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.v1.ingestion import settings as ingestion_settings
+from app.core.config import settings as ingestion_settings
 from app.db.database import get_db
-from app.db.models import ActivityEvent, Base, Device, DeviceOwnership, User, UserRole
+from app.db.models import ActivityEvent, Base, DeviceOwnership, User, UserRole
 from app.main import app
 from app.services import token_service
 
@@ -96,7 +97,7 @@ def test_list_falls_endpoint_is_removed(client, auth_headers):
 
 def test_list_activities_pagination_and_sorting(client, db_session, auth_headers):
     """Verify listing activities supports pagination and orders by timestamp_utc descending."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Seed 5 activities for HK-1 and 1 for HK-2
     events_hk1 = [
@@ -251,7 +252,7 @@ def test_ingest_event_unowned_device_forbidden(client, db_session, monkeypatch):
 
 def test_list_activities_filter_by_specific_event_type(client, db_session, auth_headers):
     """Verify event_type='walk' strictly filters only walk activities."""
-    base_time = datetime(2026, 9, 10, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 10, 10, 0, 0, tzinfo=UTC)
     for i, event_type in enumerate(["walk", "run", "walk", "fall_forward", "idle"]):
         db_session.add(
             ActivityEvent(
@@ -276,7 +277,7 @@ def test_list_activities_filter_by_specific_event_type(client, db_session, auth_
 
 def test_list_activities_filter_by_falls_group(client, db_session, auth_headers):
     """Verify event_type='falls' filters all fall events (fall_forward, fall_lateral, etc.)."""
-    base_time = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
     for i, event_type in enumerate(["walk", "fall_forward", "fall_lateral", "fall_backward", "idle"]):
         db_session.add(
             ActivityEvent(
@@ -305,7 +306,7 @@ def test_list_activities_filter_by_falls_group(client, db_session, auth_headers)
 
 def test_list_activities_filter_all_or_empty_returns_everything(client, db_session, auth_headers):
     """Verify event_type='all' or absent/empty applies no filtering."""
-    base_time = datetime(2026, 9, 10, 14, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 10, 14, 0, 0, tzinfo=UTC)
     for i, event_type in enumerate(["walk", "run", "fall_forward"]):
         db_session.add(
             ActivityEvent(
@@ -334,11 +335,11 @@ def test_list_activities_filter_all_or_empty_returns_everything(client, db_sessi
 
 def test_list_activities_filter_by_date_range(client, db_session, auth_headers):
     """Verify start_date and end_date filtering with both date-only and full timestamps."""
-    day1 = datetime(2026, 9, 11, 10, 0, 0, tzinfo=timezone.utc)
-    day2 = datetime(2026, 9, 12, 15, 0, 0, tzinfo=timezone.utc)
-    day3 = datetime(2026, 9, 13, 8, 0, 0, tzinfo=timezone.utc)
+    day1 = datetime(2026, 9, 11, 10, 0, 0, tzinfo=UTC)
+    day2 = datetime(2026, 9, 12, 15, 0, 0, tzinfo=UTC)
+    day3 = datetime(2026, 9, 13, 8, 0, 0, tzinfo=UTC)
 
-    for i, ts in enumerate([day1, day2, day3]):
+    for ts in [day1, day2, day3]:
         db_session.add(
             ActivityEvent(
                 device_id="HK-DATES",
@@ -370,7 +371,7 @@ def test_list_activities_filter_by_date_range(client, db_session, auth_headers):
 
 def test_list_activities_combined_filters_and_total_pagination(client, db_session, auth_headers):
     """Verify combining event_type and date range, ensuring total reflects filters under pagination."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
 
     # 4 falls on Sept 12, 2 walks on Sept 12, 2 falls on Sept 13
     for i in range(4):
@@ -428,6 +429,7 @@ def test_list_activities_start_date_after_end_date_400(client, auth_headers):
 def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session, monkeypatch):
     """Verify /api/v1/ingest/telemetry/raw webhook updates sample_count in StudioSession table."""
     import uuid
+
     from app.db.models import StudioSession, User, UserRole
 
     monkeypatch.setattr(
@@ -483,6 +485,7 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
 def test_ingest_raw_telemetry_device_mismatch_forbidden(client, db_session, monkeypatch):
     """Verify /api/v1/ingest/telemetry/raw returns 403 when device does not belong to non-admin session owner."""
     import uuid
+
     from app.db.models import StudioSession, User, UserRole
 
     monkeypatch.setattr(
@@ -532,6 +535,7 @@ def test_ingest_raw_telemetry_device_mismatch_forbidden(client, db_session, monk
 def test_ingest_raw_telemetry_admin_allowed_any_device(client, db_session, monkeypatch):
     """Verify /api/v1/ingest/telemetry/raw succeeds for any device if session owner is admin."""
     import uuid
+
     from app.db.models import StudioSession, User, UserRole
 
     monkeypatch.setattr(

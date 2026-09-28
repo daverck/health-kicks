@@ -1,6 +1,7 @@
 """Common API utilities for query parameter validation and date filtering."""
 
 from datetime import date, datetime, time
+
 from fastapi import HTTPException, status
 
 

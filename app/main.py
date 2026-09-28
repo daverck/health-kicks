@@ -1,25 +1,25 @@
 """Stateless FastAPI Cloud API entry point."""
 
 import asyncio
-from contextlib import asynccontextmanager
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from alembic import command
 from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router
 from app.api.v1.ingestion import create_ingestion_router
 from app.api.v1.internal import create_internal_router
-from app.api.v1.studio_sessions import create_studio_sessions_router
 from app.api.v1.steps import create_steps_router
+from app.api.v1.studio_sessions import create_studio_sessions_router
 from app.api.v1.telemetry import create_telemetry_router
 from app.api.v1.users import create_users_router
 from app.core.config import settings

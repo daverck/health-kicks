@@ -1,10 +1,9 @@
 """Internal service routes (e.g. AWS IoT Lifecycle event presence webhooks)."""
 
-from datetime import datetime, timezone
-from hmac import compare_digest
 import logging
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import verify_ingest_token
@@ -12,6 +11,8 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import Device, DeviceOwnership, DeviceStatus, User
 from app.schemas.internal import DevicePresencePayload, DevicePresenceResponse
+
+__all__ = ["create_internal_router", "settings"]
 
 logger = logging.getLogger("healthkicks.internal")
 
@@ -50,7 +51,7 @@ def create_internal_router() -> APIRouter:
 
             if is_online:
                 device.status = DeviceStatus.online
-                device.last_seen_utc = payload.timestamp or datetime.now(timezone.utc)
+                device.last_seen_utc = payload.timestamp or datetime.now(UTC)
                 logger.info("Device '%s' marked online at %s", device.device_id, device.last_seen_utc)
             else:
                 device.status = DeviceStatus.offline

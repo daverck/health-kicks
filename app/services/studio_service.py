@@ -1,13 +1,12 @@
 """Studio session management, authorization, and statistics computation service."""
 
-from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import StudioSession, User, UserRole
+from app.db.models import StudioSession, User
 from app.schemas.studio import StudioSessionSummary
 from app.schemas.telemetry import StudioDatasetStatsResponse
 
@@ -22,7 +21,7 @@ def parse_session_uuid(session_id: str | UUID) -> UUID:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Studio session '{session_id}' not found",
-        )
+        ) from None
 
 
 def get_authorized_session(

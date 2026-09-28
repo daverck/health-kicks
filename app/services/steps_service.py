@@ -1,11 +1,12 @@
 """Business logic and persistence service for daily activity step counting."""
 
-from datetime import date, datetime, timezone
 import logging
-from sqlalchemy import func, select
+from datetime import UTC, date, datetime
+
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyActivityStep, DeviceOwnership, UserRole
+from app.db.models import DailyActivityStep, UserRole
 from app.schemas.steps import (
     DailyStepsHistoryResponse,
     DailyStepsSummary,
@@ -21,7 +22,7 @@ def sync_daily_steps(db: Session, user_id: int, payload: DailyStepsSyncPayload) 
     Idempotent operation: updates existing records or inserts new ones.
     """
     synced_count = 0
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
 
     for item in payload.activities:
         stmt = select(DailyActivityStep).where(

@@ -3,11 +3,11 @@
 Issues and verifies signed JWT access tokens and refresh tokens used for API authentication.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import HTTPException, status
 import jwt
+from fastapi import HTTPException, status
 
 from app.core.config import settings
 from app.db.models import User
@@ -15,7 +15,7 @@ from app.db.models import User
 
 def issue_access_token(user: User) -> str:
     """Sign a stateless access token for API calls."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user.id),
         "google_sub": user.google_sub,
@@ -31,7 +31,7 @@ def issue_access_token(user: User) -> str:
 
 def issue_refresh_token(user: User) -> str:
     """Sign a stateless refresh token for session renewals."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user.id),
         "type": "refresh",

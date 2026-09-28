@@ -1,9 +1,8 @@
 """Secure AWS IoT Rule webhook routes."""
 
-from hmac import compare_digest
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -12,6 +11,8 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.schemas.ingestion import IngestionResponse
 from app.services.ingestion_service import ingest_event, ingest_raw_telemetry
+
+__all__ = ["create_ingestion_router", "settings"]
 
 
 def create_ingestion_router() -> APIRouter:

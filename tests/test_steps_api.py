@@ -1,6 +1,5 @@
 """Tests for daily activity steps synchronization and history endpoints."""
 
-from datetime import date, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

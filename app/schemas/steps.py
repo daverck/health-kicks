@@ -1,6 +1,7 @@
 """Pydantic schemas for daily activity step counting and synchronization."""
 
 from datetime import date as date_type
+
 from pydantic import BaseModel, ConfigDict, Field
 
 

@@ -1,8 +1,8 @@
 """Stateless DynamoDB telemetry data access service."""
 
-from datetime import datetime, timezone
-from decimal import Decimal
 import logging
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -27,7 +27,7 @@ def _decimal_to_float(value: Any) -> float:
 
 def _item_to_reading(item: dict[str, Any]) -> ImuReadingResponse:
     ts_us = int(item["timestamp"])
-    ts_iso = datetime.fromtimestamp(ts_us / 1_000_000, tz=timezone.utc)
+    ts_iso = datetime.fromtimestamp(ts_us / 1_000_000, tz=UTC)
     return ImuReadingResponse(
         timestamp_epoch_us=ts_us,
         timestamp_iso=ts_iso,

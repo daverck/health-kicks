@@ -1,7 +1,7 @@
 """SQLAlchemy persistence models for the Cloud API."""
 
-from datetime import date, datetime, timezone
-from enum import Enum
+from datetime import UTC, date, datetime
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
@@ -12,7 +12,7 @@ class Base(DeclarativeBase):
     """Base class for application tables."""
 
 
-class DeviceStatus(str, Enum):
+class DeviceStatus(StrEnum):
     """Known connectivity states for a device."""
 
     online = "online"
@@ -28,7 +28,7 @@ class Device(Base):
     status: Mapped[DeviceStatus] = mapped_column(default=DeviceStatus.offline)
     last_seen_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -43,7 +43,7 @@ class ActivityEvent(Base):
     device_id: Mapped[str] = mapped_column(String(128), index=True)
     event_type: Mapped[str] = mapped_column(String(64), default="walk")
     timestamp_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
     )
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
@@ -59,7 +59,7 @@ class HapticLog(Base):
     intensity: Mapped[int] = mapped_column(Integer)
     duration_ms: Mapped[int] = mapped_column(Integer)
     triggered_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     triggered_by_user: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -76,7 +76,7 @@ class ProcessedMessage(Base):
 # --- Auth & user management (Step 2) ---
 
 
-class UserRole(str, Enum):
+class UserRole(StrEnum):
     """Role hierarchy for authorization checks."""
 
     admin = "admin"
@@ -98,7 +98,7 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(default=UserRole.user)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     last_login_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -123,7 +123,7 @@ class DeviceOwnership(Base):
     user_id: Mapped[int] = mapped_column(Integer, index=True)
     device_id: Mapped[str] = mapped_column(String(128), index=True)
     bound_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -143,7 +143,7 @@ class StudioSession(Base):
     duration_sec: Mapped[float] = mapped_column(Float, default=5.0)
     is_validated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     user: Mapped["User"] = relationship("User", lazy="joined")
@@ -167,8 +167,8 @@ class DailyActivityStep(Base):
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     user: Mapped["User"] = relationship("User", lazy="joined")

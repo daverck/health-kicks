@@ -3,8 +3,8 @@
 Validates that modifying user email is strictly forbidden to preserve OIDC IdP consistency.
 """
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

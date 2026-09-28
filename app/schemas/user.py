@@ -1,6 +1,7 @@
 """Strict Pydantic schemas for User updates."""
 
 from typing import Any
+
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.db.models import UserRole

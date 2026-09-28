@@ -4,9 +4,10 @@ Provides centralized user upsert, account linking across OAuth providers (Google
 Microsoft Entra ID), and atomic race-condition handling.
 """
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
 from typing import Literal
+
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -86,7 +87,7 @@ def upsert_sso_user(
         if avatar_url:
             user.avatar_url = avatar_url
 
-    user.last_login_utc = datetime.now(timezone.utc)
+    user.last_login_utc = datetime.now(UTC)
 
     try:
         session.commit()

@@ -2,10 +2,10 @@
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.api.v1.ingestion import settings as ingestion_settings
+from app.core.config import settings as ingestion_settings
 from app.db.database import get_db
 from app.db.models import ActivityEvent, Base, DeviceOwnership, User, UserRole
 from app.main import app

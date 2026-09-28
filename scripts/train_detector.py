@@ -40,30 +40,19 @@ Usage examples:
     # Development / offline demo mode with synthetic dataset (no AWS access needed):
     $ uv run python -m scripts.train_detector --synthetic
 """
-from pathlib import Path
-from dotenv import load_dotenv
-
-
-def load_project_env() -> None:
-    """Loads project .env file without overriding already defined variables."""
-    env_file = Path(__file__).resolve().parent.parent / ".env"
-    if env_file.exists():
-        load_dotenv(env_file, override=False)
-
 import argparse
-from datetime import datetime, timezone
 import json
 import logging
-import math
-import os
 import sys
+import warnings
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-import warnings
-
+from dotenv import load_dotenv
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     HistGradientBoostingClassifier,
@@ -74,6 +63,14 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+
+
+def load_project_env() -> None:
+    """Loads project .env file without overriding already defined variables."""
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
+
 
 # Logging configuration
 logging.basicConfig(
@@ -296,7 +293,7 @@ def migrate_json_to_npz(json_path: Path, cache_dir: Path) -> int:
         return 0
 
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
+        with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as err:
         logger.warning("JSON->NPZ Migration: failed to read %s: %s", json_path, err)
@@ -525,7 +522,6 @@ def sync_sessions_cache(
                 for sess in batch_chunk
             }
             for future in as_completed(future_to_sess):
-                sess_ref = future_to_sess[future]
                 sess_id, session_dict, exc = future.result()
                 if exc is not None:
                     exc_type = type(exc).__name__
@@ -800,7 +796,7 @@ def train_and_benchmark(
         "fall_classes": fall_classes,
         "benign_classes": benign_classes,
         "window_size_sec": float(window_size_sec),
-        "trained_at_utc": datetime.now(timezone.utc).isoformat(),
+        "trained_at_utc": datetime.now(UTC).isoformat(),
         "is_m2cgen_compatible": (best_name != "HistGradientBoosting"),
         "metrics": {
             "f1_macro": best_info["f1_macro"],

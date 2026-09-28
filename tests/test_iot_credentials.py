@@ -1,12 +1,12 @@
 """Tests for AWS STS IoT credentials token exchange service and endpoint."""
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
+import pytest
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
-import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -38,7 +38,7 @@ def mock_sts_client():
             "AccessKeyId": "ASIA_MOCK_ACCESS_KEY",
             "SecretAccessKey": "mock_secret_key",
             "SessionToken": "mock_session_token_xyz",
-            "Expiration": datetime(2026, 9, 14, 18, 0, 0, tzinfo=timezone.utc),
+            "Expiration": datetime(2026, 9, 14, 18, 0, 0, tzinfo=UTC),
         }
     }
     return client

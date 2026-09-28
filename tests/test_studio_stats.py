@@ -1,8 +1,9 @@
 """Unit tests for Studio dataset statistics service and REST endpoints."""
 
 from unittest.mock import MagicMock
-from botocore.exceptions import ClientError
+
 import pytest
+from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,10 +12,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_current_user
 from app.api.v1.telemetry import create_telemetry_router
-from app.db.models import Base, User, UserRole
 from app.db.database import get_db
 from app.db.models import Base, StudioSession, User, UserRole
-from app.schemas.telemetry import StudioDatasetStatsResponse
 from app.services import token_service
 from app.services.telemetry_service import TelemetryService
 
@@ -204,14 +203,6 @@ def test_get_dataset_stats_raises_on_dynamo_error(telemetry_service, mock_table)
 # ---------------------------------------------------------------------------
 
 
-def test_get_device_studio_stats_endpoint(test_client, mock_table) -> None:
-    mock_table.query.return_value = {
-        "Items": [
-            {"session_id": "s1", "label": "walk"},
-            {"session_id": "s1", "label": "walk"},
-            {"session_id": "s2", "label": "stumble"},
-        ]
-    }
 def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
     s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="walk", duration_sec=5.0, sample_count=50)
@@ -230,14 +221,6 @@ def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) ->
     assert data["by_label"] == {"walk": 1, "stumble": 1}
 
 
-def test_get_global_studio_stats_endpoint(test_client, mock_table) -> None:
-    mock_table.scan.return_value = {
-        "Items": [
-            {"session_id": "s1", "label": "walk"},
-            {"session_id": "s2", "label": "walk"},
-            {"session_id": "s3", "label": "run"},
-        ]
-    }
 def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
     s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-1", label="walk", duration_sec=5.0, sample_count=50)

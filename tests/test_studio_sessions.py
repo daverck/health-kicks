@@ -1,9 +1,9 @@
 """Unit tests for Studio sessions history, RBAC, and curation endpoints."""
 
-from datetime import datetime, timezone
-from decimal import Decimal
-from unittest.mock import MagicMock
 import uuid
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,7 +11,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import get_current_user
 from app.api.v1.studio_sessions import create_studio_sessions_router
 from app.db.database import get_db
 from app.db.models import Base, StudioSession, User, UserRole
@@ -174,9 +173,9 @@ def test_list_sessions_admin_filtering_by_user_id(client, admin_user, user_a, us
 
 
 def test_list_sessions_filtering_and_pagination(client, user_a, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 1, 2, tzinfo=timezone.utc))
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 1, 3, tzinfo=timezone.utc))
+    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 1, 1, tzinfo=UTC))
+    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 1, 2, tzinfo=UTC))
+    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 1, 3, tzinfo=UTC))
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -198,9 +197,9 @@ def test_list_sessions_filtering_and_pagination(client, user_a, db_session) -> N
 
 
 def test_list_sessions_filter_by_date_range(client, user_a, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 5, 1, 10, 0, tzinfo=timezone.utc))
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 5, 2, 14, 0, tzinfo=timezone.utc))
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 5, 3, 18, 0, tzinfo=timezone.utc))
+    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 5, 1, 10, 0, tzinfo=UTC))
+    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 5, 2, 14, 0, tzinfo=UTC))
+    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 5, 3, 18, 0, tzinfo=UTC))
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -251,12 +250,12 @@ def test_get_session_readings_success(client, user_a, mock_telemetry_service, db
         readings=[
             ImuReadingResponse(
                 timestamp_epoch_us=100,
-                timestamp_iso=datetime.now(timezone.utc),
+                timestamp_iso=datetime.now(UTC),
                 ax=1.0, ay=0.0, az=9.8, gx=0.1, gy=0.0, gz=0.0,
             ),
             ImuReadingResponse(
                 timestamp_epoch_us=200,
-                timestamp_iso=datetime.now(timezone.utc),
+                timestamp_iso=datetime.now(UTC),
                 ax=1.1, ay=0.1, az=9.7, gx=0.2, gy=0.0, gz=0.0,
             ),
         ],

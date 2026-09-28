@@ -1,7 +1,7 @@
 """FastAPI router for daily activity steps synchronization and history."""
 
-from datetime import date, datetime, timedelta, timezone
 import logging
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -56,7 +56,7 @@ def create_steps_router() -> APIRouter:
         """Fetch step counts history grouped by day and activity type."""
         verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
 
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
 
         if to_date is None:
             resolved_to_date = today

@@ -2,11 +2,12 @@
 
 import dataclasses
 from unittest.mock import MagicMock, patch
+
+import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from itsdangerous import URLSafeSerializer
-import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool

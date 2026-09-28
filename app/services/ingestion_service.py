@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -6,17 +6,26 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import ActivityEvent, Device, DeviceOwnership, DeviceStatus, ProcessedMessage, StudioSession, User, UserRole
+from app.db.models import (
+    ActivityEvent,
+    Device,
+    DeviceOwnership,
+    DeviceStatus,
+    ProcessedMessage,
+    StudioSession,
+    User,
+    UserRole,
+)
 from app.schemas.ingestion import DeviceStatusEvent, IngestionEvent
 
 
 def _timestamp(value: Any) -> datetime:
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, str):
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    return datetime.now(UTC)
 
 
 def _parts(message: dict[str, Any], headers: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -84,7 +93,7 @@ def ingest_device_status(
     device = _get_device(
         session,
         contract.header.device_id,
-        contract.header.timestamp_utc or datetime.now(timezone.utc),
+        contract.header.timestamp_utc or datetime.now(UTC),
     )
     device.status = DeviceStatus(contract.payload.status)
     session.commit()
@@ -155,7 +164,7 @@ def ingest_raw_telemetry(
         sample_count=sample_count,
         duration_sec=float(payload.get("duration_sec", 5.0)),
         is_validated=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(studio_session)
     session.commit()

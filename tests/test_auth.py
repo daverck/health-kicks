@@ -2,12 +2,13 @@
 
 import dataclasses
 
+import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_current_user, require_roles
 from app.db.models import Base, User, UserRole
@@ -57,11 +58,10 @@ def test_issue_and_verify_access_token_roundtrip(db_session) -> None:
 
 
 def test_verify_rejects_tampered_token() -> None:
-
     token = token_service.issue_access_token(
         User(google_sub="s", email="b@example.com", role=UserRole.user)
     )
-    with pytest.raises(Exception):
+    with pytest.raises(jwt.PyJWTError):
         token_service.verify_access_token(token + "x")
 
 
@@ -111,7 +111,6 @@ def test_role_authorization_rejects_non_admin(db_session) -> None:
     db_session.commit()
     db_session.refresh(user)
 
-    from app.db.database import get_db
     from app.api.deps import bearer_scheme
 
     app = _protected_app(db_session)
@@ -141,7 +140,6 @@ def test_role_authorization_rejects_non_admin(db_session) -> None:
 
 
 def test_missing_token_is_unauthorized(db_session) -> None:
-    from app.api.deps import bearer_scheme
 
     app = _protected_app(db_session)
     client = TestClient(app)
@@ -220,7 +218,9 @@ def test_endpoint_google_callback_rejects_azure_state() -> None:
 def test_endpoint_google_callback_post_success(db_session, monkeypatch) -> None:
     import secrets
     from unittest.mock import patch
+
     from itsdangerous import URLSafeSerializer
+
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app
@@ -266,10 +266,12 @@ def test_endpoint_google_callback_post_success(db_session, monkeypatch) -> None:
 def test_endpoint_google_callback_post_token_exchange_error() -> None:
     import secrets
     from unittest.mock import patch
+
     from itsdangerous import URLSafeSerializer
+
     from app.core.config import settings
-    from app.services.google_auth_service import GoogleAuthError
     from app.main import app
+    from app.services.google_auth_service import GoogleAuthError
 
     serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
@@ -318,8 +320,9 @@ def test_verify_google_id_token_audience_mismatch(mock_google_settings) -> None:
 
 def test_verify_google_id_token_expired(mock_google_settings) -> None:
     mock_google_settings(google_client_id="expected-client-id")
-    import jwt
     import time
+
+    import jwt
     token = jwt.encode(
         {
             "iss": "https://accounts.google.com",
@@ -335,9 +338,10 @@ def test_verify_google_id_token_expired(mock_google_settings) -> None:
 
 def test_verify_google_id_token_no_matching_key(mock_google_settings) -> None:
     mock_google_settings(google_client_id="expected-client-id")
-    import jwt
     import time
     from unittest.mock import patch
+
+    import jwt
     token = jwt.encode(
         {
             "iss": "https://accounts.google.com",
@@ -358,8 +362,9 @@ def test_exchange_code_for_id_token_network_error(mock_google_settings) -> None:
         google_client_id="g-client-id",
         google_client_secret="g-client-secret",
     )
-    import httpx
     from unittest.mock import patch
+
+    import httpx
     with patch("httpx.post", side_effect=httpx.ConnectError("Connection refused")):
         with pytest.raises(google_auth_service.GoogleAuthError, match="network failure"):
             google_auth_service.exchange_code_for_id_token("auth-code")
@@ -368,7 +373,9 @@ def test_exchange_code_for_id_token_network_error(mock_google_settings) -> None:
 def test_endpoint_google_callback_post_unexpected_exception(caplog) -> None:
     import secrets
     from unittest.mock import patch
+
     from itsdangerous import URLSafeSerializer
+
     from app.core.config import settings
     from app.main import app
 
@@ -405,9 +412,11 @@ def test_issue_and_verify_refresh_token_roundtrip(db_session) -> None:
 
 
 def test_verify_refresh_token_expired(db_session) -> None:
-    import jwt
     import time
+
+    import jwt
     from fastapi import HTTPException
+
     from app.core.config import settings
 
     user = User(google_sub="exp-sub", email="exp@example.com", role=UserRole.user)
@@ -445,8 +454,9 @@ def test_verify_refresh_token_rejects_access_token(db_session) -> None:
 
 
 def test_verify_refresh_token_invalid_signature() -> None:
-    import jwt
     import time
+
+    import jwt
     from fastapi import HTTPException
 
     token = jwt.encode(
@@ -461,9 +471,11 @@ def test_verify_refresh_token_invalid_signature() -> None:
 
 
 def test_verify_refresh_token_invalid_subject() -> None:
-    import jwt
     import time
+
+    import jwt
     from fastapi import HTTPException
+
     from app.core.config import settings
 
     # sub is not a valid int
@@ -529,8 +541,10 @@ def test_endpoint_refresh_nominal(db_session) -> None:
 
 
 def test_endpoint_refresh_expired_token(db_session) -> None:
-    import jwt
     import time
+
+    import jwt
+
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app
@@ -590,8 +604,10 @@ def test_endpoint_refresh_inactive_user(db_session) -> None:
 
 
 def test_endpoint_refresh_unknown_user(db_session) -> None:
-    import jwt
     import time
+
+    import jwt
+
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app
