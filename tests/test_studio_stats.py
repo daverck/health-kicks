@@ -203,6 +203,14 @@ def test_get_dataset_stats_raises_on_dynamo_error(telemetry_service, mock_table)
 # ---------------------------------------------------------------------------
 
 
+def test_get_device_studio_stats_endpoint(test_client, mock_table) -> None:
+    mock_table.query.return_value = {
+        "Items": [
+            {"session_id": "s1", "label": "walk"},
+            {"session_id": "s1", "label": "walk"},
+            {"session_id": "s2", "label": "stumble"},
+        ]
+    }
 def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
     s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="walk", duration_sec=5.0, sample_count=50)
@@ -221,6 +229,14 @@ def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) ->
     assert data["by_label"] == {"walk": 1, "stumble": 1}
 
 
+def test_get_global_studio_stats_endpoint(test_client, mock_table) -> None:
+    mock_table.scan.return_value = {
+        "Items": [
+            {"session_id": "s1", "label": "walk"},
+            {"session_id": "s2", "label": "walk"},
+            {"session_id": "s3", "label": "run"},
+        ]
+    }
 def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
     s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-1", label="walk", duration_sec=5.0, sample_count=50)

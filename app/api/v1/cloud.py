@@ -44,9 +44,9 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
                 triggered_at_utc=now,
             ))
             db.commit()
-        except SQLAlchemyError as err:
+        except SQLAlchemyError:
             db.rollback()
-            raise HTTPException(status_code=500, detail="Unable to persist haptic command") from err
+            raise HTTPException(status_code=500, detail="Unable to persist haptic command")
         if not published:
             raise HTTPException(status_code=503, detail="AWS IoT publish unavailable")
         return {"status": "command_sent", "device_id": device_id, "intensity": command.intensity, "duration_ms": command.duration_ms}

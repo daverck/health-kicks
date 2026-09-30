@@ -115,7 +115,7 @@ def create_studio_sessions_router(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to retrieve studio session readings from telemetry store",
-            ) from error
+            )
 
         if readings is None:
             return StudioSessionReadingsResponse(

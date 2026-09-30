@@ -1,7 +1,7 @@
 """Strict Pydantic schemas for Studio sessions dataset curation."""
 
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from uuid import UUID
 
 from pydantic import Field
@@ -9,7 +9,7 @@ from pydantic import Field
 from app.schemas.cloud import StrictModel
 
 
-class StudioActivityLabel(StrEnum):
+class StudioActivityLabel(str, Enum):
     """Standard activity labels for Studio IMU recordings."""
 
     WALK = "walk"

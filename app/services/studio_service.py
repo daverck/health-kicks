@@ -21,7 +21,7 @@ def parse_session_uuid(session_id: str | UUID) -> UUID:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Studio session '{session_id}' not found",
-        ) from None
+        )
 
 
 def get_authorized_session(

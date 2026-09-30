@@ -1,7 +1,7 @@
 """SQLAlchemy persistence models for the Cloud API."""
 
 from datetime import UTC, date, datetime
-from enum import StrEnum
+from enum import Enum
 from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
@@ -12,7 +12,7 @@ class Base(DeclarativeBase):
     """Base class for application tables."""
 
 
-class DeviceStatus(StrEnum):
+class DeviceStatus(str, Enum):
     """Known connectivity states for a device."""
 
     online = "online"
@@ -76,7 +76,7 @@ class ProcessedMessage(Base):
 # --- Auth & user management (Step 2) ---
 
 
-class UserRole(StrEnum):
+class UserRole(str, Enum):
     """Role hierarchy for authorization checks."""
 
     admin = "admin"

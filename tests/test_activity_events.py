@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.config import settings as ingestion_settings
+from app.api.v1.ingestion import settings as ingestion_settings
 from app.db.database import get_db
 from app.db.models import ActivityEvent, Base, DeviceOwnership, User, UserRole
 from app.main import app
@@ -339,7 +339,7 @@ def test_list_activities_filter_by_date_range(client, db_session, auth_headers):
     day2 = datetime(2026, 9, 12, 15, 0, 0, tzinfo=UTC)
     day3 = datetime(2026, 9, 13, 8, 0, 0, tzinfo=UTC)
 
-    for ts in [day1, day2, day3]:
+    for i, ts in enumerate([day1, day2, day3]):
         db_session.add(
             ActivityEvent(
                 device_id="HK-DATES",

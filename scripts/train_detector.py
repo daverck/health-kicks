@@ -40,19 +40,28 @@ Usage examples:
     # Development / offline demo mode with synthetic dataset (no AWS access needed):
     $ uv run python -m scripts.train_detector --synthetic
 """
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+def load_project_env() -> None:
+    """Loads project .env file without overriding already defined variables."""
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
+
 import argparse
 import json
 import logging
 import sys
 import warnings
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     HistGradientBoostingClassifier,
@@ -63,14 +72,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-
-
-def load_project_env() -> None:
-    """Loads project .env file without overriding already defined variables."""
-    env_file = Path(__file__).resolve().parent.parent / ".env"
-    if env_file.exists():
-        load_dotenv(env_file, override=False)
-
 
 # Logging configuration
 logging.basicConfig(
@@ -522,6 +523,7 @@ def sync_sessions_cache(
                 for sess in batch_chunk
             }
             for future in as_completed(future_to_sess):
+                sess_ref = future_to_sess[future]
                 sess_id, session_dict, exc = future.result()
                 if exc is not None:
                     exc_type = type(exc).__name__

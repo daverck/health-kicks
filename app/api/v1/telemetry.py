@@ -133,7 +133,7 @@ def create_telemetry_router(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to dispatch command to device",
-            ) from error
+            )
         except Exception as error:
             logger.exception(
                 "Unexpected error dispatching studio start to %s: %s",
@@ -143,7 +143,7 @@ def create_telemetry_router(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to dispatch command to device",
-            ) from error
+            )
 
         # Immediate PostgreSQL persistence
         session_record = StudioSession(
