@@ -31,3 +31,9 @@ auth:
 
 public_origins:
   - http://localhost:3000
+
+s3:
+  firmware_bucket: healthkicks-firmware-releases
+  firmware_key: firmware/esp32s3/latest/firmware.bin
+  presigned_url_expire_seconds: 900
+

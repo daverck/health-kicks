@@ -16,6 +16,7 @@ from alembic import command
 from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router
+from app.api.v1.firmware import create_firmware_router
 from app.api.v1.ingestion import create_ingestion_router
 from app.api.v1.internal import create_internal_router
 from app.api.v1.steps import create_steps_router
@@ -103,6 +104,7 @@ app.include_router(create_internal_router())
 app.include_router(create_telemetry_router())
 app.include_router(create_studio_sessions_router())
 app.include_router(create_steps_router())
+app.include_router(create_firmware_router())
 
 
 @app.get("/", tags=["Health"])

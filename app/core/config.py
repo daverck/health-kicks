@@ -60,6 +60,10 @@ class Settings:
     database_pool_pre_ping: bool = True
     # Logging
     log_level: str = "INFO"
+    # S3 Firmware distribution
+    s3_firmware_bucket: str = "healthkicks-firmware-releases"
+    s3_firmware_key: str = "firmware/esp32s3/latest/firmware.bin"
+    s3_presigned_url_expire_seconds: int = 900
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -175,6 +179,23 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             "log_level",
             _nested_value(yaml_values, "logging", "level", defaults.log_level),
         ),
+        # S3 Firmware distribution
+        "s3_firmware_bucket": yaml_values.get(
+            "s3_firmware_bucket",
+            _nested_value(yaml_values, "s3", "firmware_bucket", defaults.s3_firmware_bucket),
+        ),
+        "s3_firmware_key": yaml_values.get(
+            "s3_firmware_key",
+            _nested_value(yaml_values, "s3", "firmware_key", defaults.s3_firmware_key),
+        ),
+        "s3_presigned_url_expire_seconds": int(
+            yaml_values.get(
+                "s3_presigned_url_expire_seconds",
+                _nested_value(
+                    yaml_values, "s3", "presigned_url_expire_seconds", defaults.s3_presigned_url_expire_seconds
+                ),
+            )
+        ),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -248,6 +269,13 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         ),
         # Logging
         "log_level": (("HEALTHKICKS_LOG_LEVEL", "LOG_LEVEL"), str),
+        # S3 Firmware distribution
+        "s3_firmware_bucket": (("HEALTHKICKS_S3_FIRMWARE_BUCKET", "S3_FIRMWARE_BUCKET"), str),
+        "s3_firmware_key": (("HEALTHKICKS_S3_FIRMWARE_KEY", "S3_FIRMWARE_KEY"), str),
+        "s3_presigned_url_expire_seconds": (
+            ("HEALTHKICKS_S3_PRESIGNED_URL_EXPIRE_SECONDS", "S3_PRESIGNED_URL_EXPIRE_SECONDS"),
+            int,
+        ),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
