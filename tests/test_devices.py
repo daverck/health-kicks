@@ -108,6 +108,10 @@ def test_bind_factory_device(client, auth_headers_a, db_session, user_a) -> None
     assert data["name"] == "Left Smart Shoe"
     assert data["status"] == DeviceStatus.offline.value
     assert data["last_seen_utc"] is None
+    assert data["is_online"] is False
+    assert data["firmware_version"] == "v1.2.0-esp32s3"
+    assert data["last_seen"] is None
+    assert data["last_calibration_time"] is None
     assert data["bound_at_utc"] is not None
     assert "id" in data
     assert "created_at" in data

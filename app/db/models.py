@@ -27,6 +27,12 @@ class Device(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[DeviceStatus] = mapped_column(default=DeviceStatus.offline)
     last_seen_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    firmware_version: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default="v1.2.0-esp32s3"
+    )
+    last_calibration_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

@@ -18,7 +18,7 @@ class DeviceCreate(BaseModel):
 
 
 class DeviceResponse(BaseModel):
-    """A device bound to a user, including the binding timestamp."""
+    """A device bound to a user, including connectivity and hardware health metadata."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -26,7 +26,11 @@ class DeviceResponse(BaseModel):
     device_id: str
     name: str | None = None
     status: DeviceStatus
+    is_online: bool = False
+    last_seen: datetime | None = None
     last_seen_utc: datetime | None = None
+    firmware_version: str | None = None
+    last_calibration_time: datetime | None = None
     created_at: datetime
     bound_at_utc: datetime
 

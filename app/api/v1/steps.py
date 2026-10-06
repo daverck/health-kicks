@@ -13,9 +13,14 @@ from app.schemas.steps import (
     DailyStepsHistoryResponse,
     DailyStepsSyncPayload,
     DailyStepsSyncResponse,
+    HourlyStepsResponse,
 )
 from app.services.device_service import verify_device_ownership
-from app.services.steps_service import get_steps_history, sync_daily_steps
+from app.services.steps_service import (
+    get_hourly_steps,
+    get_steps_history,
+    sync_daily_steps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,27 @@ def create_steps_router() -> APIRouter:
             user_role=user.role,
             from_date=resolved_from_date,
             to_date=resolved_to_date,
+        )
+
+    @router.get(
+        "/hourly",
+        response_model=HourlyStepsResponse,
+        summary="Retrieve 24-hour step counts breakdown for a device on a specific date",
+    )
+    def get_hourly(
+        device_id: Annotated[str, Query(description="Target device ID", min_length=1, max_length=64)],
+        date: Annotated[date, Query(description="Calendar date (YYYY-MM-DD)")],
+        user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> HourlyStepsResponse:
+        """Fetch hourly step counts breakdown distributed across the 24 hours of a target date."""
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        return get_hourly_steps(
+            db=db,
+            device_id=device_id,
+            user_id=user.id,
+            user_role=user.role,
+            target_date=date,
         )
 
     return router

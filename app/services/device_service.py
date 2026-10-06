@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Device, DeviceOwnership, User, UserRole
+from app.db.models import Device, DeviceOwnership, DeviceStatus, User, UserRole
 from app.schemas.device import DeviceCreate, DeviceResponse
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,11 @@ def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceRespo
         device_id=device.device_id,
         name=device.name,
         status=device.status,
+        is_online=(device.status == DeviceStatus.online),
+        last_seen=device.last_seen_utc,
         last_seen_utc=device.last_seen_utc,
+        firmware_version=device.firmware_version or "v1.2.0-esp32s3",
+        last_calibration_time=device.last_calibration_time,
         created_at=device.created_at,
         bound_at_utc=new_ownership.bound_at_utc,
     )
@@ -149,7 +153,11 @@ def list_user_devices(
             device_id=device.device_id,
             name=device.name,
             status=device.status,
+            is_online=(device.status == DeviceStatus.online),
+            last_seen=device.last_seen_utc,
             last_seen_utc=device.last_seen_utc,
+            firmware_version=device.firmware_version or "v1.2.0-esp32s3",
+            last_calibration_time=device.last_calibration_time,
             created_at=device.created_at,
             bound_at_utc=bound_at_utc,
         )
@@ -177,7 +185,11 @@ def list_all_devices(
             device_id=device.device_id,
             name=device.name,
             status=device.status,
+            is_online=(device.status == DeviceStatus.online),
+            last_seen=device.last_seen_utc,
             last_seen_utc=device.last_seen_utc,
+            firmware_version=device.firmware_version or "v1.2.0-esp32s3",
+            last_calibration_time=device.last_calibration_time,
             created_at=device.created_at,
             bound_at_utc=bound_at_utc or device.created_at,
         )

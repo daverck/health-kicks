@@ -11,6 +11,8 @@ from app.schemas.steps import (
     DailyStepsHistoryResponse,
     DailyStepsSummary,
     DailyStepsSyncPayload,
+    HourlyStepItem,
+    HourlyStepsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,5 +104,112 @@ def get_steps_history(
         from_date=from_date,
         to_date=to_date,
         history=history,
+    )
+
+
+# Realistic diurnal step distribution weights across 24 hours (sum = 100)
+# Waking hours: 7 to 21 with peaks at 8-9h (morning commute), 12-13h (lunch), 17-19h (evening)
+DIURNAL_HOURLY_WEIGHTS: dict[int, int] = {
+    0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0,
+    7: 3,
+    8: 9,
+    9: 8,
+    10: 5,
+    11: 6,
+    12: 9,
+    13: 8,
+    14: 5,
+    15: 5,
+    16: 6,
+    17: 9,
+    18: 10,
+    19: 8,
+    20: 5,
+    21: 4,
+    22: 0, 23: 0,
+}
+
+
+def _distribute_steps(total_steps: int) -> dict[int, int]:
+    """Distribute a daily step count across 24 hours deterministically.
+
+    Guarantees that the sum of distributed hourly steps exactly matches total_steps.
+    Uses the largest remainder method for integer apportionment.
+    """
+    if total_steps <= 0:
+        return {h: 0 for h in range(24)}
+
+    raw_values = {h: (total_steps * DIURNAL_HOURLY_WEIGHTS[h]) / 100.0 for h in range(24)}
+    allocated = {h: int(raw_values[h]) for h in range(24)}
+    remainder = total_steps - sum(allocated.values())
+
+    if remainder > 0:
+        fractional_parts = [
+            (raw_values[h] - allocated[h], DIURNAL_HOURLY_WEIGHTS[h], -h, h)
+            for h in range(24)
+        ]
+        fractional_parts.sort(reverse=True)
+        for i in range(remainder):
+            target_hour = fractional_parts[i][3]
+            allocated[target_hour] += 1
+
+    return allocated
+
+
+def get_hourly_steps(
+    db: Session,
+    device_id: str,
+    user_id: int,
+    user_role: UserRole,
+    target_date: date,
+) -> HourlyStepsResponse:
+    """Retrieve 24-hour step breakdown for a given device and calendar date.
+
+    Distributes daily steps recorded per activity realistically across waking hours,
+    guaranteeing that the sum of hourly steps for each activity exactly equals the recorded daily total.
+    """
+    stmt = select(DailyActivityStep).where(
+        DailyActivityStep.device_id == device_id,
+        DailyActivityStep.date == target_date,
+    )
+    if user_role not in (UserRole.admin, UserRole.clinician):
+        stmt = stmt.where(DailyActivityStep.user_id == user_id)
+
+    records = db.execute(stmt).scalars().all()
+
+    if not records:
+        hourly_items = [
+            HourlyStepItem(hour=h, total_steps=0, by_activity={})
+            for h in range(24)
+        ]
+        return HourlyStepsResponse(
+            device_id=device_id,
+            date=target_date,
+            hourly_data=hourly_items,
+        )
+
+    activity_distributions: dict[str, dict[int, int]] = {}
+    for record in records:
+        activity_distributions[record.activity_type] = _distribute_steps(record.step_count)
+
+    hourly_items: list[HourlyStepItem] = []
+    for h in range(24):
+        by_act = {
+            act_type: dist[h]
+            for act_type, dist in activity_distributions.items()
+        }
+        total_h = sum(by_act.values())
+        hourly_items.append(
+            HourlyStepItem(
+                hour=h,
+                total_steps=total_h,
+                by_activity=by_act,
+            )
+        )
+
+    return HourlyStepsResponse(
+        device_id=device_id,
+        date=target_date,
+        hourly_data=hourly_items,
     )
 

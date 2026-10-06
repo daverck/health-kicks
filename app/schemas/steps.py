@@ -83,3 +83,23 @@ class DailyStepsHistoryResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class HourlyStepItem(BaseModel):
+    """Hourly step count breakdown and activity distribution."""
+
+    hour: int = Field(..., ge=0, le=23, description="Hour of the day 0 to 23")
+    total_steps: int = Field(0, ge=0, description="Total steps in this hour")
+    by_activity: dict[str, int] = Field(default_factory=dict, description="Steps breakdown by activity")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HourlyStepsResponse(BaseModel):
+    """24-hour step breakdown for a target device and calendar date."""
+
+    device_id: str = Field(..., description="Target device identifier")
+    date: date_type = Field(..., description="Calendar date (YYYY-MM-DD)")
+    hourly_data: list[HourlyStepItem] = Field(default_factory=list, description="24-hour step breakdown")
+
+    model_config = ConfigDict(from_attributes=True)
+

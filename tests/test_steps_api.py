@@ -269,3 +269,69 @@ def test_steps_rbac_isolation(client, auth_headers_regular, auth_headers_other, 
     assert len(res_admin.json()["history"]) == 1
     assert res_admin.json()["history"][0]["total_steps"] == 5000
 
+
+def test_get_hourly_steps_populated(client, auth_headers_regular) -> None:
+    """Test retrieving hourly step breakdown when daily steps exist."""
+    # Sync steps for a test day
+    client.post(
+        "/api/v1/steps/sync",
+        json={
+            "device_id": "HK-SHOE-001",
+            "date": "2026-10-06",
+            "activities": [
+                {"activity_type": "walk", "step_count": 4500},
+                {"activity_type": "run", "step_count": 1200},
+                {"activity_type": "stairs", "step_count": 300},
+            ],
+        },
+        headers=auth_headers_regular,
+    )
+
+    res = client.get(
+        "/api/v1/steps/hourly?device_id=HK-SHOE-001&date=2026-10-06",
+        headers=auth_headers_regular,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["device_id"] == "HK-SHOE-001"
+    assert data["date"] == "2026-10-06"
+    assert len(data["hourly_data"]) == 24
+
+    # Verify that the sum of hourly steps exactly equals the daily total
+    total_hourly_walk = sum(item["by_activity"].get("walk", 0) for item in data["hourly_data"])
+    total_hourly_run = sum(item["by_activity"].get("run", 0) for item in data["hourly_data"])
+    total_hourly_stairs = sum(item["by_activity"].get("stairs", 0) for item in data["hourly_data"])
+
+    assert total_hourly_walk == 4500
+    assert total_hourly_run == 1200
+    assert total_hourly_stairs == 300
+
+    total_all_hourly = sum(item["total_steps"] for item in data["hourly_data"])
+    assert total_all_hourly == 6000
+
+
+def test_get_hourly_steps_empty_date(client, auth_headers_regular) -> None:
+    """Test retrieving hourly step breakdown for a date with no records."""
+    res = client.get(
+        "/api/v1/steps/hourly?device_id=HK-SHOE-001&date=2026-01-01",
+        headers=auth_headers_regular,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["hourly_data"]) == 24
+    assert all(item["total_steps"] == 0 for item in data["hourly_data"])
+
+
+def test_get_hourly_steps_unauthorized_and_forbidden(client, auth_headers_other) -> None:
+    """Test 401 unauthenticated and 403 forbidden device ownership checks on hourly steps."""
+    # 401 without auth header
+    res_unauth = client.get("/api/v1/steps/hourly?device_id=HK-SHOE-001&date=2026-10-06")
+    assert res_unauth.status_code == 401
+
+    # 403 when requesting device not bound to user
+    res_forbid = client.get(
+        "/api/v1/steps/hourly?device_id=HK-SHOE-001&date=2026-10-06",
+        headers=auth_headers_other,
+    )
+    assert res_forbid.status_code == 403
+
