@@ -1,4 +1,4 @@
-"""FastAPI router for firmware distribution and updates."""
+"""FastAPI router for S3 firmware binary distribution with JWT access control."""
 
 from typing import Annotated
 
@@ -9,25 +9,26 @@ from app.schemas.firmware import FirmwareLatestResponse
 from app.services.firmware_service import FirmwareDistributionService
 
 
-def create_firmware_router(
-    service: FirmwareDistributionService | None = None,
-) -> APIRouter:
-    """Instantiate and configure the firmware router."""
-    router = APIRouter(prefix="/api/v1/firmware", tags=["Firmware"])
+def get_firmware_service() -> FirmwareDistributionService:
+    """Dependency provider for FirmwareDistributionService."""
+    return FirmwareDistributionService()
 
-    def get_service() -> FirmwareDistributionService:
-        return service if service is not None else FirmwareDistributionService()
+
+def create_firmware_router(service: FirmwareDistributionService | None = None) -> APIRouter:
+    """Instantiate and configure the firmware distribution router."""
+    router = APIRouter(prefix="/api/v1/firmware", tags=["Firmware"])
 
     @router.get(
         "/latest",
         response_model=FirmwareLatestResponse,
-        summary="Retrieve latest firmware release metadata and pre-signed download URL",
+        summary="Get latest ESP32-S3 firmware release pre-signed download URL",
     )
     def get_latest_firmware(
         user: CurrentUser,
-        firmware_service: Annotated[FirmwareDistributionService, Depends(get_service)],
+        svc: Annotated[FirmwareDistributionService, Depends(get_firmware_service)],
     ) -> FirmwareLatestResponse:
-        """Fetch metadata and temporary pre-signed URL to download the latest ESP32-S3 firmware binary."""
-        return firmware_service.get_latest_firmware()
+        active_service = service or svc
+        return active_service.get_latest_firmware()
 
     return router
+

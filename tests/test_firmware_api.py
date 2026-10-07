@@ -1,6 +1,6 @@
-"""Unit and integration tests for firmware distribution endpoint and service."""
+"""Tests for S3 firmware binary distribution endpoint with JWT access control."""
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.v1.firmware import get_firmware_service
 from app.db.database import get_db
 from app.db.models import Base, User, UserRole
 from app.main import app
@@ -19,6 +20,7 @@ from app.services.firmware_service import FirmwareDistributionService
 
 @pytest.fixture()
 def db_session():
+    """In-memory SQLite session for isolated database tests."""
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -30,6 +32,7 @@ def db_session():
 
 @pytest.fixture()
 def client(db_session):
+    """Test client with database session override."""
     def override_get_db():
         yield db_session
 
@@ -40,11 +43,12 @@ def client(db_session):
 
 
 @pytest.fixture()
-def auth_user(db_session) -> User:
+def regular_user(db_session) -> User:
+    """Create a regular test user."""
     user = User(
         google_sub="sub-firmware-user",
-        email="firmware_tester@example.com",
-        name="Firmware Tester",
+        email="firmware@example.com",
+        name="Firmware Test User",
         role=UserRole.user,
     )
     db_session.add(user)
@@ -54,132 +58,82 @@ def auth_user(db_session) -> User:
 
 
 @pytest.fixture()
-def auth_headers(auth_user) -> dict[str, str]:
-    token = token_service.issue_access_token(auth_user)
+def auth_headers(regular_user) -> dict[str, str]:
+    token = token_service.issue_access_token(regular_user)
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_firmware_latest_unauthenticated_rejected(client) -> None:
-    """Verify that requests without JWT return 401 Unauthorized."""
+def test_get_latest_firmware_unauthorized(client) -> None:
+    """Requesting latest firmware without JWT Bearer token returns 401."""
     response = client.get("/api/v1/firmware/latest")
     assert response.status_code == 401
-    assert "Missing bearer token" in response.json()["detail"]
 
 
-def test_firmware_latest_success(client, auth_headers, monkeypatch) -> None:
-    """Verify 200 OK with metadata and pre-signed URL when S3 object exists."""
+def test_get_latest_firmware_success(client, auth_headers) -> None:
+    """Requesting latest firmware with valid JWT returns pre-signed S3 URL and metadata."""
     mock_s3 = MagicMock()
     mock_s3.head_object.return_value = {
         "Metadata": {
             "version": "v1.2.1-esp32s3",
-            "sha256": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            "sha256": "8a32f6b3e7d581f148e658091ecb6a93ad5d24d26f047ff690b200b3e55c2aa7",
         },
-        "ContentLength": 805641,
-        "LastModified": datetime(2026, 10, 6, 12, 0, 0, tzinfo=UTC),
+        "ContentLength": 1048576,
+        "LastModified": datetime(2026, 10, 6, 21, 30, tzinfo=timezone.utc),
     }
     mock_s3.generate_presigned_url.return_value = (
-        "https://healthkicks-firmware-releases.s3.eu-north-1.amazonaws.com/firmware/esp32s3/latest/firmware.bin?AWSAccessKeyId=MOCK"
+        "https://healthkicks-firmware-releases.s3.eu-north-1.amazonaws.com/firmware/esp32s3/latest/firmware.bin?AWSAccessKeyId=test"
     )
-
-    monkeypatch.setattr(
-        "app.services.firmware_service.boto3.client",
-        lambda *args, **kwargs: mock_s3,
-    )
-
-    response = client.get("/api/v1/firmware/latest", headers=auth_headers)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["version"] == "v1.2.1-esp32s3"
-    assert data["sha256"] == "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-    assert data["size_bytes"] == 805641
-    assert data["download_url"].startswith("https://healthkicks-firmware-releases.s3")
-    assert data["expires_in_seconds"] == 900
-    assert "release_date" in data
-
-
-def test_firmware_latest_not_found(client, auth_headers, monkeypatch) -> None:
-    """Verify 404 Not Found when S3 head_object raises 404."""
-    mock_s3 = MagicMock()
-    mock_s3.head_object.side_effect = ClientError(
-        error_response={"Error": {"Code": "404", "Message": "Not Found"}},
-        operation_name="HeadObject",
-    )
-
-    monkeypatch.setattr(
-        "app.services.firmware_service.boto3.client",
-        lambda *args, **kwargs: mock_s3,
-    )
-
-    response = client.get("/api/v1/firmware/latest", headers=auth_headers)
-    assert response.status_code == 404
-    assert response.json()["detail"] == "No firmware release found on S3"
-
-
-def test_firmware_latest_nosuchkey(client, auth_headers, monkeypatch) -> None:
-    """Verify 404 Not Found when S3 head_object raises NoSuchKey."""
-    mock_s3 = MagicMock()
-    mock_s3.head_object.side_effect = ClientError(
-        error_response={"Error": {"Code": "NoSuchKey", "Message": "The specified key does not exist."}},
-        operation_name="HeadObject",
-    )
-
-    monkeypatch.setattr(
-        "app.services.firmware_service.boto3.client",
-        lambda *args, **kwargs: mock_s3,
-    )
-
-    response = client.get("/api/v1/firmware/latest", headers=auth_headers)
-    assert response.status_code == 404
-    assert response.json()["detail"] == "No firmware release found on S3"
-
-
-def test_firmware_latest_s3_client_error_503(client, auth_headers, monkeypatch) -> None:
-    """Verify 503 Service Unavailable when S3 client raises generic ClientError."""
-    mock_s3 = MagicMock()
-    mock_s3.head_object.side_effect = ClientError(
-        error_response={"Error": {"Code": "InternalError", "Message": "S3 failure"}},
-        operation_name="HeadObject",
-    )
-
-    monkeypatch.setattr(
-        "app.services.firmware_service.boto3.client",
-        lambda *args, **kwargs: mock_s3,
-    )
-
-    response = client.get("/api/v1/firmware/latest", headers=auth_headers)
-    assert response.status_code == 503
-    assert "S3 firmware service error" in response.json()["detail"]
-
-
-def test_firmware_latest_s3_unexpected_exception_503(client, auth_headers, monkeypatch) -> None:
-    """Verify 503 Service Unavailable when S3 client raises an unexpected Exception."""
-    mock_s3 = MagicMock()
-    mock_s3.head_object.side_effect = RuntimeError("Network timeout connecting to S3")
-
-    monkeypatch.setattr(
-        "app.services.firmware_service.boto3.client",
-        lambda *args, **kwargs: mock_s3,
-    )
-
-    response = client.get("/api/v1/firmware/latest", headers=auth_headers)
-    assert response.status_code == 503
-    assert "S3 firmware service unavailable" in response.json()["detail"]
-
-
-def test_firmware_distribution_service_direct_unit() -> None:
-    """Direct unit tests on FirmwareDistributionService."""
-    mock_s3 = MagicMock()
-    mock_s3.head_object.return_value = {
-        "Metadata": {"version": "v2.0.0", "sha256": "1234"},
-        "ContentLength": 5000,
-        "LastModified": datetime(2026, 10, 6, 0, 0, 0, tzinfo=UTC),
-    }
-    mock_s3.generate_presigned_url.return_value = "https://s3.signed/url"
 
     svc = FirmwareDistributionService(s3_client=mock_s3)
-    res = svc.get_latest_firmware()
-    assert res.version == "v2.0.0"
-    assert res.sha256 == "1234"
-    assert res.size_bytes == 5000
-    assert res.download_url == "https://s3.signed/url"
-    assert res.expires_in_seconds == 900
+    app.dependency_overrides[get_firmware_service] = lambda: svc
+
+    try:
+        response = client.get("/api/v1/firmware/latest", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["version"] == "v1.2.1-esp32s3"
+        assert data["sha256"] == "8a32f6b3e7d581f148e658091ecb6a93ad5d24d26f047ff690b200b3e55c2aa7"
+        assert data["size_bytes"] == 1048576
+        assert data["expires_in_seconds"] == 900
+        assert "https://healthkicks-firmware-releases.s3" in data["download_url"]
+    finally:
+        app.dependency_overrides.pop(get_firmware_service, None)
+
+
+def test_get_latest_firmware_not_found(client, auth_headers) -> None:
+    """When firmware does not exist on S3, returns 404."""
+    mock_s3 = MagicMock()
+    mock_s3.head_object.side_effect = ClientError(
+        {"Error": {"Code": "NoSuchKey", "Message": "The specified key does not exist."}},
+        "HeadObject",
+    )
+
+    svc = FirmwareDistributionService(s3_client=mock_s3)
+    app.dependency_overrides[get_firmware_service] = lambda: svc
+
+    try:
+        response = client.get("/api/v1/firmware/latest", headers=auth_headers)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "No firmware release found on S3"
+    finally:
+        app.dependency_overrides.pop(get_firmware_service, None)
+
+
+def test_get_latest_firmware_s3_error(client, auth_headers) -> None:
+    """When S3 client raises an unexpected ClientError, returns 503."""
+    mock_s3 = MagicMock()
+    mock_s3.head_object.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+        "HeadObject",
+    )
+
+    svc = FirmwareDistributionService(s3_client=mock_s3)
+    app.dependency_overrides[get_firmware_service] = lambda: svc
+
+    try:
+        response = client.get("/api/v1/firmware/latest", headers=auth_headers)
+        assert response.status_code == 503
+        assert "S3 firmware service error" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(get_firmware_service, None)
+

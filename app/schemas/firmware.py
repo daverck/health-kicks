@@ -1,13 +1,8 @@
-"""Pydantic schemas for OTA firmware distribution."""
-
 from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class FirmwareLatestResponse(BaseModel):
-    """Schema representing metadata and temporary download link for the latest firmware release."""
-
     version: str = Field(..., description="Firmware semantic version string")
     download_url: str = Field(..., description="Temporary AWS S3 pre-signed download URL")
     sha256: str = Field(..., description="SHA-256 digest of the firmware binary in lowercase hex")
@@ -16,3 +11,4 @@ class FirmwareLatestResponse(BaseModel):
     release_date: datetime = Field(..., description="Release or build timestamp in UTC")
 
     model_config = ConfigDict(from_attributes=True)
+
