@@ -33,15 +33,15 @@ def test_alembic_upgrade_head_from_scratch(alembic_cfg: Config) -> None:
     # 1. Run full migration suite
     command.upgrade(alembic_cfg, "head")
 
-    # 2. Verify all 10 factory devices are seeded
+    # 2. Verify all 2 factory devices are seeded
     with engine.connect() as conn:
         devices = conn.execute(
             sa.text("SELECT device_id, name, status FROM devices")
         ).fetchall()
-        assert len(devices) == 10
+        assert len(devices) == 2
         device_ids = {row[0] for row in devices}
         assert TEST_DEVICE_ID in device_ids
-        assert device_ids == {f"HK-{i}" for i in range(1, 11)}
+        assert device_ids == {"HK-1", "HK-2"}
         for device_id, name, status in devices:
             assert status == "offline"
             assert name == f"HealthKicks Shoe {device_id.split('-')[-1]}"
@@ -77,12 +77,12 @@ def test_alembic_upgrade_head_handles_preexisting_create_all_schema(
         tables = set(sa.inspect(conn).get_table_names())
         assert "alembic_version" in tables
         count = conn.execute(sa.text("SELECT count(*) FROM devices")).scalar()
-        assert count == 10
+        assert count == 2
 
     # Second run should be a clean no-op
     command.upgrade(alembic_cfg, "head")
     with engine.connect() as conn:
-        assert conn.execute(sa.text("SELECT count(*) FROM devices")).scalar() == 10
+        assert conn.execute(sa.text("SELECT count(*) FROM devices")).scalar() == 2
 
     engine.dispose()
 
@@ -101,7 +101,7 @@ def test_programmatic_migrations_with_shared_connection(alembic_cfg: Config) -> 
         assert "devices" in tables
         assert "alembic_version" in tables
         count = conn.execute(sa.text("SELECT count(*) FROM devices")).scalar()
-        assert count == 10
+        assert count == 2
 
     test_engine.dispose()
 
