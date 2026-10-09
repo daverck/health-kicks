@@ -18,6 +18,10 @@ dependencies = [
     "alembic>=1.13.0",
     "itsdangerous>=2.1.0",
     "botocore[crt]>=1.43.79",
+    "m2cgen>=0.10.0",
+    "joblib>=1.6.0",
+    "scikit-learn>=1.4.2",
+    "numpy>=2.4.6",
 ]
 
 [dependency-groups]

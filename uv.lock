@@ -287,11 +287,16 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "itsdangerous" },
+    { name = "joblib" },
+    { name = "m2cgen" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "scikit-learn" },
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
@@ -317,11 +322,15 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "itsdangerous", specifier = ">=2.1.0" },
+    { name = "joblib", specifier = ">=1.6.0" },
+    { name = "m2cgen", specifier = ">=0.10.0" },
+    { name = "numpy", specifier = ">=2.4.6" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "scikit-learn", specifier = ">=1.4.2" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
     { name = "uvicorn", specifier = ">=0.52.4" },
 ]
@@ -451,6 +460,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d5/1d/537ab090f302b838943a1b56497dd53059b9a9b46a074936470173a2e207/joblib-1.6.0.tar.gz", hash = "sha256:2ccc96785b12046c08fd6d55839c12857831b54a3c1673ffadd2f04bfc4eda03", size = 327903, upload-time = "2026-08-31T09:39:04.122Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl", hash = "sha256:3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba", size = 306115, upload-time = "2026-08-31T09:39:02.298Z" },
+]
+
+[[package]]
+name = "m2cgen"
+version = "0.10.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/92/eb4176f0e71bcd988a9df54e7103987a232082e5b6ef14a12d56b1c3bddf/m2cgen-0.10.0.tar.gz", hash = "sha256:9adfc5c6e693b1bb2e757c379e14ff97c95d1a11f9f6536882ebd7e402d34aa8", size = 55796, upload-time = "2022-04-26T01:24:36.626Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/1f/d57169a8458481e0292b672f8939688b269109d5d559bb0fd1ef3276cd91/m2cgen-0.10.0-py3-none-any.whl", hash = "sha256:b9f3e85133e905a306b507139ea40e595eccf499a7f4842889773caea7b74beb", size = 92239, upload-time = "2022-04-26T01:24:34.936Z" },
 ]
 
 [[package]]
