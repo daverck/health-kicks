@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.cloud import create_cloud_router
-from app.db.models import ActivityEvent, Base, DeviceStatus, HapticLog, User, UserRole
+from app.db.models import ActivityEvent, Base, Device, DeviceOwnership, DeviceStatus, HapticLog, User, UserRole
 from app.schemas.cloud import HapticTrigger
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.ingestion_service import ingest_device_status
@@ -221,4 +221,128 @@ def test_haptic_trigger_unowned_device_forbidden() -> None:
             db=session,
         )
     assert exc_info.value.status_code == 403
+    session.close()
+
+
+def test_list_activities_multi_device_and_multi_type() -> None:
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
+    router = create_cloud_router(DummyPublisher())
+    activities_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("events/activities")
+    )
+
+    t = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
+    session.add_all([
+        Device(device_id="HK-1"),
+        Device(device_id="HK-2"),
+        ActivityEvent(device_id="HK-1", event_type="walk", confidence_score=0.9, timestamp_utc=t),
+        ActivityEvent(device_id="HK-2", event_type="run", confidence_score=0.85, timestamp_utc=t),
+        ActivityEvent(device_id="HK-1", event_type="stairs_up", confidence_score=0.8, timestamp_utc=t),
+        ActivityEvent(device_id="HK-2", event_type="fall_forward", confidence_score=0.95, timestamp_utc=t),
+    ])
+    session.commit()
+
+    # Multi-device query HK-1,HK-2
+    res = activities_endpoint("HK-1,HK-2", user=admin, page=1, page_size=10, db=session)
+    assert res.total == 4
+    devices = {item.device_id for item in res.items}
+    assert devices == {"HK-1", "HK-2"}
+
+    # device_id="all" returns all devices for admin
+    res_all = activities_endpoint("all", user=admin, page=1, page_size=10, db=session)
+    assert res_all.total == 4
+
+    # Multi-activity filtering: walk,run
+    res_types = activities_endpoint("HK-1,HK-2", user=admin, event_type="walk,run", page=1, page_size=10, db=session)
+    assert res_types.total == 2
+    assert {item.event_type for item in res_types.items} == {"walk", "run"}
+
+    # Multi-activity filtering: stairs_up,falls
+    res_falls = activities_endpoint("HK-1,HK-2", user=admin, event_type="stairs_up,falls", page=1, page_size=10, db=session)
+    assert res_falls.total == 2
+    assert {item.event_type for item in res_falls.items} == {"stairs_up", "fall_forward"}
+
+    session.close()
+
+
+def test_list_haptic_history_multi_device() -> None:
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
+    router = create_cloud_router(DummyPublisher())
+    haptic_history_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("haptic/history")
+    )
+
+    t = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
+    session.add_all([
+        Device(device_id="HK-1"),
+        Device(device_id="HK-2"),
+        HapticLog(device_id="HK-1", intensity=100, duration_ms=200, triggered_at_utc=t, triggered_by_user=True),
+        HapticLog(device_id="HK-2", intensity=150, duration_ms=300, triggered_at_utc=t, triggered_by_user=True),
+    ])
+    session.commit()
+
+    # Multi-device query
+    res = haptic_history_endpoint("HK-1,HK-2", user=admin, page=1, page_size=10, db=session)
+    assert res.total == 2
+    assert {item.device_id for item in res.items} == {"HK-1", "HK-2"}
+
+    # device_id="all"
+    res_all = haptic_history_endpoint("all", user=admin, page=1, page_size=10, db=session)
+    assert res_all.total == 2
+
+    session.close()
+
+
+def test_list_activities_and_haptic_ownership_check() -> None:
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    regular = User(id=2, email="reg@test.com", name="Regular", role=UserRole.user)
+    session.add_all([
+        regular,
+        Device(device_id="HK-1"),
+        Device(device_id="HK-unowned"),
+        DeviceOwnership(user_id=2, device_id="HK-1"),
+    ])
+    session.commit()
+
+    router = create_cloud_router(DummyPublisher())
+    activities_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("events/activities")
+    )
+    haptic_history_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("haptic/history")
+    )
+
+    # Regular user querying unowned device alongside owned one raises 403 Forbidden
+    with pytest.raises(HTTPException) as exc_activities:
+        activities_endpoint("HK-1,HK-unowned", user=regular, page=1, page_size=10, db=session)
+    assert exc_activities.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc_haptic:
+        haptic_history_endpoint("HK-1,HK-unowned", user=regular, page=1, page_size=10, db=session)
+    assert exc_haptic.value.status_code == 403
+
+    # device_id="all" for regular user only resolves their owned devices without error
+    res_all = activities_endpoint("all", user=regular, page=1, page_size=10, db=session)
+    assert res_all.total == 0
+
     session.close()

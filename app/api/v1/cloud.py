@@ -3,14 +3,14 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.db.database import get_db
-from app.db.models import ActivityEvent, Device, HapticLog
+from app.db.models import ActivityEvent, Device, DeviceOwnership, HapticLog, UserRole
 from app.schemas.cloud import (
     ActivityEventPage,
     ActivityEventResponse,
@@ -21,6 +21,19 @@ from app.schemas.cloud import (
 )
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.device_service import verify_device_ownership
+
+
+def _resolve_target_device_ids(device_id: str, user: CurrentUser, db: Session) -> list[str]:
+    """Resolve and authorize target device IDs from comma-separated string or 'all'."""
+    raw_devs = [d.strip() for d in device_id.split(",") if d.strip()]
+    if not raw_devs or any(d.lower() == "all" for d in raw_devs):
+        if user.role in (UserRole.admin, UserRole.clinician):
+            return [d.device_id for d in db.query(Device.device_id).all()]
+        return [o.device_id for o in db.query(DeviceOwnership.device_id).filter_by(user_id=user.id).all()]
+
+    for dev_id in raw_devs:
+        verify_device_ownership(db=db, user=user, device_id=dev_id, allow_clinician=True)
+    return raw_devs
 
 
 def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
@@ -63,18 +76,27 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         db: Session = Depends(get_db),
         request: Request = None,
     ) -> ActivityEventPage:
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        target_device_ids = _resolve_target_device_ids(device_id=device_id, user=user, db=db)
+        if not target_device_ids:
+            return ActivityEventPage(items=[], page=page, page_size=page_size, total=0)
+
         raw_end = request.query_params.get("end_date") if request is not None else None
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
-        query = db.query(ActivityEvent).filter(ActivityEvent.device_id == device_id)
+        query = db.query(ActivityEvent).filter(ActivityEvent.device_id.in_(target_device_ids))
 
         if event_type is not None and isinstance(event_type, str):
-            clean_type = event_type.strip()
-            if clean_type.lower() == "falls":
-                query = query.filter(ActivityEvent.event_type.ilike("%fall%"))
-            elif clean_type and clean_type.lower() != "all":
-                query = query.filter(ActivityEvent.event_type == clean_type)
+            clean_types = [t.strip() for t in event_type.split(",") if t.strip()]
+            if clean_types and not any(t.lower() == "all" for t in clean_types):
+                conditions = []
+                exact_types = [t for t in clean_types if t.lower() != "falls"]
+                has_falls = any(t.lower() == "falls" for t in clean_types)
+                if exact_types:
+                    conditions.append(ActivityEvent.event_type.in_(exact_types))
+                if has_falls:
+                    conditions.append(ActivityEvent.event_type.ilike("%fall%"))
+                if conditions:
+                    query = query.filter(or_(*conditions))
 
         if norm_start is not None:
             query = query.filter(ActivityEvent.timestamp_utc >= norm_start)
@@ -107,12 +129,15 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         db: Session = Depends(get_db),
         request: Request = None,
     ) -> HapticLogPage:
-        """List haptic commands/vibrations history for a device."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        """List haptic commands/vibrations history for a device or multiple devices."""
+        target_device_ids = _resolve_target_device_ids(device_id=device_id, user=user, db=db)
+        if not target_device_ids:
+            return HapticLogPage(items=[], page=page, page_size=page_size, total=0)
+
         raw_end = request.query_params.get("end_date") if request is not None else None
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
-        query = db.query(HapticLog).filter(HapticLog.device_id == device_id)
+        query = db.query(HapticLog).filter(HapticLog.device_id.in_(target_device_ids))
 
         if norm_start is not None:
             query = query.filter(HapticLog.triggered_at_utc >= norm_start)
