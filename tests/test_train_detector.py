@@ -19,7 +19,9 @@ from scripts.train_detector import (
     generate_synthetic_sessions,
     is_benign_activity,
     is_fall_activity,
+    is_punctual_event,
     load_session_npz,
+    locate_dynamic_event_peak,
     main,
     migrate_json_to_npz,
     parse_args,
@@ -638,3 +640,115 @@ def test_main_synthetic_execution(tmp_path: Path):
     )
     assert ret_code == 0
     assert model_path.exists()
+
+
+def test_is_punctual_event():
+    """Verifies recognition of discrete punctual events vs continuous activities."""
+    assert is_punctual_event("fall_forward")
+    assert is_punctual_event("fall_backward")
+    assert is_punctual_event("fall_lateral")
+    assert is_punctual_event("fall")
+    assert is_punctual_event("stumble_recover")
+    assert not is_punctual_event("walk")
+    assert not is_punctual_event("run")
+    assert not is_punctual_event("idle")
+    assert not is_punctual_event("stairs_up")
+
+
+def test_locate_dynamic_event_peak():
+    """Verifies dynamic peak detection in IMU signals."""
+    # Stationary signal -> None
+    df_flat = pd.DataFrame({
+        "ax": [0.0] * 30,
+        "ay": [9.8] * 30,
+        "az": [0.0] * 30,
+        "gx": [0.0] * 30,
+        "gy": [0.0] * 30,
+        "gz": [0.0] * 30,
+    })
+    assert locate_dynamic_event_peak(df_flat) is None
+
+    # Signal with a sharp dynamic peak at index 15
+    df_peak = df_flat.copy()
+    df_peak.loc[15, "ay"] = 35.0
+    df_peak.loc[15, "gx"] = 250.0
+    assert locate_dynamic_event_peak(df_peak) == 15
+
+
+def test_event_centric_windowing_rejects_idle_tail():
+    """Verifies that post-fall stationary periods are rejected from fall training windows."""
+    # 5.0 seconds session at 20 Hz (100 samples)
+    # 0.0s to 1.5s (samples 0-30): quiet standing / walking
+    # 1.5s (sample 30): violent impact / fall transition
+    # 2.0s to 5.0s (samples 40-100): lying motionless on floor (idle tail)
+    readings = []
+    for i in range(100):
+        t_us = i * 50_000  # 50ms intervals -> 20 Hz
+        if i == 30:
+            ax, ay, az = 0.5, 30.0, 15.0
+            gx, gy, gz = 120.0, 240.0, 80.0
+        elif i > 35:
+            # Motionless on floor
+            ax, ay, az = 0.0, 1.0, 9.8
+            gx, gy, gz = 0.0, 0.0, 0.0
+        else:
+            # Walking before fall
+            ax, ay, az = 0.2, 9.8, 1.0
+            gx, gy, gz = 10.0, 5.0, 0.0
+        readings.append({
+            "timestamp": t_us,
+            "ax": ax, "ay": ay, "az": az,
+            "gx": gx, "gy": gy, "gz": gz,
+        })
+
+    session = {
+        "session_id": "fall-test-sess",
+        "label": "fall_backward",
+        "duration_sec": 5.0,
+        "readings": readings,
+    }
+
+    # Window size 2.0s, step 0.5s
+    X, y = build_dataset_from_sessions([session], window_size_sec=2.0, step_sec=0.5)
+
+    assert len(X) > 0
+    # Crucially, all extracted windows for this fall session must contain dynamic energy,
+    # rather than having pure idle tail windows with max acceleration ~ 9.8 and zero gyro.
+    for _, row in X.iterrows():
+        # Every kept window must have captured the impact peak (> 20.0 m/s^2)
+        assert row["acc_mag_max"] > 20.0
+
+
+def test_build_dataset_max_sessions_per_class():
+    """Verifies capping to the N most recent sessions per class."""
+    sessions = []
+    for i in range(10):
+        sessions.append({
+            "session_id": f"walk-{i}",
+            "label": "walk",
+            "duration_sec": 5.0,
+            "readings": [
+                {"timestamp": (i + 1) * 1_000_000 + j * 50_000, "ax": 0.0, "ay": 9.8, "az": 0.0, "gx": 0.0, "gy": 0.0, "gz": 0.0}
+                for j in range(10)
+            ],
+        })
+
+    # Without max_sessions_per_class: all 10 sessions used
+    X_all, y_all = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
+    assert len(y_all) >= 10
+
+    # With max_sessions_per_class=3: only 3 most recent sessions used
+    X_capped, y_capped = build_dataset_from_sessions(
+        sessions, window_size_sec=2.0, step_sec=0.5, max_sessions_per_class=3
+    )
+    # Slicing 3 sessions yields exactly 3 windows (each session has 10 samples -> 1 window of 2.0s fallback or timestamped)
+    assert len(X_capped) < len(X_all)
+
+
+def test_parse_args_max_sessions_per_class():
+    """Verifies CLI parsing for --max-sessions-per-class option."""
+    args_default = parse_args([])
+    assert args_default.max_sessions_per_class is None
+
+    args_custom = parse_args(["--max-sessions-per-class", "25"])
+    assert args_custom.max_sessions_per_class == 25

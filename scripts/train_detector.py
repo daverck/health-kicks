@@ -129,6 +129,40 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
 
 
 DEFAULT_EXCLUDED_LABELS: set[str] = {"stairs"}
+PUNCTUAL_EVENT_LABELS: set[str] = {"stumble_recover"}
+
+
+def is_punctual_event(label: str) -> bool:
+    """Returns True if the label represents a discrete, punctual transition event (falls, stumbles)."""
+    return label.startswith("fall_") or label in ("fall", "stumble_recover") or label in PUNCTUAL_EVENT_LABELS
+
+
+def locate_dynamic_event_peak(df: pd.DataFrame) -> int | None:
+    """Locates the sample index of the dynamic impact/transition in a punctual event session.
+
+    Uses combined acceleration deviation from gravity and angular velocity magnitude.
+    Returns None if the signal is uniform/stationary without a distinct dynamic peak.
+    """
+    if len(df) < 5:
+        return None
+    ax = df["ax"].to_numpy(dtype=float)
+    ay = df["ay"].to_numpy(dtype=float)
+    az = df["az"].to_numpy(dtype=float)
+    gx = df["gx"].to_numpy(dtype=float)
+    gy = df["gy"].to_numpy(dtype=float)
+    gz = df["gz"].to_numpy(dtype=float)
+
+    acc_mag = np.sqrt(ax**2 + ay**2 + az**2)
+    gyro_mag = np.sqrt(gx**2 + gy**2 + gz**2)
+
+    g_ref = 9.81 if float(np.median(acc_mag)) > 5.0 else 1.0
+    gyro_norm = 100.0 if float(np.median(gyro_mag)) > 10.0 else 2.0
+    metric = np.abs(acc_mag - g_ref) + (gyro_mag / gyro_norm)
+
+    if (np.max(metric) - np.min(metric)) < 0.15:
+        return None
+
+    return int(np.argmax(metric))
 
 
 def build_dataset_from_sessions(
@@ -136,12 +170,15 @@ def build_dataset_from_sessions(
     window_size_sec: float = 2.0,
     step_sec: float = 0.5,
     min_sessions_per_class: int = 0,
+    max_sessions_per_class: int | None = None,
     excluded_labels: set[str] | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Splits each session into sliding windows and extracts features.
 
     Filters out sessions with excluded labels (e.g. legacy 'stairs') and classes
-    with fewer than min_sessions_per_class sessions.
+    with fewer than min_sessions_per_class sessions. For punctual events (falls,
+    stumble_recover), uses event-centric windowing to reject idle post-fall tails.
+    Supports capping to the N most recent sessions per class via max_sessions_per_class.
     """
     if excluded_labels is None:
         excluded_labels = DEFAULT_EXCLUDED_LABELS
@@ -150,13 +187,13 @@ def build_dataset_from_sessions(
     y_labels: list[str] = []
 
     # Pre-filter sessions by class count if required
-    valid_sessions: list[dict[str, Any]] = []
     class_counts: dict[str, int] = {}
     for s in sessions_data:
         lbl = s.get("label")
         if lbl and lbl not in excluded_labels:
             class_counts[lbl] = class_counts.get(lbl, 0) + 1
 
+    candidate_sessions: list[dict[str, Any]] = []
     for session in sessions_data:
         label = session.get("label")
         if not label or label in excluded_labels:
@@ -166,7 +203,34 @@ def build_dataset_from_sessions(
         readings = session.get("readings", [])
         if len(readings) < 5:
             continue
-        valid_sessions.append(session)
+        candidate_sessions.append(session)
+
+    # Optional recency filtering: limit to N most recent sessions per class
+    valid_sessions: list[dict[str, Any]] = []
+    if max_sessions_per_class is not None and max_sessions_per_class > 0:
+        by_class: dict[str, list[dict[str, Any]]] = {}
+        for s in candidate_sessions:
+            by_class.setdefault(str(s["label"]), []).append(s)
+
+        for lbl, class_sess in by_class.items():
+            def _get_ts(sess: dict[str, Any]) -> float:
+                rds = sess.get("readings", [])
+                if rds:
+                    return float(rds[-1].get("timestamp", 0) or rds[0].get("timestamp", 0))
+                return 0.0
+
+            class_sess.sort(key=_get_ts, reverse=True)
+            kept = class_sess[:max_sessions_per_class]
+            if len(class_sess) > max_sessions_per_class:
+                logger.info(
+                    "Capped class '%s' from %d to %d most recent sessions.",
+                    lbl,
+                    len(class_sess),
+                    max_sessions_per_class,
+                )
+            valid_sessions.extend(kept)
+    else:
+        valid_sessions = candidate_sessions
 
     for session in valid_sessions:
         label = session.get("label")
@@ -206,12 +270,24 @@ def build_dataset_from_sessions(
         total_samples = len(df)
         windows_extracted = 0
 
+        # Detect dynamic event peak for punctual events (falls, stumble_recover)
+        punctual = is_punctual_event(label)
+        peak_idx = locate_dynamic_event_peak(df) if punctual else None
+
         if scale and scale > 0 and (delta_ts / scale) >= window_size_sec:
             t_sec = (ts_vals - ts_vals[0]) / scale
             max_t = t_sec[-1]
             curr_t = 0.0
+            t_peak = float(t_sec[peak_idx]) if peak_idx is not None else None
 
             while curr_t + window_size_sec <= max_t + 1e-5:
+                # Event-centric windowing: reject windows that don't cover the dynamic event
+                if t_peak is not None:
+                    is_event_window = (curr_t <= t_peak <= curr_t + window_size_sec)
+                    if not is_event_window:
+                        curr_t += step_sec
+                        continue
+
                 window_mask = (t_sec >= curr_t) & (t_sec <= curr_t + window_size_sec)
                 window_df = df.loc[window_mask]
                 if len(window_df) >= 5:
@@ -227,6 +303,11 @@ def build_dataset_from_sessions(
             step_samples = max(int(step_sec * samples_per_sec), 1)
 
             for start in range(0, total_samples - window_samples + 1, step_samples):
+                if peak_idx is not None:
+                    is_event_window = (start <= peak_idx <= start + window_samples)
+                    if not is_event_window:
+                        continue
+
                 window_df = df.iloc[start : start + window_samples]
                 feat = compute_window_features(window_df)
                 X_rows.append(feat)
@@ -921,6 +1002,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         default=20,
         help="Minimum number of recording sessions required to include a class in training (default: 20).",
     )
+    parser.add_argument(
+        "--max-sessions-per-class",
+        type=int,
+        default=None,
+        help="Maximum number of most recent recording sessions to keep per class (default: None, keep all).",
+    )
     return parser.parse_args(args)
 
 
@@ -941,6 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Force refresh        : {'YES' if args.force_refresh else 'NO'}")
     print(f"* Synthetic data       : {'YES' if args.synthetic else 'NO'}")
     print(f"* Min sessions / class : {min_sessions}")
+    print(f"* Max sessions / class : {args.max_sessions_per_class if args.max_sessions_per_class else 'ALL (unlimited)'}")
     print(f"* Only m2cgen models   : {'NO (all models)' if args.include_unsupported_c else 'YES (default)'}")
     print("=" * 68 + "\n")
 
@@ -963,6 +1051,7 @@ def main(argv: list[str] | None = None) -> int:
         window_size_sec=args.window_size,
         step_sec=args.window_step,
         min_sessions_per_class=min_sessions,
+        max_sessions_per_class=args.max_sessions_per_class,
     )
 
     if len(X) == 0:
