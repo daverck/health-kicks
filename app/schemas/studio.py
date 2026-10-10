@@ -15,11 +15,14 @@ class StudioActivityLabel(str, Enum):
     WALK = "walk"
     IDLE = "idle"
     STAIRS = "stairs"
+    STAIRS_UP = "stairs_up"
+    STAIRS_DOWN = "stairs_down"
     RUN = "run"
     STUMBLE_RECOVER = "stumble_recover"
     FALL_FORWARD = "fall_forward"
     FALL_BACKWARD = "fall_backward"
     FALL_LATERAL = "fall_lateral"
+    FALL_RECOVERY = "fall_recovery"
 
 
 class StudioSessionSummary(StrictModel):

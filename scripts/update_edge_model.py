@@ -220,6 +220,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip PlatformIO firmware compilation verification.",
     )
+    parser.add_argument(
+        "--min-sessions-per-class",
+        type=int,
+        default=20,
+        help="Minimum number of recording sessions required to include a class in training (default: 20).",
+    )
     return parser.parse_args(args)
 
 
@@ -227,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     """Main MLOps orchestration entrypoint."""
     load_project_env()
     args = parse_args(argv)
+    min_sessions = 0 if args.synthetic else args.min_sessions_per_class
 
     print("\n" + "=" * 72)
     print(" HEALTHKICKS MLOPS - END-TO-END EDGE MODEL UPDATE PIPELINE")
@@ -235,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Model Artifact       : {args.output_model}")
     print(f"* Quality Gate F1 Min  : {args.min_f1 * 100:.1f} %")
     print(f"* Window Parameters    : {args.window_size:.1f}s window, {args.window_step:.1f}s step")
+    print(f"* Min Sessions / Class : {min_sessions}")
     print(f"* Build Check Enabled  : {'NO' if args.no_build_check else 'YES'}")
     print("=" * 72 + "\n")
 
@@ -271,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
             sessions_data=sessions_data,
             window_size_sec=args.window_size,
             step_sec=args.window_step,
+            min_sessions_per_class=min_sessions,
         )
 
         if len(X) == 0:

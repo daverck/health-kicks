@@ -128,20 +128,49 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
     return features
 
 
+DEFAULT_EXCLUDED_LABELS: set[str] = {"stairs"}
+
+
 def build_dataset_from_sessions(
     sessions_data: list[dict[str, Any]],
     window_size_sec: float = 2.0,
     step_sec: float = 0.5,
+    min_sessions_per_class: int = 0,
+    excluded_labels: set[str] | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray]:
-    """Splits each session into sliding windows and extracts features."""
+    """Splits each session into sliding windows and extracts features.
+
+    Filters out sessions with excluded labels (e.g. legacy 'stairs') and classes
+    with fewer than min_sessions_per_class sessions.
+    """
+    if excluded_labels is None:
+        excluded_labels = DEFAULT_EXCLUDED_LABELS
+
     X_rows: list[dict[str, float]] = []
     y_labels: list[str] = []
 
+    # Pre-filter sessions by class count if required
+    valid_sessions: list[dict[str, Any]] = []
+    class_counts: dict[str, int] = {}
+    for s in sessions_data:
+        lbl = s.get("label")
+        if lbl and lbl not in excluded_labels:
+            class_counts[lbl] = class_counts.get(lbl, 0) + 1
+
     for session in sessions_data:
         label = session.get("label")
-        readings = session.get("readings", [])
-        if not label or len(readings) < 5:
+        if not label or label in excluded_labels:
             continue
+        if min_sessions_per_class > 0 and class_counts.get(label, 0) < min_sessions_per_class:
+            continue
+        readings = session.get("readings", [])
+        if len(readings) < 5:
+            continue
+        valid_sessions.append(session)
+
+    for session in valid_sessions:
+        label = session.get("label")
+        readings = session.get("readings", [])
 
         df = pd.DataFrame(readings)
 
@@ -558,7 +587,8 @@ def sync_sessions_cache(
 
 def is_fall_activity(label: str) -> bool:
     """Returns True if label corresponds to a critical fall (family 'fall_*')."""
-    return str(label).lower().startswith("fall_")
+    lbl = str(label).lower()
+    return lbl.startswith("fall_") and lbl != "fall_recovery"
 
 
 def is_benign_activity(label: str) -> bool:
@@ -578,7 +608,7 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
     n_points = int(duration * sampling_freq)
     t = np.linspace(0, duration, n_points)
 
-    classes = ["walk", "idle", "fall_forward", "stairs", "stumble_recover"]
+    classes = ["walk", "idle", "fall_forward", "stairs_up", "stairs_down", "fall_recovery"]
 
     for label in classes:
         for idx in range(n_per_class):
@@ -625,25 +655,41 @@ def generate_synthetic_sessions(n_per_class: int = 25) -> list[dict[str, Any]]:
                 az[rest_idx:] = 9.7 + np.random.normal(0, 0.05, n_points - rest_idx)
                 gx[rest_idx:] = np.random.normal(0, 0.02, n_points - rest_idx)
 
-            elif label == "stairs":
-                ax = 1.2 * np.sin(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.3, n_points)
-                ay = 9.8 + 3.5 * np.sin(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.4, n_points)
-                az = 1.0 * np.cos(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.3, n_points)
-                gx = 0.6 * np.cos(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.1, n_points)
-                gy = 0.3 * np.sin(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.1, n_points)
-                gz = 0.5 * np.cos(2 * np.pi * 1.4 * t) + np.random.normal(0, 0.1, n_points)
+            elif label == "stairs_up":
+                ax = 1.2 * np.sin(2 * np.pi * 1.3 * t) + np.random.normal(0, 0.3, n_points)
+                ay = 9.8 + 4.2 * np.sin(2 * np.pi * 1.3 * t) + np.random.normal(0, 0.4, n_points)
+                az = 1.1 * np.cos(2 * np.pi * 1.3 * t) + np.random.normal(0, 0.3, n_points)
+                gx = 0.7 * np.cos(2 * np.pi * 1.3 * t) + np.random.normal(0, 0.1, n_points)
+                gy = 0.4 * np.sin(2 * np.pi * 1.3 * t) + np.random.normal(0, 0.1, n_points)
+                gz = 0.5 * np.cos(2 * np.pi * 1.3 * t) + np.random.normal(0, 0.1, n_points)
 
-            else:
-                ax = 0.8 * np.sin(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.2, n_points)
-                ay = 9.8 + 2.0 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.3, n_points)
-                az = 0.5 * np.sin(2 * np.pi * 1.8 * t + 0.5) + np.random.normal(0, 0.2, n_points)
-                gx = 0.3 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
-                gy = 0.2 * np.sin(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
-                gz = 0.4 * np.cos(2 * np.pi * 1.8 * t) + np.random.normal(0, 0.05, n_points)
+            elif label == "stairs_down":
+                ax = 1.0 * np.sin(2 * np.pi * 1.5 * t) + np.random.normal(0, 0.3, n_points)
+                ay = 9.8 + 3.0 * np.sin(2 * np.pi * 1.5 * t) + np.random.normal(0, 0.4, n_points)
+                az = 0.9 * np.cos(2 * np.pi * 1.5 * t) + np.random.normal(0, 0.3, n_points)
+                gx = 0.5 * np.cos(2 * np.pi * 1.5 * t) + np.random.normal(0, 0.1, n_points)
+                gy = 0.3 * np.sin(2 * np.pi * 1.5 * t) + np.random.normal(0, 0.1, n_points)
+                gz = 0.6 * np.cos(2 * np.pi * 1.5 * t) + np.random.normal(0, 0.1, n_points)
 
-                jerk_idx = int(2.0 * sampling_freq)
-                ay[jerk_idx : jerk_idx + 6] = 16.0 + np.random.normal(0, 1.0, 6)
-                gx[jerk_idx : jerk_idx + 6] = 3.5 + np.random.normal(0, 0.5, 6)
+            elif label == "fall_recovery":
+                # Fall impact at 1.0s, brief stillness on floor, then stand-up motion from 2.5s to 4.2s
+                ax = np.random.normal(0, 0.1, n_points)
+                ay = np.random.normal(9.8, 0.2, n_points)
+                az = np.random.normal(0, 0.1, n_points)
+                gx = np.random.normal(0, 0.05, n_points)
+                gy = np.random.normal(0, 0.05, n_points)
+                gz = np.random.normal(0, 0.05, n_points)
+
+                impact_idx = int(1.0 * sampling_freq)
+                standup_idx = int(2.5 * sampling_freq)
+                ay[impact_idx:standup_idx] = 0.5 + np.random.normal(0, 0.05, standup_idx - impact_idx)
+                az[impact_idx:standup_idx] = 9.6 + np.random.normal(0, 0.05, standup_idx - impact_idx)
+
+                rec_len = int(1.5 * sampling_freq)
+                t_rec = np.linspace(0, 1, rec_len)
+                ay[standup_idx : standup_idx + rec_len] = (0.5 + 9.3 * t_rec) + 1.5 * np.sin(np.pi * t_rec)
+                az[standup_idx : standup_idx + rec_len] = 9.6 * (1.0 - t_rec)
+                gx[standup_idx : standup_idx + rec_len] = 2.0 * np.sin(np.pi * t_rec) + np.random.normal(0, 0.1, rec_len)
 
             readings = [
                 {
@@ -869,6 +915,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Include non-m2cgen models (HistGradientBoosting) in CV benchmark.",
     )
+    parser.add_argument(
+        "--min-sessions-per-class",
+        type=int,
+        default=20,
+        help="Minimum number of recording sessions required to include a class in training (default: 20).",
+    )
     return parser.parse_args(args)
 
 
@@ -877,6 +929,7 @@ def main(argv: list[str] | None = None) -> int:
     load_project_env()
     args = parse_args(argv)
     cache_file = Path(args.cache_dir)
+    min_sessions = 0 if args.synthetic else args.min_sessions_per_class
 
     print("=" * 68)
     print("HEALTHKICKS EDGE ML - ACTIVITY CLASSIFIER TRAINING PIPELINE")
@@ -887,6 +940,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Batch concurrency    : {args.batch_size} concurrent sessions")
     print(f"* Force refresh        : {'YES' if args.force_refresh else 'NO'}")
     print(f"* Synthetic data       : {'YES' if args.synthetic else 'NO'}")
+    print(f"* Min sessions / class : {min_sessions}")
     print(f"* Only m2cgen models   : {'NO (all models)' if args.include_unsupported_c else 'YES (default)'}")
     print("=" * 68 + "\n")
 
@@ -903,11 +957,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # 2. Featurization and windowing
-    logger.info("Extracting features and sliding windows...")
+    logger.info("Extracting features and sliding windows (min_sessions=%d)...", min_sessions)
     X, y = build_dataset_from_sessions(
         sessions_data=sessions_data,
         window_size_sec=args.window_size,
         step_sec=args.window_step,
+        min_sessions_per_class=min_sessions,
     )
 
     if len(X) == 0:

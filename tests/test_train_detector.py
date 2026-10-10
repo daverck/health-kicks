@@ -174,11 +174,27 @@ def test_build_dataset_from_sessions_short_session():
         {"ax": 0.1, "ay": 9.8, "az": 0.1, "gx": 0.0, "gy": 0.0, "gz": 0.0}
         for _ in range(8)
     ]
-    sessions = [{"session_id": "sess-short", "label": "stairs", "readings": readings}]
+    sessions = [{"session_id": "sess-short", "label": "stairs_up", "readings": readings}]
 
     X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
     assert len(X) == 1
-    assert y[0] == "stairs"
+    assert y[0] == "stairs_up"
+
+
+def test_build_dataset_from_sessions_excludes_stairs():
+    """Verifies that legacy 'stairs' label is excluded from dataset by default."""
+    readings = [
+        {"ax": 0.1, "ay": 9.8, "az": 0.1, "gx": 0.0, "gy": 0.0, "gz": 0.0}
+        for _ in range(8)
+    ]
+    sessions = [
+        {"session_id": "sess-stairs", "label": "stairs", "readings": readings},
+        {"session_id": "sess-stairs-up", "label": "stairs_up", "readings": readings},
+    ]
+
+    X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
+    assert len(X) == 1
+    assert y[0] == "stairs_up"
 
 
 def test_build_dataset_from_sessions_empty_or_invalid():
@@ -199,10 +215,10 @@ def test_build_dataset_from_sessions_empty_or_invalid():
 def test_generate_synthetic_sessions():
     """Verifies consistency of the synthetic session generator."""
     sessions = generate_synthetic_sessions(n_per_class=5)
-    assert len(sessions) == 25  # 5 classes * 5
+    assert len(sessions) == 30  # 6 classes * 5
 
     labels = {s["label"] for s in sessions}
-    assert labels == {"walk", "idle", "fall_forward", "stairs", "stumble_recover"}
+    assert labels == {"walk", "idle", "fall_forward", "stairs_up", "stairs_down", "fall_recovery"}
 
     sample_sess = sessions[0]
     assert "session_id" in sample_sess
@@ -217,7 +233,10 @@ def test_fall_and_benign_activity_helpers():
     assert not is_fall_activity("idle")
 
     assert is_benign_activity("walk")
-    assert is_benign_activity("stairs")
+    assert is_benign_activity("stairs_up")
+    assert is_benign_activity("stairs_down")
+    assert is_benign_activity("fall_recovery")
+    assert not is_fall_activity("fall_recovery")
     assert is_benign_activity("stumble_recover")
 
     assert is_fall_activity("fall_forward")
