@@ -59,3 +59,12 @@ class PaginatedSessionsResponse(StrictModel):
     total: int
     page: int
     size: int
+
+
+class StudioAuthorSummary(StrictModel):
+    """Author metadata summary for studio recording curation."""
+
+    id: int = Field(..., description="Unique user identifier")
+    email: str = Field(..., description="User email address")
+    name: str | None = Field(default=None, description="User full display name")
+

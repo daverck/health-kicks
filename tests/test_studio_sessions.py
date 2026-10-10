@@ -611,10 +611,138 @@ def test_regular_user_forbidden_on_all_studio_endpoints(client, regular_user, us
 
     headers = _auth_headers(regular_user)
     assert client.get("/api/v1/studio/sessions", headers=headers).status_code == 403
+    assert client.get("/api/v1/studio/sessions/authors", headers=headers).status_code == 403
     assert client.get(f"/api/v1/studio/sessions/{sess_id}", headers=headers).status_code == 403
     assert client.get(f"/api/v1/studio/sessions/{sess_id}/readings", headers=headers).status_code == 403
     assert client.patch(f"/api/v1/studio/sessions/{sess_id}", json={"label": "run"}, headers=headers).status_code == 403
     assert client.patch(f"/api/v1/studio/sessions/{sess_id}/confirm", headers=headers).status_code == 403
     assert client.delete(f"/api/v1/studio/sessions/{sess_id}", headers=headers).status_code == 403
+
+
+def test_list_sessions_multi_device_filtering(client, user_a, db_session) -> None:
+    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="run")
+    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-3", label="stairs")
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
+
+    # Multi-device "HK-1,HK-2"
+    res = client.get("/api/v1/studio/sessions?device_id=HK-1,HK-2", headers=_auth_headers(user_a))
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 2
+    dev_ids = {item["device_id"] for item in data["items"]}
+    assert dev_ids == {"HK-1", "HK-2"}
+
+    # device_id="all" returns all devices
+    res_all = client.get("/api/v1/studio/sessions?device_id=all", headers=_auth_headers(user_a))
+    assert res_all.status_code == 200
+    assert res_all.json()["total"] == 3
+
+
+def test_list_sessions_multi_label_filtering(client, user_a, db_session) -> None:
+    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run")
+    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="stairs")
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
+
+    # Multi-label "walk,run"
+    res = client.get("/api/v1/studio/sessions?label=walk,run", headers=_auth_headers(user_a))
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 2
+    labels = {item["label"] for item in data["items"]}
+    assert labels == {"walk", "run"}
+
+    # label="all" returns all sessions
+    res_all = client.get("/api/v1/studio/sessions?label=all", headers=_auth_headers(user_a))
+    assert res_all.status_code == 200
+    assert res_all.json()["total"] == 3
+
+
+def test_list_sessions_multi_author_filtering(client, admin_user, user_a, user_b, db_session) -> None:
+    user_c = User(
+        google_sub="sub-user-c",
+        email="charlie@example.com",
+        name="Charlie",
+        role=UserRole.clinician,
+        is_active=True,
+    )
+    db_session.add(user_c)
+    db_session.commit()
+
+    s_a = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s_b = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="run")
+    s_c = StudioSession(id=uuid.uuid4(), user_id=user_c.id, device_id="HK-3", label="stairs")
+    db_session.add_all([s_a, s_b, s_c])
+    db_session.commit()
+
+    # Admin filtering by multi user_id: user_a, user_b
+    res = client.get(
+        f"/api/v1/studio/sessions?user_id={user_a.id},{user_b.id}",
+        headers=_auth_headers(admin_user),
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 2
+    uids = {item["user_id"] for item in data["items"]}
+    assert uids == {user_a.id, user_b.id}
+
+    # Admin filtering by user_id="all" returns all
+    res_all = client.get("/api/v1/studio/sessions?user_id=all", headers=_auth_headers(admin_user))
+    assert res_all.status_code == 200
+    assert res_all.json()["total"] == 3
+
+    # Clinician user_a attempting user_id filter is still restricted to user_a
+    res_clinician = client.get(
+        f"/api/v1/studio/sessions?user_id={user_b.id}",
+        headers=_auth_headers(user_a),
+    )
+    assert res_clinician.status_code == 200
+    assert res_clinician.json()["total"] == 1
+    assert res_clinician.json()["items"][0]["user_id"] == user_a.id
+
+
+def test_list_studio_authors_admin(client, admin_user, user_a, user_b, db_session) -> None:
+    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run")
+    s3 = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="stairs")
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
+
+    res = client.get("/api/v1/studio/sessions/authors", headers=_auth_headers(admin_user))
+    assert res.status_code == 200
+    authors = res.json()
+    assert len(authors) == 2
+    assert authors[0]["id"] == user_a.id
+    assert authors[0]["email"] == user_a.email
+    assert authors[0]["name"] == user_a.name
+    assert authors[1]["id"] == user_b.id
+    assert authors[1]["email"] == user_b.email
+    assert authors[1]["name"] == user_b.name
+
+
+def test_list_studio_authors_clinician(client, user_a, user_b, db_session) -> None:
+    s = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="stairs")
+    db_session.add(s)
+    db_session.commit()
+
+    res = client.get("/api/v1/studio/sessions/authors", headers=_auth_headers(user_a))
+    assert res.status_code == 200
+    authors = res.json()
+    assert len(authors) == 1
+    assert authors[0]["id"] == user_a.id
+    assert authors[0]["email"] == user_a.email
+    assert authors[0]["name"] == user_a.name
+
+
+def test_list_studio_authors_rbac_denied(client, regular_user) -> None:
+    # 401 unauthenticated
+    assert client.get("/api/v1/studio/sessions/authors").status_code == 401
+
+    # 403 regular user
+    assert client.get("/api/v1/studio/sessions/authors", headers=_auth_headers(regular_user)).status_code == 403
+
 
 
