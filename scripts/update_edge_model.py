@@ -226,6 +226,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         default=20,
         help="Minimum number of recording sessions required to include a class in training (default: 20).",
     )
+    parser.add_argument(
+        "--max-sessions-per-class",
+        type=int,
+        default=None,
+        help="Maximum number of most recent recording sessions to keep per class (default: None, keep all).",
+    )
     return parser.parse_args(args)
 
 
@@ -243,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Quality Gate F1 Min  : {args.min_f1 * 100:.1f} %")
     print(f"* Window Parameters    : {args.window_size:.1f}s window, {args.window_step:.1f}s step")
     print(f"* Min Sessions / Class : {min_sessions}")
+    print(f"* Max Sessions / Class : {args.max_sessions_per_class if args.max_sessions_per_class else 'ALL (unlimited)'}")
     print(f"* Build Check Enabled  : {'NO' if args.no_build_check else 'YES'}")
     print("=" * 72 + "\n")
 
@@ -280,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
             window_size_sec=args.window_size,
             step_sec=args.window_step,
             min_sessions_per_class=min_sessions,
+            max_sessions_per_class=args.max_sessions_per_class,
         )
 
         if len(X) == 0:
