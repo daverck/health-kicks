@@ -108,7 +108,76 @@ uv run python -m scripts.train_detector \
 
 ---
 
-## 4. Running Inference with the Production Artifact
+## 4. End-to-End MLOps Pipeline (`scripts/update_edge_model.py`)
+
+While `scripts/train_detector.py` serves for model exploration and hyperparameter benchmarking, the production orchestration script [`scripts/update_edge_model.py`](../scripts/update_edge_model.py) binds the entire machine learning lifecycle to the embedded ESP32-S3 firmware:
+
+```text
+[ PostgreSQL + DynamoDB ]
+         │ (Incremental caching)
+         ▼
+[ Feature Extraction ] (16 canonical indicators, 3.0s window / 0.5s stride)
+         │
+         ▼
+[ Stratified 5-Fold CV ] (RandomForest, ExtraTrees, etc.)
+         │
+         ▼
+[ Quality Gate Check ] (Macro F1 >= 85%)
+         │
+         ▼
+[ C Transpilation via m2cgen ] ──► health-kicks-esp32-s3/include/activity_model_generated.h
+         │
+         ▼
+[ PlatformIO Firmware Build ] ──► Flash / RAM validation (pio run)
+```
+
+### Key Capabilities & Workflow:
+1. **Automated Data Sync**: Downloads missing raw telemetry sessions into `scripts/data/sessions/` via multithreaded workers.
+2. **Class Filtering**: Automatically selects classes with sufficient training sessions (`--min-sessions-per-class 20`).
+3. **Quality Gate**: Prevents degraded models from reaching firmware by asserting `macro F1 >= min_f1` (default 85%).
+4. **Zero-Configuration C Transpilation**: Generates pure C decision trees compatible with embedded C++17 (`activity_model_generated.h`).
+5. **Firmware Integrity Validation**: Runs PlatformIO (`pio run`) directly in `health-kicks-esp32-s3/` to guarantee RAM/Flash bounds before any git commit.
+
+### CLI Usage:
+
+```bash
+# Standard production update (Sync + Train + Quality Gate + C Transpile + Build Check)
+uv run python -m scripts.update_edge_model
+
+# Fast offline demo using synthetic data (no AWS credentials or DB needed)
+uv run python -m scripts.update_edge_model --synthetic
+
+# Skip retraining and re-transpile existing model artifact + verify firmware build
+uv run python -m scripts.update_edge_model --skip-train
+
+# Custom Quality Gate threshold (e.g. 90% F1 score)
+uv run python -m scripts.update_edge_model --min-f1 0.90
+
+# Skip PlatformIO firmware compilation check
+uv run python -m scripts.update_edge_model --no-build-check
+```
+
+### CLI Options Reference (`scripts.update_edge_model`):
+
+| Option | Default | Description |
+|---|---|---|
+| `--synthetic` | `False` | Generate synthetic dataset for offline pipeline validation without DB/AWS. |
+| `--force-refresh` | `False` | Re-download all raw telemetry sessions from DynamoDB even if cached. |
+| `--cache-dir` | `scripts/data/sessions` | Directory path where individual session JSON files are stored. |
+| `--output-model` | `scripts/models/activity_classifier.joblib` | Path where champion `.joblib` model artifact is saved. |
+| `--target-firmware-dir` | Auto-detected | Path to `health-kicks-esp32-s3` (detected automatically in workspace). |
+| `--output-header` | `include/activity_model_generated.h` | Target C header relative to firmware directory. |
+| `--window-size` | `3.0` | Rolling analysis window size in seconds (default: 3.0s). |
+| `--window-step` | `0.5` | Sliding window step in seconds (default: 0.5s). |
+| `--min-f1` | `0.85` | Quality gate: minimum macro F1 score required to accept champion model. |
+| `--min-sessions-per-class` | `20` | Minimum recording sessions required to include a class in training. |
+| `--max-sessions-per-class` | `None` | Maximum number of most recent sessions to include per class. |
+| `--skip-train` | `False` | Skip training phase and re-transpile existing model artifact directly. |
+| `--no-build-check` | `False` | Skip PlatformIO firmware build verification step. |
+
+---
+
+## 5. Running Inference with the Production Artifact
 
 The exported artifact file (`scripts/models/activity_classifier.joblib`) packages the trained estimator alongside all feature engineering metadata. Here is an example showing how to run inference in a Python service or Edge script:
 

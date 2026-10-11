@@ -85,21 +85,49 @@ Key environment variables:
 
 ## Machine Learning (Edge Activity Classification & Fall Detection)
 
-A complete local ML training and evaluation pipeline is available to train and compare lightweight classifiers for the embedded Edge service:
+A complete local ML training, benchmarking, and embedded transpilation pipeline is available to train lightweight classifiers and automatically deploy them to the ESP32-S3 firmware.
+
+### 1. Unified End-to-End MLOps Pipeline (`scripts.update_edge_model`)
+
+The [`scripts/update_edge_model.py`](scripts/update_edge_model.py) script automates the complete model lifecycle in a single command:
+1. **Incremental Data Ingestion**: Synchronizes validated Studio sessions from PostgreSQL and DynamoDB.
+2. **Cross-Validation Training**: Benchmarks candidate algorithms via 5-Fold Stratified Cross-Validation optimizing for macro F1-score.
+3. **Quality Gate Verification**: Enforces minimum F1-score standards (default: $\ge 85\%$).
+4. **C Transpilation**: Converts the champion model into embedded C code (`include/activity_model_generated.h`) via `m2cgen`.
+5. **Firmware Integrity Check**: Automatically verifies ESP32-S3 firmware compilation via PlatformIO.
 
 ```powershell
-# Install optional Data Science / ML dependencies
+# Install ML dependencies in virtualenv
 uv sync --group ml
 
-# Authenticate with AWS CLI for live DynamoDB telemetry data
+# Authenticate with AWS CLI for live telemetry data
 aws sso login   # or aws login / aws configure
 
-# Train classifiers with incremental PostgreSQL & DynamoDB caching (concurrent batch downloads)
+# Full end-to-end sync, train, export to C, and firmware build check
+uv run python -m scripts.update_edge_model
+
+# Fast offline run with synthetic dataset (no AWS or database connection required)
+uv run python -m scripts.update_edge_model --synthetic
+
+# Skip retraining and re-transpile existing model artifact directly
+uv run python -m scripts.update_edge_model --skip-train
+
+# Export to C header without running the PlatformIO build check
+uv run python -m scripts.update_edge_model --no-build-check
+```
+
+### 2. Standalone Training & Hyperparameter Tuning (`scripts.train_detector`)
+
+For detailed model comparison, feature extraction tuning, or custom cross-validation:
+
+```powershell
+# Train classifiers with incremental PostgreSQL & DynamoDB caching
 uv run python -m scripts.train_detector
 
-# Or run in offline synthetic demo mode (no AWS or database connection required)
+# Synthetic offline training
 uv run python -m scripts.train_detector --synthetic
 ```
 
-For full details, refer to the [Machine Learning Training Guide](docs/ML_TRAINING.md).
+For full architecture and parameters details, refer to the [Machine Learning Training Guide](docs/ML_TRAINING.md).
+
 
