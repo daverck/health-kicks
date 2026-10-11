@@ -832,27 +832,27 @@ def train_and_benchmark(
 
     # Base candidate models: 100% compatible m2cgen & optimized for ESP32 flash memory
     models: dict[str, Any] = {
-        "RandomForest_Light": RandomForestClassifier(
-            n_estimators=25, max_depth=6, random_state=42, n_jobs=-1
-        ),
-        "ExtraTrees_Light": ExtraTreesClassifier(
-            n_estimators=25, max_depth=6, random_state=42, n_jobs=-1
-        ),
         "RandomForest_Standard": RandomForestClassifier(
-            n_estimators=40, max_depth=7, random_state=42, n_jobs=-1
+            n_estimators=40, max_depth=8, class_weight="balanced", random_state=42, n_jobs=-1
         ),
-        "LogisticRegression": Pipeline(
+        "RandomForest_Light": RandomForestClassifier(
+            n_estimators=30, max_depth=6, class_weight="balanced", random_state=42, n_jobs=-1
+        ),
+        "ExtraTrees_Standard": ExtraTreesClassifier(
+            n_estimators=40, max_depth=8, class_weight="balanced", random_state=42, n_jobs=-1
+        ),
+    }
+
+    # Include non-transpilable / experimental models only when explicitly requested
+    if include_unsupported_c:
+        models["HistGradientBoosting"] = HistGradientBoostingClassifier(
+            max_iter=100, max_depth=5, random_state=42
+        )
+        models["LogisticRegression"] = Pipeline(
             [
                 ("scaler", StandardScaler()),
                 ("clf", LogisticRegression(max_iter=1000, random_state=42)),
             ]
-        ),
-    }
-
-    # Include non-transpilable models only when explicitly requested
-    if include_unsupported_c:
-        models["HistGradientBoosting"] = HistGradientBoostingClassifier(
-            max_iter=100, max_depth=5, random_state=42
         )
 
     min_class_samples = pd.Series(y).value_counts().min()
