@@ -57,11 +57,18 @@ async def lifespan(_: FastAPI):
 
     if should_migrate:
         logger.info("[lifespan] Running database migrations (Alembic upgrade head)...")
-        try:
-            await asyncio.to_thread(run_migrations)
-            logger.info("[lifespan] Database migrations completed successfully.")
-        except Exception:
-            logger.exception("[lifespan] Database migrations failed during startup")
+        max_retries = 6
+        for attempt in range(1, max_retries + 1):
+            try:
+                await asyncio.to_thread(run_migrations)
+                logger.info("[lifespan] Database migrations completed successfully.")
+                break
+            except Exception:
+                if attempt == max_retries:
+                    logger.exception("[lifespan] Database migrations failed after %d attempts during startup", max_retries)
+                else:
+                    logger.warning("[lifespan] Database migration attempt %d failed, retrying in 4s...", attempt)
+                    await asyncio.sleep(4)
     elif settings.auto_create_tables:
         try:
             create_tables()

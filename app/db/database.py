@@ -13,6 +13,7 @@ When ``USE_RDS_IAM=false``, the standard SQLAlchemy connection based on
 
 from collections.abc import Generator
 from functools import partial
+import time
 from typing import Any
 
 import boto3
@@ -37,21 +38,29 @@ def _get_iam_token(db_url, settings_obj: Settings = settings) -> str:
 
 
 def _connect_with_iam(settings_obj: Settings = settings):
-    """Custom engine creator: open one psycopg2 connection with a fresh token."""
+    """Custom engine creator: open one psycopg2 connection with a fresh token, retrying on transient failures or Aurora auto-pause wake-up."""
     db_url = make_url(settings_obj.database_url)
-    token = _get_iam_token(db_url, settings_obj=settings_obj)
-    return psycopg2.connect(
-        host=db_url.host,
-        port=db_url.port or 5432,
-        user=db_url.username or "postgres",
-        password=token,
-        dbname=db_url.database or "postgres",
-        sslmode=getattr(settings_obj, "database_sslmode", "require"),
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
-    )
+    max_retries = 6
+    for attempt in range(1, max_retries + 1):
+        token = _get_iam_token(db_url, settings_obj=settings_obj)
+        try:
+            return psycopg2.connect(
+                host=db_url.host,
+                port=db_url.port or 5432,
+                user=db_url.username or "postgres",
+                password=token,
+                dbname=db_url.database or "postgres",
+                sslmode=getattr(settings_obj, "database_sslmode", "require"),
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
+                connect_timeout=30,
+            )
+        except psycopg2.OperationalError as exc:
+            if attempt == max_retries:
+                raise
+            time.sleep(3)
 
 
 def build_engine(settings_obj: Settings = settings) -> Engine:
