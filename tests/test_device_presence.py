@@ -32,7 +32,7 @@ def db_session():
 @pytest.fixture()
 def client(db_session, monkeypatch):
     patched_settings = dataclasses.replace(config_module.settings, ingest_token=INGEST_TOKEN)
-    monkeypatch.setattr("app.api.v1.internal.settings", patched_settings)
+    app.dependency_overrides[config_module.get_settings] = lambda: patched_settings
 
     def override_get_db():
         yield db_session

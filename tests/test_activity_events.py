@@ -31,7 +31,11 @@ def client(db_session):
     def override_get_db():
         yield db_session
 
+    from app.core.config import get_settings
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_settings] = lambda: ingestion_settings.__class__(
+        ingest_token="secret-test-token", environment="production"
+    )
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

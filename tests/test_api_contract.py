@@ -52,7 +52,9 @@ def test_ingestion_route_auth_and_idempotence(monkeypatch) -> None:
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    monkeypatch.setattr("app.api.v1.ingestion.settings", ingestion_settings.__class__(ingest_token="secret", environment="production"))
+    patched_ingest_settings = ingestion_settings.__class__(ingest_token="secret", environment="production")
+    from app.core.config import get_settings
+    app.dependency_overrides[get_settings] = lambda: patched_ingest_settings
     payload = {
         "header": {"device_id": "shoe-1", "msg_id": "message-1", "timestamp": "2026-01-01T00:00:00Z"},
         "payload": {"event_type": "fall", "confidence_score": 0.95, "raw_imu_snapshot": {"ax": 1.0}},

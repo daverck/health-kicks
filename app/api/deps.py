@@ -7,6 +7,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.db.database import get_db
 from app.db.models import User, UserRole
 from app.services.token_service import verify_access_token
@@ -60,24 +61,12 @@ def verify_ingest_token(
     request: Request,
     x_hk_ingest_token: str | None = Header(default=None, alias="X-HealthKicks-Ingest-Token"),
     x_ingest_token: str | None = Header(default=None, alias="X-Ingest-Token"),
+    settings: Settings = Depends(get_settings),
 ) -> None:
     """Verify that the request comes from an authorized caller using the ingest token."""
-    import sys
     from hmac import compare_digest
 
-    from app.core.config import settings
-
-    cfg = settings
-    if request is not None and request.url.path.startswith("/api/v1/internal"):
-        mod = sys.modules.get("app.api.v1.internal")
-        if mod is not None and hasattr(mod, "settings"):
-            cfg = mod.settings
-    elif request is not None and request.url.path.startswith("/api/v1/ingest"):
-        mod = sys.modules.get("app.api.v1.ingestion")
-        if mod is not None and hasattr(mod, "settings"):
-            cfg = mod.settings
-
-    expected = cfg.ingest_token
+    expected = settings.ingest_token
     token = x_hk_ingest_token or x_ingest_token
 
     if expected:
@@ -91,7 +80,7 @@ def verify_ingest_token(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=error_detail,
             )
-    elif cfg.environment.lower() in {"production", "prod"}:
+    elif settings.environment.lower() in {"production", "prod"}:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Ingestion authentication is not configured",

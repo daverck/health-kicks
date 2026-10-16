@@ -292,3 +292,8 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
 
 
 settings = load_settings()
+
+
+def get_settings() -> Settings:
+    """Return the current application settings instance."""
+    return settings
