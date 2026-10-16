@@ -45,9 +45,9 @@ def _get_device(session: Session, device_id: str, seen_at: datetime) -> Device:
     return device
 
 
-def ingest_event(session: Session, message: dict[str, Any]) -> ActivityEvent | None:
+def ingest_event(session: Session, message: IngestionEvent | dict[str, Any]) -> ActivityEvent | None:
     """Validate and persist one AWS IoT Rule event with idempotent delivery and device ownership check."""
-    contract = IngestionEvent.model_validate(message)
+    contract = message if isinstance(message, IngestionEvent) else IngestionEvent.model_validate(message)
     header = contract.header
     payload = contract.payload
 

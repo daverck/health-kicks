@@ -1,7 +1,7 @@
 """Strict AWS IoT Rule webhook contracts."""
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, BeforeValidator, Field
 
@@ -58,3 +58,12 @@ class IngestionResponse(StrictModel):
     status: str
     msg_id: str
     duplicate: bool
+
+
+class RawTelemetryIngestionRequest(StrictModel):
+    device_id: str | None = Field(default=None, max_length=128)
+    session_id: str = Field(min_length=1, max_length=255)
+    label: str | None = Field(default="unlabeled", max_length=64)
+    sample_count: int | None = Field(default=0, ge=0)
+    duration_sec: float | None = Field(default=5.0, ge=0)
+    readings: list[dict[str, Any]] | None = Field(default_factory=list)
