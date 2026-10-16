@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
 from app.api.v1.utils import validate_and_normalize_date_range
+from app.core.rate_limit import rate_limit
 from app.db.database import get_db
 from app.db.models import ActivityEvent, Device, DeviceOwnership, HapticLog, UserRole
 from app.schemas.cloud import (
@@ -40,7 +41,10 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
     """Build HTTP routes with infrastructure dependencies injected."""
     router = APIRouter(prefix="/api/v1", tags=["Cloud API"])
 
-    @router.post("/devices/{device_id}/haptic/trigger")
+    @router.post(
+        "/devices/{device_id}/haptic/trigger",
+        dependencies=[Depends(rate_limit("haptic_trigger", max_requests=10, window_seconds=60.0))],
+    )
     def trigger_haptic(device_id: str, command: HapticTrigger, user: CurrentUser, db: Session = Depends(get_db)) -> dict[str, str | int]:
         verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
         device = db.query(Device).filter_by(device_id=device_id).one_or_none()

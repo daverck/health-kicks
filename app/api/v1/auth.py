@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_sts_service
 from app.core.config import settings
+from app.core.rate_limit import rate_limit
 from app.db.database import get_db
 from app.db.models import DeviceOwnership, User, UserRole
 from app.schemas.auth import (
@@ -435,7 +436,11 @@ def create_auth_router() -> APIRouter:
         logger.info("Azure SSO callback: issued access token for user id=%s", user.id)
         return TokenResponse.build(user, access_token, refresh_token)
 
-    @router.post("/token/exchange", response_model=TokenResponse)
+    @router.post(
+        "/token/exchange",
+        response_model=TokenResponse,
+        dependencies=[Depends(rate_limit("token_exchange", max_requests=20, window_seconds=60.0))],
+    )
     def exchange_auth_ticket(payload: OAuthTicketExchangeRequest) -> TokenResponse:
         """Atomically exchange a one-time OAuth ticket for access and refresh tokens."""
         entry = _ONE_TIME_TICKETS.pop(payload.ticket, None)
@@ -457,7 +462,11 @@ def create_auth_router() -> APIRouter:
             user=entry["user"],
         )
 
-    @router.post("/refresh", response_model=TokenResponse)
+    @router.post(
+        "/refresh",
+        response_model=TokenResponse,
+        dependencies=[Depends(rate_limit("token_refresh", max_requests=30, window_seconds=60.0))],
+    )
     def refresh(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> TokenResponse:
         user_id = token_service.verify_refresh_token(payload.refresh_token)
         user = db.query(User).filter_by(id=user_id).one_or_none()

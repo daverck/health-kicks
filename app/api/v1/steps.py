@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
+from app.core.rate_limit import rate_limit
 from app.db.database import get_db
 from app.schemas.steps import (
     DailyStepsHistoryResponse,
@@ -34,6 +35,7 @@ def create_steps_router() -> APIRouter:
         response_model=DailyStepsSyncResponse,
         status_code=status.HTTP_200_OK,
         summary="Idempotently synchronize daily step counts broken down by activity",
+        dependencies=[Depends(rate_limit("steps_sync", max_requests=60, window_seconds=60.0))],
     )
     def sync_steps(
         payload: DailyStepsSyncPayload,
