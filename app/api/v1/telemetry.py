@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, RequireClinicianOrAdmin
 from app.db.database import get_db
-from app.db.models import StudioSession
+from app.db.models import DeviceOwnership, StudioSession, UserRole
 from app.schemas.telemetry import (
     ImuReadingResponse,
     StudioDatasetStatsResponse,
@@ -53,7 +53,36 @@ def create_telemetry_router(
         """Query IMU telemetry by Studio session_id or by time range."""
         verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
 
+        bound_at_utc: datetime | None = None
+        if user.role == UserRole.user:
+            ownership = (
+                db.query(DeviceOwnership.bound_at_utc)
+                .filter(DeviceOwnership.device_id == device_id, DeviceOwnership.user_id == user.id)
+                .first()
+            )
+            if ownership:
+                bound_at_utc = ownership[0]
+
         if session_id is not None:
+            if user.role == UserRole.user and bound_at_utc is not None:
+                try:
+                    session_uuid = uuid.UUID(session_id)
+                    sess = db.query(StudioSession).filter_by(id=session_uuid, device_id=device_id).first()
+                    if sess is not None:
+                        sess_created = sess.created_at
+                        b_cmp = bound_at_utc
+                        if sess_created.tzinfo is not None and b_cmp.tzinfo is None:
+                            b_cmp = b_cmp.replace(tzinfo=sess_created.tzinfo)
+                        elif sess_created.tzinfo is None and b_cmp.tzinfo is not None:
+                            sess_created = sess_created.replace(tzinfo=b_cmp.tzinfo)
+                        if sess_created < b_cmp and sess.user_id != user.id:
+                            raise HTTPException(
+                                status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"Studio session '{session_id}' not found for device '{device_id}'",
+                            )
+                except ValueError:
+                    pass
+
             result = telemetry_service.get_session_readings(
                 device_id=device_id,
                 session_id=session_id,
@@ -71,6 +100,26 @@ def create_telemetry_router(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="start_time must be less than or equal to end_time",
                 )
+
+            # Temporal isolation for regular users
+            if user.role == UserRole.user and bound_at_utc is not None:
+                b_cmp = bound_at_utc
+                if start_time.tzinfo is not None and b_cmp.tzinfo is None:
+                    b_cmp = b_cmp.replace(tzinfo=start_time.tzinfo)
+                elif start_time.tzinfo is None and b_cmp.tzinfo is not None:
+                    b_cmp = b_cmp.replace(tzinfo=None)
+
+                end_cmp = end_time
+                if end_time.tzinfo is None and b_cmp.tzinfo is not None:
+                    end_cmp = end_time.replace(tzinfo=b_cmp.tzinfo)
+                elif end_time.tzinfo is not None and b_cmp.tzinfo is None:
+                    end_cmp = end_time.replace(tzinfo=None)
+
+                if end_cmp < b_cmp:
+                    return []
+                if start_time < b_cmp:
+                    start_time = b_cmp
+
             start_us = int(start_time.timestamp() * 1_000_000)
             end_us = int(end_time.timestamp() * 1_000_000)
             return telemetry_service.get_timerange_readings(

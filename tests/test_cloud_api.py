@@ -346,3 +346,65 @@ def test_list_activities_and_haptic_ownership_check() -> None:
     assert res_all.total == 0
 
     session.close()
+
+
+def test_temporal_isolation_for_rebound_device() -> None:
+    """Ensure regular users cannot view events prior to device binding, but clinicians/admins can."""
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+
+    t0 = datetime(2026, 9, 1, 10, 0, 0, tzinfo=UTC)
+    t1_bound = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
+    t2 = datetime(2026, 9, 15, 14, 0, 0, tzinfo=UTC)
+
+    old_user = User(id=10, email="old@test.com", name="Old Owner", role=UserRole.user)
+    new_user = User(id=11, email="new@test.com", name="New Owner", role=UserRole.user)
+    clinician = User(id=12, email="doc@test.com", name="Clinician", role=UserRole.clinician)
+
+    session.add_all([
+        old_user,
+        new_user,
+        clinician,
+        Device(device_id="HK-X"),
+        DeviceOwnership(user_id=new_user.id, device_id="HK-X", bound_at_utc=t1_bound),
+        # Activity events: one before binding, one after binding
+        ActivityEvent(device_id="HK-X", event_type="walk", confidence_score=0.9, timestamp_utc=t0),
+        ActivityEvent(device_id="HK-X", event_type="run", confidence_score=0.95, timestamp_utc=t2),
+        # Haptic logs: one before binding, one after binding
+        HapticLog(device_id="HK-X", intensity=100, duration_ms=200, triggered_at_utc=t0, triggered_by_user=True),
+        HapticLog(device_id="HK-X", intensity=150, duration_ms=300, triggered_at_utc=t2, triggered_by_user=True),
+    ])
+    session.commit()
+
+    router = create_cloud_router(DummyPublisher())
+    activities_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("events/activities")
+    )
+    haptic_history_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("haptic/history")
+    )
+
+    # 1. New user (regular) only sees events/logs strictly on or after t1_bound
+    act_new = activities_endpoint("HK-X", user=new_user, page=1, page_size=10, db=session)
+    assert act_new.total == 1
+    assert act_new.items[0].event_type == "run"
+
+    hap_new = haptic_history_endpoint("HK-X", user=new_user, page=1, page_size=10, db=session)
+    assert hap_new.total == 1
+    assert hap_new.items[0].intensity == 150
+
+    # 2. Clinician sees all events and logs (both before and after t1_bound)
+    act_doc = activities_endpoint("HK-X", user=clinician, page=1, page_size=10, db=session)
+    assert act_doc.total == 2
+    assert {item.event_type for item in act_doc.items} == {"walk", "run"}
+
+    hap_doc = haptic_history_endpoint("HK-X", user=clinician, page=1, page_size=10, db=session)
+    assert hap_doc.total == 2
+    assert {item.intensity for item in hap_doc.items} == {100, 150}
+
+    session.close()

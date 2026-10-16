@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, or_, text
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -85,6 +85,24 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
 
         query = db.query(ActivityEvent).filter(ActivityEvent.device_id.in_(target_device_ids))
 
+        # Temporal isolation for regular users: cannot view historical data from before device binding
+        if user.role == UserRole.user:
+            ownerships = (
+                db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
+                .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))
+                .all()
+            )
+            if not ownerships:
+                return ActivityEventPage(items=[], page=page, page_size=page_size, total=0)
+            bound_conds = []
+            for dev_id, bound_at in ownerships:
+                if bound_at is not None:
+                    bound_conds.append(and_(ActivityEvent.device_id == dev_id, ActivityEvent.timestamp_utc >= bound_at))
+                else:
+                    bound_conds.append(ActivityEvent.device_id == dev_id)
+            if bound_conds:
+                query = query.filter(or_(*bound_conds))
+
         if event_type is not None and isinstance(event_type, str):
             clean_types = [t.strip() for t in event_type.split(",") if t.strip()]
             if clean_types and not any(t.lower() == "all" for t in clean_types):
@@ -138,6 +156,24 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
         query = db.query(HapticLog).filter(HapticLog.device_id.in_(target_device_ids))
+
+        # Temporal isolation for regular users: cannot view historical haptics from before device binding
+        if user.role == UserRole.user:
+            ownerships = (
+                db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
+                .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))
+                .all()
+            )
+            if not ownerships:
+                return HapticLogPage(items=[], page=page, page_size=page_size, total=0)
+            bound_conds = []
+            for dev_id, bound_at in ownerships:
+                if bound_at is not None:
+                    bound_conds.append(and_(HapticLog.device_id == dev_id, HapticLog.triggered_at_utc >= bound_at))
+                else:
+                    bound_conds.append(HapticLog.device_id == dev_id)
+            if bound_conds:
+                query = query.filter(or_(*bound_conds))
 
         if norm_start is not None:
             query = query.filter(HapticLog.triggered_at_utc >= norm_start)

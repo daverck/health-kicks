@@ -13,7 +13,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_current_user
 from app.api.v1.telemetry import create_telemetry_router
-from app.db.models import Base, User, UserRole
+from app.db.database import get_db
+from app.db.models import Base, DeviceOwnership, User, UserRole
 from app.services import token_service
 from app.services.telemetry_service import TelemetryService
 
@@ -330,3 +331,61 @@ def test_api_delete_session_success(test_client, mock_table) -> None:
     assert res.status_code == 204
     assert res.text == ""
     assert batch_mock.delete_item.call_count == 1
+
+
+def test_api_get_telemetry_temporal_isolation(db_session, telemetry_service, mock_table) -> None:
+    """Ensure regular user telemetry queries are clamped to bound_at_utc and prior session telemetry is 404."""
+    t_bound = datetime(2023, 11, 14, 22, 13, 25, tzinfo=UTC)
+    regular_user = User(
+        id=99,
+        google_sub="test-sub-regular",
+        email="regular@example.com",
+        name="Regular",
+        role=UserRole.user,
+    )
+    db_session.add(regular_user)
+    db_session.add(DeviceOwnership(user_id=99, device_id="HK-BOUND", bound_at_utc=t_bound))
+    db_session.commit()
+
+    app = FastAPI()
+    app.include_router(create_telemetry_router(service=telemetry_service))
+    app.dependency_overrides[get_current_user] = lambda: regular_user
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    # 1. Range strictly before bound_at_utc returns empty list without querying DynamoDB
+    start_prior = "2023-11-14T22:13:00Z"
+    end_prior = "2023-11-14T22:13:20Z"
+    res = client.get(f"/api/v1/devices/HK-BOUND/telemetry?start_time={start_prior}&end_time={end_prior}")
+    assert res.status_code == 200
+    assert res.json() == []
+
+    # 2. Range overlapping bound_at_utc clamps start_time to bound_at_utc
+    clamped_us = int(t_bound.timestamp() * 1_000_000)
+    mock_table.query.return_value = {
+        "Items": [
+            {
+                "device_id": "HK-BOUND",
+                "timestamp": clamped_us + 1000,
+                "ax": Decimal("0.1"),
+                "ay": Decimal("0.2"),
+                "az": Decimal("9.8"),
+                "gx": Decimal("0.0"),
+                "gy": Decimal("0.0"),
+                "gz": Decimal("0.0"),
+            }
+        ]
+    }
+    start_str = "2023-11-14T22:13:20Z"
+    end_str = "2023-11-14T22:13:30Z"
+    from unittest.mock import patch
+    with patch.object(telemetry_service, "get_timerange_readings", wraps=telemetry_service.get_timerange_readings) as spy:
+        res2 = client.get(f"/api/v1/devices/HK-BOUND/telemetry?start_time={start_str}&end_time={end_str}")
+        assert res2.status_code == 200
+        assert len(res2.json()) == 1
+        spy.assert_called_once_with(
+            device_id="HK-BOUND",
+            start_epoch_us=clamped_us,
+            end_epoch_us=int(datetime(2023, 11, 14, 22, 13, 30, tzinfo=UTC).timestamp() * 1_000_000),
+            limit=1000,
+        )
