@@ -7,71 +7,92 @@ SPA Frontend-First flow:
 4. Backend verifies state, exchanges code for user profile, and returns the session JWT as JSON.
 """
 
+import base64
+import hashlib
 import logging
 import secrets
+import time
+from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
-from itsdangerous import BadData, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
+from itsdangerous import BadData, SignatureExpired, URLSafeTimedSerializer
+from pydantic import Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_sts_service
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import DeviceOwnership, User, UserRole
-from app.schemas.auth import IoTCredentialsRequest, IoTCredentialsResponse
+from app.schemas.auth import (
+    IoTCredentialsRequest,
+    IoTCredentialsResponse,
+    OAuthTicketExchangeRequest,
+)
 from app.schemas.cloud import StrictModel
 from app.services import azure_auth_service, google_auth_service, token_service
 from app.services.aws_sts_service import AWSSTSService
 
 _timed_serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
-_untimed_serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
 logger = logging.getLogger(__name__)
 
+_ONE_TIME_TICKETS: dict[str, dict[str, Any]] = {}
+TICKET_TTL_SECONDS = 60
 
-def generate_oauth_state(provider: str, platform: str = "web") -> str:
-    """Generate a signed anti-CSRF OAuth state containing a nonce, provider name, and platform."""
-    payload = {
+
+def generate_oauth_state(
+    provider: str, platform: str = "web", code_challenge: str | None = None
+) -> str:
+    """Generate a signed anti-CSRF OAuth state containing a nonce, provider name, platform, and optional PKCE challenge."""
+    payload: dict[str, Any] = {
         "platform": platform,
         "provider": provider,
         "nonce": secrets.token_hex(16),
     }
+    if code_challenge is not None:
+        payload["cc"] = code_challenge
     return _timed_serializer.dumps(payload)
 
 
 def verify_oauth_state(state: str, expected_provider: str, max_age: int = 600) -> dict:
     """Validate the cryptographic signature, expiration (max_age seconds), and provider."""
-    data = None
     try:
         data = _timed_serializer.loads(state, max_age=max_age)
     except SignatureExpired as error:
         logger.warning("Expired OAuth state token: %s", error)
         raise HTTPException(status_code=400, detail="Invalid OAuth state: state expired") from error
-    except BadData:
-        # Fallback to untimed serializer in case state was generated without timestamp
-        try:
-            data = _untimed_serializer.loads(state)
-        except BadData as error:
-            logger.warning("Invalid OAuth state signature: %s", error)
-            raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
+    except BadData as error:
+        logger.warning("Invalid OAuth state signature: %s", error)
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
 
     if not isinstance(data, dict) or data.get("provider") != expected_provider:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
     return data
 
 
+def _verify_pkce_challenge(code_challenge: str | None, code_verifier: str | None) -> None:
+    """Verify S256 PKCE code_verifier against the stored code_challenge when present."""
+    if not code_challenge:
+        return
+    if not code_verifier:
+        raise HTTPException(status_code=400, detail="Missing PKCE code_verifier")
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    if not secrets.compare_digest(computed, code_challenge):
+        raise HTTPException(status_code=400, detail="Invalid PKCE code_verifier")
+
+
 def get_state_platform(state: str | None) -> str:
     """Extract the target platform ('mobile' or 'web') from the state payload without enforcing strict signature/expiry."""
     if not state:
         return "web"
-    for serializer in (_timed_serializer, _untimed_serializer):
-        try:
-            _, payload = serializer.loads_unsafe(state)
-            if isinstance(payload, dict) and "platform" in payload:
-                return str(payload["platform"])
-        except Exception:
-            pass
+    try:
+        _, payload = _timed_serializer.loads_unsafe(state)
+        if isinstance(payload, dict) and "platform" in payload:
+            return str(payload["platform"])
+    except Exception:
+        pass
     return "web"
 
 
@@ -93,6 +114,31 @@ class UserResponse(StrictModel):
             role=user.role.value if hasattr(user.role, "value") else str(user.role),
             is_active=user.is_active,
         )
+
+
+def _create_one_time_ticket(
+    access_token: str,
+    refresh_token: str,
+    user_resp: UserResponse,
+    code_challenge: str | None = None,
+) -> str:
+    """Create a short-lived one-time authentication ticket to avoid exposing JWTs in redirect URLs."""
+    now = time.time()
+    expired_keys = [
+        k for k, v in _ONE_TIME_TICKETS.items() if now - v["created_at"] > TICKET_TTL_SECONDS
+    ]
+    for k in expired_keys:
+        _ONE_TIME_TICKETS.pop(k, None)
+
+    ticket = secrets.token_urlsafe(32)
+    _ONE_TIME_TICKETS[ticket] = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user": user_resp,
+        "code_challenge": code_challenge,
+        "created_at": now,
+    }
+    return ticket
 
 
 class TokenResponse(StrictModel):
@@ -123,6 +169,7 @@ class OAuthLoginResponse(StrictModel):
 class OAuthCallbackRequest(StrictModel):
     code: str
     state: str
+    code_verifier: str | None = Field(default=None, min_length=43, max_length=128)
 
 
 GoogleLoginResponse = OAuthLoginResponse
@@ -138,12 +185,24 @@ def create_auth_router() -> APIRouter:
         return getattr(settings, "frontend_url", "https://healthkicks.duckdns.org").rstrip("/")
 
     @router.get("/google/login", response_model=GoogleLoginResponse)
-    def google_login(request: Request, redirect: bool = False, platform: str | None = None):
+    def google_login(
+        request: Request,
+        redirect: bool = False,
+        platform: str | None = None,
+        code_challenge: str | None = Query(default=None, min_length=43, max_length=128),
+        code_challenge_method: str | None = Query(default="S256"),
+    ):
         if not settings.google_client_id or not settings.google_client_secret:
             raise HTTPException(status_code=503, detail="Google SSO is not configured")
+        if code_challenge is not None and (code_challenge_method or "S256").upper() != "S256":
+            raise HTTPException(
+                status_code=400, detail="Only S256 PKCE code_challenge_method is supported"
+            )
         is_mobile = (redirect or platform == "mobile")
         target_platform = "mobile" if is_mobile else "web"
-        state = generate_oauth_state("google", platform=target_platform)
+        state = generate_oauth_state(
+            "google", platform=target_platform, code_challenge=code_challenge
+        )
         url = google_auth_service.google_authorization_url(state, is_mobile=is_mobile)
 
         accept = request.headers.get("accept", "")
@@ -163,7 +222,7 @@ def create_auth_router() -> APIRouter:
         """Browser redirect handler for Google OAuth2.
 
         Extracts the authorization code and state parameter, validates CSRF & expiration,
-        exchanges code for user profile, and redirects to:
+        exchanges code for user profile, and redirects with a short-lived one-time ticket to:
         - `healthkicks://auth/callback` if target platform is mobile
         - `{frontend_url}/auth/google/callback` (or `/login?error=`) for web clients
         """
@@ -208,18 +267,25 @@ def create_auth_router() -> APIRouter:
             logger.exception("Google SSO callback GET: user provisioning failed: %s", err)
             return _redirect_error("Échec de persistance de l'utilisateur")
 
+        ticket = _create_one_time_ticket(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            user_resp=UserResponse.from_user(user),
+            code_challenge=state_data.get("cc"),
+        )
         logger.info("Google SSO callback GET: success for user id=%s (is_mobile=%s)", user.id, is_mobile)
         if is_mobile:
             return RedirectResponse(
-                f"healthkicks://auth/callback?access_token={access_token}&refresh_token={refresh_token}"
+                f"healthkicks://auth/callback?ticket={ticket}&state={state}"
             )
         return RedirectResponse(
-            f"{frontend_base}/auth/google/callback?access_token={access_token}&refresh_token={refresh_token}"
+            f"{frontend_base}/auth/google/callback?ticket={ticket}&state={state}"
         )
 
     @router.post("/google/callback", response_model=TokenResponse)
     def google_callback(payload: GoogleCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
         state_data = verify_oauth_state(payload.state, expected_provider="google")
+        _verify_pkce_challenge(state_data.get("cc"), payload.code_verifier)
         is_mobile = (state_data.get("platform") == "mobile")
 
         try:
@@ -243,12 +309,24 @@ def create_auth_router() -> APIRouter:
         return TokenResponse.build(user, access_token, refresh_token)
 
     @router.get("/azure/login")
-    def azure_login(request: Request, redirect: bool = False, platform: str | None = None):
+    def azure_login(
+        request: Request,
+        redirect: bool = False,
+        platform: str | None = None,
+        code_challenge: str | None = Query(default=None, min_length=43, max_length=128),
+        code_challenge_method: str | None = Query(default="S256"),
+    ):
         if not settings.azure_client_id or not settings.azure_client_secret:
             raise HTTPException(status_code=503, detail="Azure SSO is not configured")
+        if code_challenge is not None and (code_challenge_method or "S256").upper() != "S256":
+            raise HTTPException(
+                status_code=400, detail="Only S256 PKCE code_challenge_method is supported"
+            )
         is_mobile = (redirect or platform == "mobile")
         target_platform = "mobile" if is_mobile else "web"
-        state = generate_oauth_state("azure", platform=target_platform)
+        state = generate_oauth_state(
+            "azure", platform=target_platform, code_challenge=code_challenge
+        )
         try:
             url = azure_auth_service.azure_authorization_url(state, is_mobile=is_mobile)
         except azure_auth_service.AzureAuthError as error:
@@ -271,7 +349,7 @@ def create_auth_router() -> APIRouter:
         """Browser redirect handler for Azure AD / Microsoft Entra ID.
 
         Extracts the authorization code and state parameter, validates CSRF & expiration,
-        exchanges code for user profile, and redirects to:
+        exchanges code for user profile, and redirects with a short-lived one-time ticket to:
         - `healthkicks://auth/callback` if target platform is mobile
         - `{frontend_url}/auth/azure/callback` (or `/login?error=`) for web clients
         """
@@ -316,18 +394,25 @@ def create_auth_router() -> APIRouter:
             logger.exception("Azure SSO callback GET: user provisioning failed: %s", err)
             return _redirect_error("Échec de persistance de l'utilisateur")
 
+        ticket = _create_one_time_ticket(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            user_resp=UserResponse.from_user(user),
+            code_challenge=state_data.get("cc"),
+        )
         logger.info("Azure SSO callback GET: success for user id=%s (is_mobile=%s)", user.id, is_mobile)
         if is_mobile:
             return RedirectResponse(
-                f"healthkicks://auth/callback?access_token={access_token}&refresh_token={refresh_token}"
+                f"healthkicks://auth/callback?ticket={ticket}&state={state}"
             )
         return RedirectResponse(
-            f"{frontend_base}/auth/azure/callback?access_token={access_token}&refresh_token={refresh_token}"
+            f"{frontend_base}/auth/azure/callback?ticket={ticket}&state={state}"
         )
 
     @router.post("/azure/callback", response_model=TokenResponse)
     def azure_callback(payload: AzureCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
         state_data = verify_oauth_state(payload.state, expected_provider="azure")
+        _verify_pkce_challenge(state_data.get("cc"), payload.code_verifier)
         is_mobile = (state_data.get("platform") == "mobile")
 
         try:
@@ -349,6 +434,28 @@ def create_auth_router() -> APIRouter:
 
         logger.info("Azure SSO callback: issued access token for user id=%s", user.id)
         return TokenResponse.build(user, access_token, refresh_token)
+
+    @router.post("/token/exchange", response_model=TokenResponse)
+    def exchange_auth_ticket(payload: OAuthTicketExchangeRequest) -> TokenResponse:
+        """Atomically exchange a one-time OAuth ticket for access and refresh tokens."""
+        entry = _ONE_TIME_TICKETS.pop(payload.ticket, None)
+        if entry is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or already consumed authentication ticket",
+            )
+        if time.time() - entry["created_at"] > TICKET_TTL_SECONDS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authentication ticket expired",
+            )
+        _verify_pkce_challenge(entry.get("code_challenge"), payload.code_verifier)
+        return TokenResponse(
+            access_token=entry["access_token"],
+            refresh_token=entry["refresh_token"],
+            token_type="bearer",
+            user=entry["user"],
+        )
 
     @router.post("/refresh", response_model=TokenResponse)
     def refresh(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> TokenResponse:

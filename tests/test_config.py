@@ -128,3 +128,18 @@ def test_database_pool_and_log_environment_overrides(tmp_path: Path, monkeypatch
     assert settings.database_pool_recycle == 600
     assert settings.database_pool_pre_ping is False
     assert settings.log_level == "DEBUG"
+
+
+def test_production_rejects_default_or_short_jwt_secret(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HEALTHKICKS_ENVIRONMENT", "production")
+    with pytest.raises(ValueError, match="Insecure JWT secret"):
+        load_settings(tmp_path / "missing.yaml")
+
+    monkeypatch.setenv("HEALTHKICKS_JWT_SECRET", "too-short")
+    with pytest.raises(ValueError, match="Insecure JWT secret"):
+        load_settings(tmp_path / "missing.yaml")
+
+    monkeypatch.setenv("HEALTHKICKS_JWT_SECRET", "s" * 32)
+    prod_settings = load_settings(tmp_path / "missing.yaml")
+    assert prod_settings.jwt_secret == "s" * 32
+

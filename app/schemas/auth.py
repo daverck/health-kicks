@@ -2,7 +2,16 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.cloud import StrictModel
+
+
+class OAuthTicketExchangeRequest(StrictModel):
+    """Request payload for exchanging a one-time OAuth ticket for session tokens."""
+
+    ticket: str = Field(..., min_length=16, max_length=256)
+    code_verifier: str | None = Field(default=None, min_length=43, max_length=128)
 
 
 class IoTCredentialsRequest(BaseModel):
@@ -25,4 +34,5 @@ class IoTCredentialsResponse(BaseModel):
     user_id: str | None = None
 
     model_config = ConfigDict(extra="forbid")
+
 

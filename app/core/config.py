@@ -283,6 +283,11 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
                 values[field_name] = converter(environment_value)
                 break
 
+    if str(values.get("environment", "")).lower() in ("prod", "production"):
+        jwt_sec = str(values.get("jwt_secret", ""))
+        if jwt_sec == "dev-only-insecure-secret" or len(jwt_sec) < 32:
+            raise ValueError("Insecure JWT secret configured for production environment")
+
     return Settings(**values)
 
 

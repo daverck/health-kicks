@@ -7,7 +7,7 @@ import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from itsdangerous import URLSafeSerializer
+from itsdangerous import URLSafeTimedSerializer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -317,7 +317,7 @@ def test_endpoint_azure_callback_rejects_google_state(auth_client) -> None:
 def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
     import secrets
 
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
 
     mock_user_info = {
@@ -361,7 +361,7 @@ def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
 def test_endpoint_azure_callback_post_token_exchange_error(auth_client) -> None:
     import secrets
 
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "azure"})
 
     with patch(
@@ -391,7 +391,7 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
     user_id = google_user.id
 
     # 2. Azure SSO callback for the same email
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": "hk", "provider": "azure"})
 
     mock_user_info = {
@@ -430,3 +430,53 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
         assert me_res.json()["id"] == user_id
         assert me_res.json()["email"] == "linked.doc@healthkicks.org"
         assert me_res.json()["role"] == "clinician"
+
+
+def test_azure_pkce_and_ticket_exchange(auth_client) -> None:
+    import base64
+    import hashlib
+    from urllib.parse import parse_qs, urlparse
+
+    verifier = "a" * 64
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+    login_res = auth_client.get(
+        "/api/v1/auth/azure/login",
+        params={"code_challenge": challenge, "code_challenge_method": "S256", "platform": "mobile"},
+    )
+    assert login_res.status_code == 200
+    state = login_res.json()["state"]
+
+    mock_user_info = {
+        "azure_sub": "az-pkce-999",
+        "email": "pkce.azure@healthkicks.org",
+        "name": "Azure PKCE",
+        "profile": {},
+        "id_token_claims": {},
+    }
+
+    with patch(
+        "app.services.azure_auth_service.exchange_code_for_azure_user",
+        return_value=mock_user_info,
+    ):
+        cb_res = auth_client.get(
+            "/api/v1/auth/azure/callback",
+            params={"code": "az-code", "state": state},
+            follow_redirects=False,
+        )
+        assert cb_res.status_code in (302, 307)
+        location = cb_res.headers["location"]
+        assert "access_token" not in location
+        assert "refresh_token" not in location
+        qs = parse_qs(urlparse(location).query)
+        assert "ticket" in qs
+        ticket = qs["ticket"][0]
+
+        ex_res = auth_client.post(
+            "/api/v1/auth/token/exchange",
+            json={"ticket": ticket, "code_verifier": verifier},
+        )
+        assert ex_res.status_code == 200
+        assert ex_res.json()["user"]["email"] == "pkce.azure@healthkicks.org"
+

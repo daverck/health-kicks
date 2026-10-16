@@ -158,10 +158,17 @@ class TestGoogleOAuthMobileRedirects:
 
             parsed = urlparse(location)
             params = parse_qs(parsed.query)
-            assert "access_token" in params
-            assert "refresh_token" in params
-            assert len(params["access_token"][0]) > 0
+            assert "ticket" in params
+            assert "access_token" not in params
+            assert "refresh_token" not in params
+            assert len(params["ticket"][0]) > 0
             mock_exchange.assert_called_once_with("valid-oauth-code", is_mobile=True)
+
+            ex = client.post("/api/v1/auth/token/exchange", json={"ticket": params["ticket"][0]})
+            assert ex.status_code == 200
+            ex_data = ex.json()
+            assert "access_token" in ex_data
+            assert "refresh_token" in ex_data
 
     def test_google_callback_get_success_redirects_to_web_for_web_platform(self, client) -> None:
         web_state = generate_oauth_state("google", platform="web")
@@ -183,7 +190,8 @@ class TestGoogleOAuthMobileRedirects:
             assert "healthkicks.duckdns.org" in location
             assert "/auth/google/callback" in location
             params = parse_qs(urlparse(location).query)
-            assert "access_token" in params
+            assert "ticket" in params
+            assert "access_token" not in params
             mock_exchange.assert_called_once_with("valid-oauth-code", is_mobile=False)
 
     def test_google_callback_get_provider_error_redirects_to_mobile_deep_link(self, client) -> None:
@@ -277,9 +285,14 @@ class TestAzureOAuthMobileRedirects:
             location = res.headers["location"]
             assert location.startswith("healthkicks://auth/callback")
             params = parse_qs(urlparse(location).query)
-            assert "access_token" in params
-            assert "refresh_token" in params
+            assert "ticket" in params
+            assert "access_token" not in params
+            assert "refresh_token" not in params
             mock_exchange.assert_called_once_with("valid-azure-code", is_mobile=True)
+
+            ex = client.post("/api/v1/auth/token/exchange", json={"ticket": params["ticket"][0]})
+            assert ex.status_code == 200
+            assert "access_token" in ex.json()
 
 
 class TestOAuthServiceRedirectUriSelection:

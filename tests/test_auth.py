@@ -219,13 +219,13 @@ def test_endpoint_google_callback_post_success(db_session, monkeypatch) -> None:
     import secrets
     from unittest.mock import patch
 
-    from itsdangerous import URLSafeSerializer
+    from itsdangerous import URLSafeTimedSerializer
 
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app
 
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
 
     mock_claims = {
@@ -267,13 +267,13 @@ def test_endpoint_google_callback_post_token_exchange_error() -> None:
     import secrets
     from unittest.mock import patch
 
-    from itsdangerous import URLSafeSerializer
+    from itsdangerous import URLSafeTimedSerializer
 
     from app.core.config import settings
     from app.main import app
     from app.services.google_auth_service import GoogleAuthError
 
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
 
     with patch(
@@ -374,12 +374,12 @@ def test_endpoint_google_callback_post_unexpected_exception(caplog) -> None:
     import secrets
     from unittest.mock import patch
 
-    from itsdangerous import URLSafeSerializer
+    from itsdangerous import URLSafeTimedSerializer
 
     from app.core.config import settings
     from app.main import app
 
-    serializer = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
 
     with patch(
@@ -624,4 +624,125 @@ def test_endpoint_refresh_unknown_user(db_session) -> None:
     res = client.post("/api/v1/auth/refresh", json={"refresh_token": ghost_token})
     assert res.status_code == 401
     assert "Unknown or inactive user" in res.json()["detail"]
+
+
+def test_verify_oauth_state_rejects_untimed_serializer() -> None:
+    import secrets
+
+    from fastapi import HTTPException
+    from itsdangerous import URLSafeSerializer
+
+    from app.api.v1.auth import verify_oauth_state
+    from app.core.config import settings
+
+    untimed = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
+    untimed_state = untimed.dumps({"nonce": secrets.token_hex(16), "provider": "google", "platform": "web"})
+    with pytest.raises(HTTPException) as exc_info:
+        verify_oauth_state(untimed_state, expected_provider="google")
+    assert exc_info.value.status_code == 400
+
+
+def test_google_pkce_s256_and_ticket_exchange_flow(db_session, mock_google_settings) -> None:
+    import base64
+    import hashlib
+    from unittest.mock import patch
+    from urllib.parse import parse_qs, urlparse
+
+    from app.db.database import get_db
+    from app.main import app
+
+    mock_google_settings(
+        google_client_id="g-client-id",
+        google_client_secret="g-client-secret",
+    )
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    verifier = "v" * 64
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+    # Unsupported code_challenge_method should fail with 400
+    bad_method = client.get(
+        "/api/v1/auth/google/login",
+        params={"code_challenge": challenge, "code_challenge_method": "plain"},
+    )
+    assert bad_method.status_code == 400
+
+    # Valid S256 login
+    login_res = client.get(
+        "/api/v1/auth/google/login",
+        params={"code_challenge": challenge, "code_challenge_method": "S256", "platform": "mobile"},
+    )
+    assert login_res.status_code == 200
+    state = login_res.json()["state"]
+
+    mock_claims = {
+        "sub": "google-pkce-sub",
+        "email": "pkce.google@healthkicks.org",
+        "name": "PKCE User",
+    }
+
+    with patch(
+        "app.services.google_auth_service.exchange_code_for_id_token",
+        return_value=mock_claims,
+    ):
+        # 1. GET callback returns redirect with one-time ticket (no JWTs in query string)
+        cb_res = client.get(
+            "/api/v1/auth/google/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+        assert cb_res.status_code in (302, 307)
+        location = cb_res.headers["location"]
+        assert "access_token" not in location
+        assert "refresh_token" not in location
+        qs = parse_qs(urlparse(location).query)
+        assert "ticket" in qs
+        ticket = qs["ticket"][0]
+
+        # Exchange with wrong code_verifier fails (note: ticket is popped on first attempt)
+        wrong_ex = client.post(
+            "/api/v1/auth/token/exchange",
+            json={"ticket": ticket, "code_verifier": "x" * 64},
+        )
+        assert wrong_ex.status_code == 400
+
+        # Issue a fresh ticket via GET callback and exchange with valid code_verifier
+        cb_res2 = client.get(
+            "/api/v1/auth/google/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+        ticket2 = parse_qs(urlparse(cb_res2.headers["location"]).query)["ticket"][0]
+        ok_ex = client.post(
+            "/api/v1/auth/token/exchange",
+            json={"ticket": ticket2, "code_verifier": verifier},
+        )
+        assert ok_ex.status_code == 200
+        token_data = ok_ex.json()
+        assert "access_token" in token_data
+        assert "refresh_token" in token_data
+        assert token_data["user"]["email"] == "pkce.google@healthkicks.org"
+
+        # Replaying the same ticket a second time must fail with 400
+        replay_ex = client.post(
+            "/api/v1/auth/token/exchange",
+            json={"ticket": ticket2, "code_verifier": verifier},
+        )
+        assert replay_ex.status_code == 400
+
+        # POST callback with missing or invalid code_verifier fails with 400
+        missing_v = client.post(
+            "/api/v1/auth/google/callback",
+            json={"code": "oauth-code", "state": state},
+        )
+        assert missing_v.status_code == 400
+
+        ok_post = client.post(
+            "/api/v1/auth/google/callback",
+            json={"code": "oauth-code", "state": state, "code_verifier": verifier},
+        )
+        assert ok_post.status_code == 200
+
 
