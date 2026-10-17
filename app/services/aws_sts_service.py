@@ -41,17 +41,17 @@ class AWSSTSService:
 
         clean_user_id = re.sub(r"[^\w+=,.@-]", "-", str(user_id))
 
+        client_resources = [
+            f"arn:aws:iot:{region}:{account_id}:client/healthkicks-mobile-{clean_user_id}-*",
+            f"arn:aws:iot:{region}:{account_id}:client/healthkicks-mobile-{clean_user_id}",
+            f"arn:aws:iot:{region}:{account_id}:client/healthkicks-session-{clean_user_id}-*",
+            f"arn:aws:iot:{region}:{account_id}:client/healthkicks-session-{clean_user_id}",
+        ]
+
         if "*" in device_ids:
-            client_resources = [f"arn:aws:iot:{region}:{account_id}:client/*"]
             topic_resources = [f"arn:aws:iot:{region}:{account_id}:topic/healthkicks/v1/*"]
             topicfilter_resources = [f"arn:aws:iot:{region}:{account_id}:topicfilter/healthkicks/v1/*"]
         else:
-            client_resources = [
-                f"arn:aws:iot:{region}:{account_id}:client/healthkicks-mobile-{clean_user_id}-*",
-                f"arn:aws:iot:{region}:{account_id}:client/healthkicks-mobile-{clean_user_id}",
-                f"arn:aws:iot:{region}:{account_id}:client/healthkicks-session-{clean_user_id}-*",
-                f"arn:aws:iot:{region}:{account_id}:client/healthkicks-session-{clean_user_id}",
-            ]
             topic_resources = [
                 f"arn:aws:iot:{region}:{account_id}:topic/healthkicks/v1/{dev_id}/*" for dev_id in device_ids
             ] + [

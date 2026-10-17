@@ -144,6 +144,11 @@ class TestAWSSTSServiceUnit:
         policy_str = sts_service.build_session_policy(user_id="admin", device_ids=["*"])
         policy = json.loads(policy_str)
 
+        connect_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Connect"])
+        assert "arn:aws:iot:eu-north-1:123456789012:client/*" not in connect_stmt["Resource"]
+        assert "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-admin-*" in connect_stmt["Resource"]
+        assert "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-session-admin-*" in connect_stmt["Resource"]
+
         pub_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Publish", "iot:Receive"])
         assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/*" in pub_stmt["Resource"]
 
@@ -273,6 +278,10 @@ class TestIoTCredentialsEndpoint:
         policy = json.loads(call_kwargs["Policy"])
         pub_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Publish", "iot:Receive"])
         assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/*" in pub_stmt["Resource"]
+
+        connect_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Connect"])
+        assert "arn:aws:iot:eu-north-1:123456789012:client/*" not in connect_stmt["Resource"]
+        assert f"arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-{admin_user.id}-*" in connect_stmt["Resource"]
 
     def test_query_parameter_fallback(self, client, standard_user, user_device, mock_sts_client):
         token = token_service.issue_access_token(standard_user)
