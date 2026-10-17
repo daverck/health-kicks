@@ -96,10 +96,44 @@ async def unhandled_exception_middleware(request: Request, call_next: Any) -> Re
         )
 
 
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: Any) -> Response:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "0"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+
+    is_https = (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    )
+    is_prod = str(settings.environment).lower() in ("prod", "production")
+    if is_https or is_prod:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    return response
+
+
+is_prod = str(settings.environment).lower() in ("prod", "production")
+cors_origins = list(settings.public_origins) if settings.public_origins else [
+    "http://localhost:4200",
+    "http://127.0.0.1:4200",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "capacitor://localhost",
+]
+cors_origin_regex = None if is_prod else r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.public_origins or ["*"],
-    allow_methods=["*"],
+    allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 app.include_router(create_cloud_router(publisher))

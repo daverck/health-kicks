@@ -288,6 +288,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         if jwt_sec == "dev-only-insecure-secret" or len(jwt_sec) < 32:
             raise ValueError("Insecure JWT secret configured for production environment")
 
+        origins = values.get("public_origins")
+        if not origins or any(str(o).strip() == "*" for o in origins):
+            raise ValueError("CORS public_origins must be explicitly configured and cannot be '*' in production")
+
     return Settings(**values)
 
 

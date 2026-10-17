@@ -140,6 +140,27 @@ def test_production_rejects_default_or_short_jwt_secret(tmp_path: Path, monkeypa
         load_settings(tmp_path / "missing.yaml")
 
     monkeypatch.setenv("HEALTHKICKS_JWT_SECRET", "s" * 32)
+    monkeypatch.setenv("HEALTHKICKS_PUBLIC_ORIGINS", "https://app.healthkicks.com")
     prod_settings = load_settings(tmp_path / "missing.yaml")
     assert prod_settings.jwt_secret == "s" * 32
+    assert prod_settings.public_origins == ["https://app.healthkicks.com"]
+
+
+def test_production_rejects_missing_or_wildcard_cors_origins(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HEALTHKICKS_ENVIRONMENT", "production")
+    monkeypatch.setenv("HEALTHKICKS_JWT_SECRET", "s" * 32)
+
+    # Missing origins
+    with pytest.raises(ValueError, match="CORS public_origins must be explicitly configured"):
+        load_settings(tmp_path / "missing.yaml")
+
+    # Wildcard origin
+    monkeypatch.setenv("HEALTHKICKS_PUBLIC_ORIGINS", "*")
+    with pytest.raises(ValueError, match=r"cannot be '\*' in production"):
+        load_settings(tmp_path / "missing.yaml")
+
+    # Valid origin list
+    monkeypatch.setenv("HEALTHKICKS_PUBLIC_ORIGINS", "https://app.healthkicks.com, https://admin.healthkicks.com")
+    settings = load_settings(tmp_path / "missing.yaml")
+    assert settings.public_origins == ["https://app.healthkicks.com", "https://admin.healthkicks.com"]
 
