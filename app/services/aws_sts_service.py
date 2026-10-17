@@ -47,7 +47,9 @@ class AWSSTSService:
             topicfilter_resources = [f"arn:aws:iot:{region}:{account_id}:topicfilter/healthkicks/v1/*"]
         else:
             client_resources = [
+                f"arn:aws:iot:{region}:{account_id}:client/healthkicks-mobile-{clean_user_id}-*",
                 f"arn:aws:iot:{region}:{account_id}:client/healthkicks-mobile-{clean_user_id}",
+                f"arn:aws:iot:{region}:{account_id}:client/healthkicks-session-{clean_user_id}-*",
                 f"arn:aws:iot:{region}:{account_id}:client/healthkicks-session-{clean_user_id}",
             ]
             topic_resources = [
