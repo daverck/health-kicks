@@ -9,6 +9,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings, settings
 from app.schemas.cloud import HapticTrigger
+from app.schemas.telemetry import StudioStartRequest
 
 logger = logging.getLogger(__name__)
 
@@ -42,3 +43,28 @@ class AWSIoTPublishService:
             logger.exception("Unexpected AWS IoT haptic publish failure for %s", device_id)
             return False
         return True
+
+    def send_studio_start(self, device_id: str, command: StudioStartRequest, session_id: str) -> str:
+        """Publish a studio recording start order to AWS IoT Core."""
+        topic = self._config.aws_iot_studio_start_topic.format(device_id=device_id)
+        payload = {
+            "session_id": session_id,
+            "label": command.label,
+            "duration_sec": command.duration_sec,
+            "pulse_count": command.pulse_count,
+            "pulse_duration_ms": command.pulse_duration_ms,
+            "pulse_pause_ms": command.pulse_pause_ms,
+            "pulse_intensity": command.pulse_intensity,
+        }
+        logger.info(
+            "Publishing studio start command to device %s on topic %s (session_id=%s)",
+            device_id,
+            topic,
+            session_id,
+        )
+        self._client_for_publish().publish(
+            topic=topic,
+            qos=1,
+            payload=json.dumps(payload),
+        )
+        return topic
