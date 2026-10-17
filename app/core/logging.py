@@ -4,6 +4,7 @@ import logging
 import sys
 
 from app.core.config import Settings, settings
+from app.core.correlation import CorrelationIdFilter
 
 
 def setup_logging(settings_obj: Settings = settings) -> None:
@@ -11,10 +12,13 @@ def setup_logging(settings_obj: Settings = settings) -> None:
     log_level_name = getattr(settings_obj, "log_level", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
 
+    handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(CorrelationIdFilter())
+
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        format="%(asctime)s [%(levelname)s] [%(name)s] [%(correlation_id)s] %(message)s",
+        handlers=[handler],
         force=True,
     )
 

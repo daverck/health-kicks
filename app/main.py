@@ -13,6 +13,12 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.core.correlation import (
+    CORRELATION_HEADER,
+    REQUEST_ID_HEADER,
+    correlation_id_ctx,
+    sanitize_correlation_id,
+)
 from app.core.metrics import metrics_collector
 
 from alembic import command
@@ -85,6 +91,19 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next: Any) -> Response:
+    raw_cid = request.headers.get(CORRELATION_HEADER.lower()) or request.headers.get(REQUEST_ID_HEADER.lower())
+    cid = sanitize_correlation_id(raw_cid)
+    token = correlation_id_ctx.set(cid)
+    try:
+        response = await call_next(request)
+        response.headers[CORRELATION_HEADER] = cid
+        return response
+    finally:
+        correlation_id_ctx.reset(token)
 
 
 @app.middleware("http")
