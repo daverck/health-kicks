@@ -59,6 +59,8 @@ import warnings
 from datetime import UTC, datetime
 from typing import Any
 
+from app.schemas.studio import StudioSessionDatasetRecord
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -385,14 +387,15 @@ def load_session_npz(filepath: Path) -> dict[str, Any] | None:
                 "gz": float(signals[i, 5]),
             })
 
-        return {
-            "session_id": str(data["session_id"]),
-            "device_id": str(data["device_id"]),
-            "label": str(data["label"]),
-            "duration_sec": float(data["duration_sec"]),
-            "sample_count": int(data["sample_count"]),
-            "readings": readings,
-        }
+        record = StudioSessionDatasetRecord(
+            session_id=str(data["session_id"]),
+            device_id=str(data["device_id"]),
+            label=str(data["label"]),
+            duration_sec=float(data["duration_sec"]),
+            sample_count=int(data["sample_count"]),
+            readings=readings,
+        )
+        return record.model_dump()
     except Exception as err:
         logger.warning("Corrupted or unreadable .npz file (%s): %s", filepath, err)
         return None
@@ -471,15 +474,15 @@ def _fetch_single_session(
                 }
                 for r in readings_resp.readings
             ]
-            session_dict = {
-                "session_id": sess_id,
-                "device_id": sess.device_id,
-                "label": sess.label,
-                "duration_sec": sess.duration_sec,
-                "sample_count": len(raw_readings),
-                "readings": raw_readings,
-            }
-            return sess_id, session_dict, None
+            record = StudioSessionDatasetRecord(
+                session_id=sess_id,
+                device_id=str(getattr(sess, "device_id", "HK-1") or "HK-1"),
+                label=str(getattr(sess, "label", "unknown") or "unknown"),
+                duration_sec=float(getattr(sess, "duration_sec", 5.0) or 5.0),
+                sample_count=len(raw_readings),
+                readings=raw_readings,
+            )
+            return sess_id, record.model_dump(), None
         return sess_id, None, None
     except Exception as exc:
         return sess_id, None, exc

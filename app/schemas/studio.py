@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
 from pydantic import Field
@@ -72,4 +73,15 @@ class StudioAuthorSummary(StrictModel):
     name: str | None = Field(default=None, description="User full display name")
     subject_pseudonym: str | None = Field(default=None, description="Deterministic pseudonymized subject identifier (GDPR)")
     is_pseudonymized: bool = Field(default=False, description="True if author PII has been pseudonymized for privacy")
+
+
+class StudioSessionDatasetRecord(StrictModel):
+    """Normalized schema for cached training sessions (DynamoDB/NPZ)."""
+
+    session_id: str
+    device_id: str = "HK-1"
+    label: str
+    duration_sec: float = 0.0
+    sample_count: int = 0
+    readings: list[dict[str, Any]] = Field(default_factory=list)
 
