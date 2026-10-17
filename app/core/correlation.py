@@ -32,3 +32,4 @@ class CorrelationIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.correlation_id = get_correlation_id() or "-"
         return True
+

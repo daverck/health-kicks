@@ -48,3 +48,4 @@ def test_correlation_id_fallback_to_request_id(client: TestClient) -> None:
     res = client.get("/health", headers={REQUEST_ID_HEADER: test_rid})
     assert res.status_code == 200
     assert res.headers.get(CORRELATION_HEADER) == test_rid
+
