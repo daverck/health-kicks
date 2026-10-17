@@ -172,6 +172,15 @@ def health_liveness() -> dict[str, Any]:
 
 
 @app.get("/metrics", tags=["Health"])
-def metrics_summary() -> dict[str, Any]:
-    """Operational metrics summary."""
-    return metrics_collector.get_summary()
+def metrics_summary(request: Request, format: str | None = None) -> Response:
+    """Operational metrics summary, supporting standard Prometheus exposition and JSON."""
+    accept = request.headers.get("accept", "")
+    wants_prometheus = (
+        format == "prometheus"
+        or "text/plain" in accept
+        or "application/openmetrics-text" in accept
+    )
+    if wants_prometheus and format != "json":
+        content = metrics_collector.get_prometheus_text()
+        return Response(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
+    return JSONResponse(content=metrics_collector.get_summary())

@@ -66,6 +66,65 @@ class MetricsCollector:
                 ),
             }
 
+    def get_prometheus_text(self, database_pool: dict[str, Any] | None = None) -> str:
+        """Render operational metrics in standard Prometheus exposition format."""
+        lines: list[str] = [
+            "# HELP healthkicks_uptime_seconds Time since application startup in seconds",
+            "# TYPE healthkicks_uptime_seconds gauge",
+            f"healthkicks_uptime_seconds {self.get_uptime_seconds()}",
+            "",
+            "# HELP healthkicks_http_requests_total Total number of HTTP requests processed by status class",
+            "# TYPE healthkicks_http_requests_total counter",
+        ]
+        with self._lock:
+            lines.append(f'healthkicks_http_requests_total{{status_class="2xx"}} {self._status_2xx}')
+            lines.append(f'healthkicks_http_requests_total{{status_class="3xx"}} {self._status_3xx}')
+            lines.append(f'healthkicks_http_requests_total{{status_class="4xx"}} {self._status_4xx}')
+            lines.append(f'healthkicks_http_requests_total{{status_class="5xx"}} {self._status_5xx}')
+            lines.append("")
+
+            avg_latency = (
+                round((self._total_duration_ms / self._total_requests) / 1000.0, 4)
+                if self._total_requests > 0
+                else 0.0
+            )
+            lines.extend([
+                "# HELP healthkicks_http_request_duration_seconds_average Average HTTP request duration in seconds",
+                "# TYPE healthkicks_http_request_duration_seconds_average gauge",
+                f"healthkicks_http_request_duration_seconds_average {avg_latency}",
+                "",
+                "# HELP healthkicks_http_endpoint_requests_total Total requests processed per route",
+                "# TYPE healthkicks_http_endpoint_requests_total counter",
+            ])
+            for route_key, count in sorted(self._routes.items(), key=lambda item: item[1], reverse=True)[:20]:
+                parts = route_key.split(" ", 1)
+                method = parts[0]
+                path = parts[1] if len(parts) > 1 else ""
+                lines.append(f'healthkicks_http_endpoint_requests_total{{method="{method}",path="{path}"}} {count}')
+
+        if database_pool:
+            lines.extend([
+                "",
+                "# HELP healthkicks_database_pool_size Connection pool configured size",
+                "# TYPE healthkicks_database_pool_size gauge",
+                f"healthkicks_database_pool_size {database_pool.get('size', 0)}",
+                "",
+                "# HELP healthkicks_database_pool_checked_in Idle connections checked in to the pool",
+                "# TYPE healthkicks_database_pool_checked_in gauge",
+                f"healthkicks_database_pool_checked_in {database_pool.get('checked_in', 0)}",
+                "",
+                "# HELP healthkicks_database_pool_checked_out Active connections checked out from the pool",
+                "# TYPE healthkicks_database_pool_checked_out gauge",
+                f"healthkicks_database_pool_checked_out {database_pool.get('checked_out', 0)}",
+                "",
+                "# HELP healthkicks_database_pool_overflow Overflow connections in the pool",
+                "# TYPE healthkicks_database_pool_overflow gauge",
+                f"healthkicks_database_pool_overflow {database_pool.get('overflow', 0)}",
+            ])
+
+        lines.append("")
+        return "\n".join(lines)
+
 
 # Global singleton instance
 metrics_collector = MetricsCollector()

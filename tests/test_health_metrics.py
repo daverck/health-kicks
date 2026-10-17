@@ -121,3 +121,26 @@ def test_api_v1_metrics(client: TestClient) -> None:
     assert data["total_requests"] > 0
     assert "average_latency_ms" in data
     assert "top_endpoints" in data
+
+
+def test_top_level_metrics_prometheus_format(client: TestClient) -> None:
+    """Top-level /metrics returns standard Prometheus exposition text when requested."""
+    res = client.get("/metrics", headers={"Accept": "text/plain"})
+    assert res.status_code == 200
+    assert "text/plain" in res.headers["content-type"]
+    text_content = res.text
+    assert "# HELP healthkicks_uptime_seconds" in text_content
+    assert "# TYPE healthkicks_uptime_seconds gauge" in text_content
+    assert "healthkicks_uptime_seconds" in text_content
+    assert "# HELP healthkicks_http_requests_total" in text_content
+    assert 'healthkicks_http_requests_total{status_class="2xx"}' in text_content
+
+
+def test_api_v1_metrics_prometheus_query_param(client: TestClient) -> None:
+    """API v1 /api/v1/metrics supports ?format=prometheus query parameter."""
+    res = client.get("/api/v1/metrics?format=prometheus")
+    assert res.status_code == 200
+    assert "text/plain" in res.headers["content-type"]
+    text_content = res.text
+    assert "healthkicks_uptime_seconds" in text_content
+    assert "healthkicks_http_endpoint_requests_total" in text_content

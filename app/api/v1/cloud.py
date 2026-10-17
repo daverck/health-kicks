@@ -2,7 +2,8 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, or_, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -274,13 +275,17 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         return health(db=db)
 
     @router.get("/metrics")
-    def get_metrics(db: Session = Depends(get_db)) -> dict[str, Any]:
+    def get_metrics(
+        request: Request,
+        format: str | None = None,
+        db: Session = Depends(get_db),
+    ) -> Response:
         """Operational metrics and request latency breakdown."""
-        summary = metrics_collector.get_summary()
+        database_pool: dict[str, Any] | None = None
         try:
             pool = db.get_bind().pool
             if pool is not None:
-                summary["database_pool"] = {
+                database_pool = {
                     "size": int(getattr(pool, "size", lambda: 0)()),
                     "checked_in": int(getattr(pool, "checkedin", lambda: 0)()),
                     "checked_out": int(getattr(pool, "checkedout", lambda: 0)()),
@@ -288,6 +293,20 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
                 }
         except Exception:
             pass
-        return summary
+
+        accept = request.headers.get("accept", "")
+        wants_prometheus = (
+            format == "prometheus"
+            or "text/plain" in accept
+            or "application/openmetrics-text" in accept
+        )
+        if wants_prometheus and format != "json":
+            content = metrics_collector.get_prometheus_text(database_pool=database_pool)
+            return Response(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+        summary = metrics_collector.get_summary()
+        if database_pool is not None:
+            summary["database_pool"] = database_pool
+        return JSONResponse(content=summary)
 
     return router
