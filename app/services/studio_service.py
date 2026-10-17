@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.pseudonymization import get_subject_pseudonym
 from app.db.models import StudioSession, User
 from app.schemas.studio import StudioSessionSummary
 from app.schemas.telemetry import StudioDatasetStatsResponse
@@ -58,13 +59,40 @@ def get_authorized_session(
     return session
 
 
-def to_session_summary(session: StudioSession, is_admin: bool) -> StudioSessionSummary:
-    """Serialize a StudioSession ORM model into a StudioSessionSummary schema."""
+def to_session_summary(
+    session: StudioSession,
+    is_admin: bool = False,
+    current_user_id: int | None = None,
+) -> StudioSessionSummary:
+    """Serialize a StudioSession ORM model into a StudioSessionSummary schema with GDPR pseudonymization.
+
+    - If the session belongs to the current user (current_user_id == session.user_id):
+      PII is preserved, is_pseudonymized is False.
+    - If the session belongs to another user (viewed by admin or clinician):
+      PII (user_email, author_name) is stripped/pseudonymized, is_pseudonymized is True,
+      and subject_pseudonym is deterministically generated (SUBJ-XXXXXXXX).
+    """
+    is_own = current_user_id is not None and session.user_id == current_user_id
+    pseudo = get_subject_pseudonym(session.user_id)
+
+    if is_own:
+        user_email = session.user.email if (is_admin and session.user) else None
+        author_name = session.user.name if session.user else None
+        is_pseudo = False
+    else:
+        # Third-party session viewed by clinician or admin: strictly pseudonymize PII
+        user_email = None
+        author_name = f"Patient {pseudo}"
+        is_pseudo = True
+
     return StudioSessionSummary(
         id=session.id,
         device_id=session.device_id,
         user_id=session.user_id,
-        user_email=session.user.email if (is_admin and session.user) else None,
+        user_email=user_email,
+        author_name=author_name,
+        subject_pseudonym=pseudo,
+        is_pseudonymized=is_pseudo,
         label=session.label,
         sample_count=session.sample_count or 0,
         duration_sec=session.duration_sec or 5.0,

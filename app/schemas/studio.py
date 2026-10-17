@@ -32,6 +32,9 @@ class StudioSessionSummary(StrictModel):
     device_id: str
     user_id: int
     user_email: str | None = None
+    author_name: str | None = None
+    subject_pseudonym: str | None = None
+    is_pseudonymized: bool = False
     label: str
     sample_count: int = 0
     duration_sec: float = 5.0
@@ -67,4 +70,6 @@ class StudioAuthorSummary(StrictModel):
     id: int = Field(..., description="Unique user identifier")
     email: str = Field(..., description="User email address")
     name: str | None = Field(default=None, description="User full display name")
+    subject_pseudonym: str | None = Field(default=None, description="Deterministic pseudonymized subject identifier (GDPR)")
+    is_pseudonymized: bool = Field(default=False, description="True if author PII has been pseudonymized for privacy")
 

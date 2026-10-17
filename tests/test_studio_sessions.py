@@ -144,19 +144,33 @@ def test_list_sessions_user_isolation(client, user_a, user_b, db_session) -> Non
     assert data_b["items"][0]["user_email"] is None
 
 
-def test_list_sessions_admin_sees_all_and_user_emails(client, admin_user, user_a, user_b, db_session) -> None:
+def test_list_sessions_admin_sees_all_with_pseudonymization(client, admin_user, user_a, user_b, db_session) -> None:
     s_a = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
     s_b = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="jump")
-    db_session.add_all([s_a, s_b])
+    s_admin = StudioSession(id=uuid.uuid4(), user_id=admin_user.id, device_id="HK-3", label="idle")
+    db_session.add_all([s_a, s_b, s_admin])
     db_session.commit()
 
     res = client.get("/api/v1/studio/sessions", headers=_auth_headers(admin_user))
     assert res.status_code == 200
     data = res.json()
-    assert data["total"] == 2
-    emails = {item["user_email"] for item in data["items"]}
-    assert "alice@example.com" in emails
-    assert "bob@example.com" in emails
+    assert data["total"] == 3
+
+    # Third-party sessions are strictly pseudonymized (no PII leak)
+    item_a = next(i for i in data["items"] if i["id"] == str(s_a.id))
+    assert item_a["user_email"] is None
+    assert item_a["is_pseudonymized"] is True
+    assert item_a["subject_pseudonym"].startswith("SUBJ-")
+
+    item_b = next(i for i in data["items"] if i["id"] == str(s_b.id))
+    assert item_b["user_email"] is None
+    assert item_b["is_pseudonymized"] is True
+    assert item_b["subject_pseudonym"].startswith("SUBJ-")
+
+    # Admin's own session preserves their email and is not pseudonymized
+    item_admin = next(i for i in data["items"] if i["id"] == str(s_admin.id))
+    assert item_admin["user_email"] == admin_user.email
+    assert item_admin["is_pseudonymized"] is False
 
 
 def test_list_sessions_admin_filtering_by_user_id(client, admin_user, user_a, user_b, db_session) -> None:
@@ -715,12 +729,20 @@ def test_list_studio_authors_admin(client, admin_user, user_a, user_b, db_sessio
     assert res.status_code == 200
     authors = res.json()
     assert len(authors) == 2
+
+    # User A is a third party to admin -> pseudonymized
     assert authors[0]["id"] == user_a.id
-    assert authors[0]["email"] == user_a.email
-    assert authors[0]["name"] == user_a.name
+    assert authors[0]["is_pseudonymized"] is True
+    assert authors[0]["subject_pseudonym"].startswith("SUBJ-")
+    assert authors[0]["email"] == f"{authors[0]['subject_pseudonym'].lower()}@pseudonym.healthkicks.local"
+    assert authors[0]["name"] == f"Patient {authors[0]['subject_pseudonym']}"
+
+    # User B is a third party to admin -> pseudonymized
     assert authors[1]["id"] == user_b.id
-    assert authors[1]["email"] == user_b.email
-    assert authors[1]["name"] == user_b.name
+    assert authors[1]["is_pseudonymized"] is True
+    assert authors[1]["subject_pseudonym"].startswith("SUBJ-")
+    assert authors[1]["email"] == f"{authors[1]['subject_pseudonym'].lower()}@pseudonym.healthkicks.local"
+    assert authors[1]["name"] == f"Patient {authors[1]['subject_pseudonym']}"
 
 
 def test_list_studio_authors_clinician(client, user_a, user_b, db_session) -> None:
@@ -732,9 +754,12 @@ def test_list_studio_authors_clinician(client, user_a, user_b, db_session) -> No
     assert res.status_code == 200
     authors = res.json()
     assert len(authors) == 1
+    # Clinician sees themselves with non-pseudonymized personal profile
     assert authors[0]["id"] == user_a.id
     assert authors[0]["email"] == user_a.email
     assert authors[0]["name"] == user_a.name
+    assert authors[0]["is_pseudonymized"] is False
+    assert authors[0]["subject_pseudonym"].startswith("SUBJ-")
 
 
 def test_list_studio_authors_rbac_denied(client, regular_user) -> None:

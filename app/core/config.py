@@ -64,6 +64,8 @@ class Settings:
     s3_firmware_bucket: str = "healthkicks-firmware-releases"
     s3_firmware_key: str = "firmware/esp32s3/latest/firmware.bin"
     s3_presigned_url_expire_seconds: int = 900
+    # GDPR Pseudonymization
+    pseudonymization_pepper: str = "dev-pseudonymization-pepper-secret-32b"
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -276,6 +278,11 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             ("HEALTHKICKS_S3_PRESIGNED_URL_EXPIRE_SECONDS", "S3_PRESIGNED_URL_EXPIRE_SECONDS"),
             int,
         ),
+        # GDPR Pseudonymization
+        "pseudonymization_pepper": (
+            ("HEALTHKICKS_PSEUDONYMIZATION_PEPPER", "PSEUDONYMIZATION_PEPPER"),
+            str,
+        ),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
@@ -291,6 +298,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         origins = values.get("public_origins")
         if not origins or any(str(o).strip() == "*" for o in origins):
             raise ValueError("CORS public_origins must be explicitly configured and cannot be '*' in production")
+
+        pepper = str(values.get("pseudonymization_pepper", ""))
+        if pepper == "dev-pseudonymization-pepper-secret-32b" or len(pepper) < 32:
+            raise ValueError("Insecure pseudonymization pepper configured for production environment")
 
     return Settings(**values)
 

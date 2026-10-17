@@ -18,6 +18,7 @@ from app.schemas.studio import (
     StudioSessionSummary,
     StudioSessionUpdatePayload,
 )
+from app.core.pseudonymization import get_subject_pseudonym
 from app.schemas.telemetry import StudioSessionReadingsResponse
 from app.services.studio_service import get_authorized_session, to_session_summary
 from app.services.telemetry_service import TelemetryService
@@ -90,7 +91,7 @@ def create_studio_sessions_router(
             .all()
         )
 
-        items = [to_session_summary(s, is_admin=user.is_admin) for s in sessions]
+        items = [to_session_summary(s, is_admin=user.is_admin, current_user_id=user.id) for s in sessions]
         return PaginatedSessionsResponse(
             items=items,
             total=total,
@@ -103,17 +104,49 @@ def create_studio_sessions_router(
         user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> list[StudioAuthorSummary]:
-        """List authors who have recorded studio sessions."""
+        """List authors who have recorded studio sessions with GDPR pseudonymization for third-party authors."""
         if user.role == UserRole.admin:
             users = (
                 db.query(User.id, User.email, User.name)
                 .join(StudioSession, StudioSession.user_id == User.id)
                 .distinct()
-                .order_by(User.email)
+                .order_by(User.id)
                 .all()
             )
-            return [StudioAuthorSummary(id=u.id, email=u.email, name=u.name) for u in users]
-        return [StudioAuthorSummary(id=user.id, email=user.email, name=user.name)]
+            authors: list[StudioAuthorSummary] = []
+            for u in users:
+                is_own = (u.id == user.id)
+                pseudo = get_subject_pseudonym(u.id)
+                if is_own:
+                    authors.append(
+                        StudioAuthorSummary(
+                            id=u.id,
+                            email=u.email,
+                            name=u.name,
+                            subject_pseudonym=pseudo,
+                            is_pseudonymized=False,
+                        )
+                    )
+                else:
+                    authors.append(
+                        StudioAuthorSummary(
+                            id=u.id,
+                            email=f"{pseudo.lower()}@pseudonym.healthkicks.local",
+                            name=f"Patient {pseudo}",
+                            subject_pseudonym=pseudo,
+                            is_pseudonymized=True,
+                        )
+                    )
+            return authors
+        return [
+            StudioAuthorSummary(
+                id=user.id,
+                email=user.email,
+                name=user.name,
+                subject_pseudonym=get_subject_pseudonym(user.id),
+                is_pseudonymized=False,
+            )
+        ]
 
     @router.get("/{session_id}", response_model=StudioSessionDetail)
     def get_session_detail(
@@ -123,7 +156,7 @@ def create_studio_sessions_router(
     ) -> StudioSessionDetail:
         """Fetch studio session metadata from Aurora DB (including sample_count)."""
         session = get_authorized_session(db, session_id, user)
-        return to_session_summary(session, is_admin=user.is_admin)
+        return to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
 
     @router.get("/{session_id}/readings", response_model=StudioSessionReadingsResponse)
     def get_session_readings(
@@ -167,7 +200,7 @@ def create_studio_sessions_router(
         session.is_validated = True
         db.commit()
         db.refresh(session)
-        return to_session_summary(session, is_admin=user.is_admin)
+        return to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
 
     @router.patch("/{session_id}", response_model=StudioSessionSummary)
     def update_session(
@@ -201,7 +234,7 @@ def create_studio_sessions_router(
                     error,
                 )
 
-        return to_session_summary(session, is_admin=user.is_admin)
+        return to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
 
     @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_session(

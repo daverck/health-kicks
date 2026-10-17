@@ -132,8 +132,28 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
             .limit(page_size)
             .all()
         )
+
+        user_owned_devs: set[str] = set()
+        if user.role in (UserRole.admin, UserRole.clinician):
+            user_owned_devs = {
+                o.device_id
+                for o in db.query(DeviceOwnership.device_id).filter_by(user_id=user.id).all()
+            }
+
+        items = [
+            ActivityEventResponse(
+                id=event.id,
+                device_id=event.device_id,
+                event_type=event.event_type,
+                timestamp_utc=event.timestamp_utc,
+                confidence_score=event.confidence_score,
+                is_pseudonymized=(user.role in (UserRole.admin, UserRole.clinician) and event.device_id not in user_owned_devs),
+            )
+            for event in events
+        ]
+
         return ActivityEventPage(
-            items=[ActivityEventResponse.model_validate(event, from_attributes=True) for event in events],
+            items=items,
             page=page,
             page_size=page_size,
             total=total,

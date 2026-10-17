@@ -141,14 +141,17 @@ def test_production_rejects_default_or_short_jwt_secret(tmp_path: Path, monkeypa
 
     monkeypatch.setenv("HEALTHKICKS_JWT_SECRET", "s" * 32)
     monkeypatch.setenv("HEALTHKICKS_PUBLIC_ORIGINS", "https://app.healthkicks.com")
+    monkeypatch.setenv("HEALTHKICKS_PSEUDONYMIZATION_PEPPER", "p" * 32)
     prod_settings = load_settings(tmp_path / "missing.yaml")
     assert prod_settings.jwt_secret == "s" * 32
     assert prod_settings.public_origins == ["https://app.healthkicks.com"]
+    assert prod_settings.pseudonymization_pepper == "p" * 32
 
 
 def test_production_rejects_missing_or_wildcard_cors_origins(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HEALTHKICKS_ENVIRONMENT", "production")
     monkeypatch.setenv("HEALTHKICKS_JWT_SECRET", "s" * 32)
+    monkeypatch.setenv("HEALTHKICKS_PSEUDONYMIZATION_PEPPER", "p" * 32)
 
     # Missing origins
     with pytest.raises(ValueError, match="CORS public_origins must be explicitly configured"):

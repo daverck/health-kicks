@@ -29,6 +29,7 @@ class ActivityEventResponse(StrictModel):
     event_type: str = "walk"
     timestamp_utc: datetime
     confidence_score: float | None = None
+    is_pseudonymized: bool = False
 
     model_config = ConfigDict(strict=True, extra="forbid", from_attributes=True)
 
