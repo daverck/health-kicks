@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,8 @@ from alembic.config import Config
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from app.core.metrics import metrics_collector
 
 from alembic import command
 from app.api.v1.auth import create_auth_router
@@ -116,6 +119,15 @@ async def security_headers_middleware(request: Request, call_next: Any) -> Respo
     return response
 
 
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next: Any) -> Response:
+    start_time = time.monotonic()
+    response = await call_next(request)
+    duration_ms = round((time.monotonic() - start_time) * 1000, 2)
+    metrics_collector.record_request(request.method, request.url.path, response.status_code, duration_ms)
+    return response
+
+
 is_prod = str(settings.environment).lower() in ("prod", "production")
 cors_origins = list(settings.public_origins) if settings.public_origins else [
     "http://localhost:4200",
@@ -151,3 +163,15 @@ app.include_router(create_firmware_router())
 @app.get("/", tags=["Health"])
 def read_root() -> dict[str, str]:
     return {"status": "online", "system": "HealthKicks Cloud API"}
+
+
+@app.get("/health", tags=["Health"])
+def health_liveness() -> dict[str, Any]:
+    """Lightweight operational liveness probe."""
+    return {"status": "ok", "uptime_seconds": metrics_collector.get_uptime_seconds()}
+
+
+@app.get("/metrics", tags=["Health"])
+def metrics_summary() -> dict[str, Any]:
+    """Operational metrics summary."""
+    return metrics_collector.get_summary()

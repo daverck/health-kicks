@@ -41,9 +41,21 @@ class ActivityEventPage(StrictModel):
     total: int
 
 
+class DatabasePoolStatus(StrictModel):
+    size: int
+    checked_in: int
+    checked_out: int
+    overflow: int
+
+
 class HealthResponse(StrictModel):
     status: str
     database: str
+    uptime_seconds: float | None = None
+    database_latency_ms: float | None = None
+    version: str | None = None
+    environment: str | None = None
+    database_pool: DatabasePoolStatus | None = None
 
 
 class HapticLogResponse(StrictModel):

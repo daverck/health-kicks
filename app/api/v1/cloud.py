@@ -1,6 +1,6 @@
-"""Cloud endpoints for haptics, activities and device logs."""
-
+import time
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, func, or_, text
@@ -9,12 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
 from app.api.v1.utils import validate_and_normalize_date_range
+from app.core.config import settings
+from app.core.metrics import metrics_collector
 from app.core.rate_limit import rate_limit
 from app.db.database import get_db
 from app.db.models import ActivityEvent, Device, DeviceOwnership, HapticLog, UserRole
 from app.schemas.cloud import (
     ActivityEventPage,
     ActivityEventResponse,
+    DatabasePoolStatus,
     HapticLogPage,
     HapticLogResponse,
     HapticTrigger,
@@ -220,10 +223,71 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
 
     @router.get("/health", response_model=HealthResponse)
     def health(db: Session = Depends(get_db)) -> HealthResponse:
+        """Deep health check verifying relational database connection and latency."""
+        start_ping = time.monotonic()
         try:
             db.execute(text("SELECT 1"))
+            latency_ms = round((time.monotonic() - start_ping) * 1000, 2)
+            db_status = "ok"
         except Exception:
-            return HealthResponse(status="degraded", database="unavailable")
-        return HealthResponse(status="ok", database="ok")
+            latency_ms = round((time.monotonic() - start_ping) * 1000, 2)
+            return HealthResponse(
+                status="degraded",
+                database="unavailable",
+                uptime_seconds=metrics_collector.get_uptime_seconds(),
+                database_latency_ms=latency_ms,
+                version="0.1.0",
+                environment=settings.environment,
+            )
+
+        pool_status: DatabasePoolStatus | None = None
+        try:
+            pool = db.get_bind().pool
+            if pool is not None:
+                pool_status = DatabasePoolStatus(
+                    size=int(getattr(pool, "size", lambda: 0)()),
+                    checked_in=int(getattr(pool, "checkedin", lambda: 0)()),
+                    checked_out=int(getattr(pool, "checkedout", lambda: 0)()),
+                    overflow=int(getattr(pool, "overflow", lambda: 0)()),
+                )
+        except Exception:
+            pool_status = None
+
+        return HealthResponse(
+            status="ok",
+            database=db_status,
+            uptime_seconds=metrics_collector.get_uptime_seconds(),
+            database_latency_ms=latency_ms,
+            version="0.1.0",
+            environment=settings.environment,
+            database_pool=pool_status,
+        )
+
+    @router.get("/health/liveness")
+    def health_liveness() -> dict[str, str]:
+        """Fast container/Kubernetes liveness probe without database dependency."""
+        return {"status": "ok"}
+
+    @router.get("/health/readiness", response_model=HealthResponse)
+    def health_readiness(db: Session = Depends(get_db)) -> HealthResponse:
+        """Container/Kubernetes readiness probe verifying database connectivity."""
+        return health(db=db)
+
+    @router.get("/metrics")
+    def get_metrics(db: Session = Depends(get_db)) -> dict[str, Any]:
+        """Operational metrics and request latency breakdown."""
+        summary = metrics_collector.get_summary()
+        try:
+            pool = db.get_bind().pool
+            if pool is not None:
+                summary["database_pool"] = {
+                    "size": int(getattr(pool, "size", lambda: 0)()),
+                    "checked_in": int(getattr(pool, "checkedin", lambda: 0)()),
+                    "checked_out": int(getattr(pool, "checkedout", lambda: 0)()),
+                    "overflow": int(getattr(pool, "overflow", lambda: 0)()),
+                }
+        except Exception:
+            pass
+        return summary
 
     return router
