@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "alembic>=1.13.0",
+    "awscrt>=0.38.0",
     "boto3>=1.35.0",
     "botocore[crt]>=1.43.79",
     "fastapi>=0.115.0",
@@ -27,6 +28,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.13.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]
@@ -39,4 +41,7 @@ markers = [
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:starlette.*",
+    "ignore:.*StarletteDeprecationWarning.*",
+    "ignore:.*testclient.*:DeprecationWarning",
+    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*",
 ]

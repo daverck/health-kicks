@@ -125,7 +125,11 @@ def test_email_fallback_order(mock_azure_settings) -> None:
         "email": "token-email@example.com",
         "preferred_username": "token-pref@example.com",
     }
-    dummy_id_token = jwt.encode(id_token_payload, "secret", algorithm="HS256")
+    dummy_id_token = jwt.encode(
+        id_token_payload,
+        "test-jwt-secret-key-for-azure-auth-tests-32b!",
+        algorithm="HS256",
+    )
 
     token_mock = MagicMock()
     token_mock.status_code = 200
@@ -178,7 +182,7 @@ def test_email_fallback_order(mock_azure_settings) -> None:
     # Case 4: Graph profile None, id_token has only preferred_username
     dummy_id_token_pref = jwt.encode(
         {"sub": "az-sub-1", "preferred_username": "token-pref@example.com"},
-        "secret",
+        "test-jwt-secret-key-for-azure-auth-tests-32b!",
         algorithm="HS256",
     )
     token_mock_pref = MagicMock()
@@ -192,7 +196,11 @@ def test_email_fallback_order(mock_azure_settings) -> None:
         assert info["email"] == "token-pref@example.com"
 
     # Case 5: No email found anywhere -> raises AzureAuthError("No valid email found in Microsoft account")
-    dummy_id_token_empty = jwt.encode({"sub": "az-sub-1"}, "secret", algorithm="HS256")
+    dummy_id_token_empty = jwt.encode(
+        {"sub": "az-sub-1"},
+        "test-jwt-secret-key-for-azure-auth-tests-32b!",
+        algorithm="HS256",
+    )
     token_mock_empty = MagicMock()
     token_mock_empty.status_code = 200
     token_mock_empty.json.return_value = {
