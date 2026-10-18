@@ -121,26 +121,19 @@ def create_studio_sessions_router(
                     ),
                 )
             )
-            # Query size + 1 to detect if next page exists without full table count
-            sessions_plus_one = (
-                query.order_by(StudioSession.created_at.desc(), StudioSession.id.desc())
-                .limit(size + 1)
-                .all()
-            )
-            if len(sessions_plus_one) > size:
-                sessions = sessions_plus_one[:size]
-                next_cursor = encode_cursor(sessions[-1].created_at, sessions[-1].id)
-            else:
-                sessions = sessions_plus_one
+
+        # Unified keyset pagination on (created_at DESC, id DESC) without slow SQL OFFSET
+        sessions_plus_one = (
+            query.order_by(StudioSession.created_at.desc(), StudioSession.id.desc())
+            .limit(size + 1)
+            .all()
+        )
+        if len(sessions_plus_one) > size:
+            sessions = sessions_plus_one[:size]
+            next_cursor = encode_cursor(sessions[-1].created_at, sessions[-1].id)
         else:
-            sessions = (
-                query.order_by(StudioSession.created_at.desc(), StudioSession.id.desc())
-                .offset((page - 1) * size)
-                .limit(size)
-                .all()
-            )
-            if sessions and (page * size) < total:
-                next_cursor = encode_cursor(sessions[-1].created_at, sessions[-1].id)
+            sessions = sessions_plus_one
+            next_cursor = None
 
         items = [to_session_summary(s, is_admin=user.is_admin, current_user_id=user.id) for s in sessions]
         return PaginatedSessionsResponse(
