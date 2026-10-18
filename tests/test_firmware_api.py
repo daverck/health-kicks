@@ -1,21 +1,20 @@
 """Tests for S3 firmware binary distribution endpoint with JWT access control."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
-from botocore.exceptions import ClientError
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.api.v1.firmware import get_firmware_service
 from app.db.database import get_db
 from app.db.models import Base, User, UserRole
 from app.main import app
 from app.services import token_service
 from app.services.firmware_service import FirmwareDistributionService
+from botocore.exceptions import ClientError
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()
@@ -78,7 +77,7 @@ def test_get_latest_firmware_success(client, auth_headers) -> None:
             "sha256": "8a32f6b3e7d581f148e658091ecb6a93ad5d24d26f047ff690b200b3e55c2aa7",
         },
         "ContentLength": 1048576,
-        "LastModified": datetime(2026, 10, 6, 21, 30, tzinfo=timezone.utc),
+        "LastModified": datetime(2026, 10, 6, 21, 30, tzinfo=UTC),
     }
     mock_s3.generate_presigned_url.return_value = (
         "https://healthkicks-firmware-releases.s3.eu-north-1.amazonaws.com/firmware/esp32s3/latest/firmware.bin?AWSAccessKeyId=test"

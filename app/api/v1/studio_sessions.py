@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import RequireClinicianOrAdmin
 from app.api.v1.utils import validate_and_normalize_date_range
+from app.core.pseudonymization import get_subject_pseudonym
 from app.db.database import get_db
 from app.db.models import StudioSession, User, UserRole
 from app.schemas.studio import (
@@ -18,7 +19,6 @@ from app.schemas.studio import (
     StudioSessionSummary,
     StudioSessionUpdatePayload,
 )
-from app.core.pseudonymization import get_subject_pseudonym
 from app.schemas.telemetry import StudioSessionReadingsResponse
 from app.services.studio_service import get_authorized_session, to_session_summary
 from app.services.telemetry_service import TelemetryService

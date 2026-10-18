@@ -5,13 +5,6 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.api.deps import get_current_user
 from app.api.v1.telemetry import create_telemetry_router
 from app.core.config import Settings
@@ -20,6 +13,12 @@ from app.db.models import Base, StudioSession, User, UserRole
 from app.main import app as main_app
 from app.services.iot_service import IotCommandService
 from app.services.telemetry_service import TelemetryService
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()

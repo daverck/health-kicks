@@ -5,13 +5,12 @@ import sqlite3
 from unittest.mock import MagicMock, patch
 
 import psycopg2
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.pool import QueuePool
-
 from app.core.config import Settings
 from app.db.database import _connect_with_iam, build_engine
 from app.main import app as main_app
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
 
 
 def test_build_engine_postgres_pool_and_keepalives() -> None:

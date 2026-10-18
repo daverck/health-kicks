@@ -8,20 +8,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core.correlation import (
-    CORRELATION_HEADER,
-    REQUEST_ID_HEADER,
-    correlation_id_ctx,
-    sanitize_correlation_id,
-)
-from app.core.metrics import metrics_collector
-
-from alembic import command
 from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router
@@ -33,7 +25,14 @@ from app.api.v1.studio_sessions import create_studio_sessions_router
 from app.api.v1.telemetry import create_telemetry_router
 from app.api.v1.users import create_users_router
 from app.core.config import settings
+from app.core.correlation import (
+    CORRELATION_HEADER,
+    REQUEST_ID_HEADER,
+    correlation_id_ctx,
+    sanitize_correlation_id,
+)
 from app.core.logging import setup_logging
+from app.core.metrics import metrics_collector
 from app.db.database import create_tables, engine
 from app.services.aws_iot_service import AWSIoTPublishService
 

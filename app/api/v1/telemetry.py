@@ -117,8 +117,7 @@ def create_telemetry_router(
 
                 if end_cmp < b_cmp:
                     return []
-                if start_time < b_cmp:
-                    start_time = b_cmp
+                start_time = max(start_time, b_cmp)
 
             start_us = int(start_time.timestamp() * 1_000_000)
             end_us = int(end_time.timestamp() * 1_000_000)

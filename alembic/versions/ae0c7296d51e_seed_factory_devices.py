@@ -5,19 +5,18 @@ Revises: ac994f8fce7b
 Create Date: 2026-09-03 11:28:00.377094
 
 """
-from datetime import datetime, timezone
 import logging
-from typing import Sequence, Union
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'ae0c7296d51e'
-down_revision: Union[str, Sequence[str], None] = 'ac994f8fce7b'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = 'ac994f8fce7b'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 logger = logging.getLogger("alembic.runtime.migration")
 
@@ -47,7 +46,7 @@ def upgrade() -> None:
         sa.column("last_seen_utc", sa.DateTime(timezone=True)),
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inserted_count = 0
     already_existing_count = 0
 

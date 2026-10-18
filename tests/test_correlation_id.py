@@ -1,15 +1,13 @@
 """Unit tests for distributed tracing and X-Correlation-ID propagation."""
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.core.correlation import (
     CORRELATION_HEADER,
     REQUEST_ID_HEADER,
-    get_correlation_id,
     sanitize_correlation_id,
 )
 from app.main import app
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture()

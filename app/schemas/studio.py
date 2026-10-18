@@ -46,7 +46,6 @@ class StudioSessionSummary(StrictModel):
 class StudioSessionDetail(StudioSessionSummary):
     """Detailed metadata view of a Studio capture session."""
 
-    pass
 
 
 class StudioSessionUpdatePayload(StrictModel):

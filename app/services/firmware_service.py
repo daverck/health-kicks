@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
+
 import boto3
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
@@ -30,7 +31,7 @@ class FirmwareDistributionService:
             version = metadata.get("version", "v1.2.0-esp32s3")
             sha256 = metadata.get("sha256", "")
             size_bytes = int(head_res.get("ContentLength", 0))
-            release_date = head_res.get("LastModified", datetime.now(timezone.utc))
+            release_date = head_res.get("LastModified", datetime.now(UTC))
 
             presigned_url = self.s3_client.generate_presigned_url(
                 "get_object",

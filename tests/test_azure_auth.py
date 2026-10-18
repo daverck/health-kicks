@@ -5,19 +5,18 @@ from unittest.mock import MagicMock, patch
 
 import jwt
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from itsdangerous import URLSafeTimedSerializer
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.api.v1.auth import create_auth_router
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import Base, User, UserRole
 from app.services import azure_auth_service, token_service
 from app.services.azure_auth_service import AzureAuthError
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from itsdangerous import URLSafeTimedSerializer
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()

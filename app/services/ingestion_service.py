@@ -140,7 +140,7 @@ def ingest_raw_telemetry(
                 )
 
         studio_session.sample_count = sample_count
-        if "label" in payload and payload["label"]:
+        if payload.get("label"):
             studio_session.label = payload["label"]
         session.commit()
         session.refresh(studio_session)

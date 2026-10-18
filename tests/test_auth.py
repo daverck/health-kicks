@@ -3,15 +3,14 @@
 import dataclasses
 
 import pytest
+from app.api.deps import get_current_user, require_roles
+from app.db.models import Base, User, UserRole
+from app.services import google_auth_service, token_service
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from app.api.deps import get_current_user, require_roles
-from app.db.models import Base, User, UserRole
-from app.services import google_auth_service, token_service
 
 
 @pytest.fixture()
@@ -219,11 +218,10 @@ def test_endpoint_google_callback_post_success(db_session, monkeypatch) -> None:
     import secrets
     from unittest.mock import patch
 
-    from itsdangerous import URLSafeTimedSerializer
-
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app
+    from itsdangerous import URLSafeTimedSerializer
 
     serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
@@ -267,11 +265,10 @@ def test_endpoint_google_callback_post_token_exchange_error() -> None:
     import secrets
     from unittest.mock import patch
 
-    from itsdangerous import URLSafeTimedSerializer
-
     from app.core.config import settings
     from app.main import app
     from app.services.google_auth_service import GoogleAuthError
+    from itsdangerous import URLSafeTimedSerializer
 
     serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
@@ -374,10 +371,9 @@ def test_endpoint_google_callback_post_unexpected_exception(caplog) -> None:
     import secrets
     from unittest.mock import patch
 
-    from itsdangerous import URLSafeTimedSerializer
-
     from app.core.config import settings
     from app.main import app
+    from itsdangerous import URLSafeTimedSerializer
 
     serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
@@ -415,9 +411,8 @@ def test_verify_refresh_token_expired(db_session) -> None:
     import time
 
     import jwt
-    from fastapi import HTTPException
-
     from app.core.config import settings
+    from fastapi import HTTPException
 
     user = User(google_sub="exp-sub", email="exp@example.com", role=UserRole.user)
     db_session.add(user)
@@ -474,9 +469,8 @@ def test_verify_refresh_token_invalid_subject() -> None:
     import time
 
     import jwt
-    from fastapi import HTTPException
-
     from app.core.config import settings
+    from fastapi import HTTPException
 
     # sub is not a valid int
     token = jwt.encode(
@@ -544,7 +538,6 @@ def test_endpoint_refresh_expired_token(db_session) -> None:
     import time
 
     import jwt
-
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app
@@ -607,7 +600,6 @@ def test_endpoint_refresh_unknown_user(db_session) -> None:
     import time
 
     import jwt
-
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app
@@ -629,11 +621,10 @@ def test_endpoint_refresh_unknown_user(db_session) -> None:
 def test_verify_oauth_state_rejects_untimed_serializer() -> None:
     import secrets
 
-    from fastapi import HTTPException
-    from itsdangerous import URLSafeSerializer
-
     from app.api.v1.auth import verify_oauth_state
     from app.core.config import settings
+    from fastapi import HTTPException
+    from itsdangerous import URLSafeSerializer
 
     untimed = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
     untimed_state = untimed.dumps({"nonce": secrets.token_hex(16), "provider": "google", "platform": "web"})

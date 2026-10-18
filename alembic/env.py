@@ -4,12 +4,11 @@ import logging
 import os
 from logging.config import fileConfig
 
-from alembic.migration import MigrationContext
-from sqlalchemy import engine_from_config, inspect, pool
-
 from alembic import context
+from alembic.migration import MigrationContext
 from app.core.config import settings
 from app.db.models import Base
+from sqlalchemy import engine_from_config, inspect, pool
 
 logger = logging.getLogger("alembic.env")
 

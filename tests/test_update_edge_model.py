@@ -1,12 +1,10 @@
 """Unit tests for scripts/update_edge_model.py MLOps pipeline."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from scripts.update_edge_model import (
     find_firmware_dir,
     main,

@@ -4,15 +4,14 @@ import dataclasses
 from datetime import UTC, datetime
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.core import config as config_module
 from app.db.database import get_db
 from app.db.models import Base, Device, DeviceOwnership, DeviceStatus, User
 from app.main import app
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 INGEST_TOKEN = "secret-test-ingest-token"
 TEST_DEVICE_ID = "HK-2"

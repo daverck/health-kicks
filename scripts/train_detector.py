@@ -59,11 +59,10 @@ import warnings
 from datetime import UTC, datetime
 from typing import Any
 
-from app.schemas.studio import StudioSessionDatasetRecord
-
 import joblib
 import numpy as np
 import pandas as pd
+from app.schemas.studio import StudioSessionDatasetRecord
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     HistGradientBoostingClassifier,

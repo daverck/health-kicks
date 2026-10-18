@@ -4,15 +4,23 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from app.api.v1.cloud import create_cloud_router
-from app.db.models import ActivityEvent, Base, Device, DeviceOwnership, DeviceStatus, HapticLog, User, UserRole
+from app.db.models import (
+    ActivityEvent,
+    Base,
+    Device,
+    DeviceOwnership,
+    DeviceStatus,
+    HapticLog,
+    User,
+    UserRole,
+)
 from app.schemas.cloud import HapticTrigger
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.ingestion_service import ingest_device_status
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 TEST_DEVICE_ID = "HK-1"
 

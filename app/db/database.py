@@ -11,9 +11,9 @@ When ``USE_RDS_IAM=false``, the standard SQLAlchemy connection based on
 ``DATABASE_URL`` (classic password) is used — local development default.
 """
 
+import time
 from collections.abc import Generator
 from functools import partial
-import time
 from typing import Any
 
 import boto3
@@ -57,7 +57,7 @@ def _connect_with_iam(settings_obj: Settings = settings):
                 keepalives_count=5,
                 connect_timeout=30,
             )
-        except psycopg2.OperationalError as exc:
+        except psycopg2.OperationalError:
             if attempt == max_retries:
                 raise
             time.sleep(3)

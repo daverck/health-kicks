@@ -5,20 +5,20 @@ Revises: 15c0a08421f5
 Create Date: 2026-09-08 23:05:00.000000
 
 """
-from datetime import datetime, timezone
 import logging
-from typing import Any, Sequence, Union
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'c2f4e81a3d90'
-down_revision: Union[str, Sequence[str], None] = '15c0a08421f5'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '15c0a08421f5'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 logger = logging.getLogger("alembic.migration")
 
@@ -27,9 +27,9 @@ def _backfill_sessions_from_dynamodb(conn: sa.Connection) -> None:
     """Scan DynamoDB telemetry items with session_id and provision studio_sessions."""
     try:
         import boto3
+        from app.core.config import settings
         from boto3.dynamodb.conditions import Attr
         from botocore.exceptions import BotoCoreError, ClientError
-        from app.core.config import settings
     except Exception as exc:
         logger.warning(f"[backfill] boto3 or app settings not available ({exc}), skipping backfill.")
         return
@@ -109,10 +109,8 @@ def _backfill_sessions_from_dynamodb(conn: sa.Connection) -> None:
                     }
                 entry = sessions[s_id_str]
                 entry["count"] += 1
-                if ts < entry["min_ts"]:
-                    entry["min_ts"] = ts
-                if ts > entry["max_ts"]:
-                    entry["max_ts"] = ts
+                entry["min_ts"] = min(entry["min_ts"], ts)
+                entry["max_ts"] = max(entry["max_ts"], ts)
                 if entry["label"] == "unknown" and item.get("label"):
                     entry["label"] = item["label"]
                 if entry["device_id"] == "unknown" and item.get("device_id"):
@@ -150,7 +148,7 @@ def _backfill_sessions_from_dynamodb(conn: sa.Connection) -> None:
         min_ts = sess["min_ts"]
         max_ts = sess["max_ts"]
         duration_sec = round(max((max_ts - min_ts) / 1_000_000.0, 5.0), 2)
-        created_at = datetime.fromtimestamp(min_ts / 1_000_000, tz=timezone.utc)
+        created_at = datetime.fromtimestamp(min_ts / 1_000_000, tz=UTC)
 
         try:
             conn.execute(

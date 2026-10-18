@@ -5,12 +5,6 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.api.v1.auth import (
     generate_oauth_state,
     get_state_platform,
@@ -19,6 +13,11 @@ from app.api.v1.auth import (
 from app.db.database import get_db
 from app.db.models import Base
 from app.main import app
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()

@@ -5,18 +5,17 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.api.v1.studio_sessions import create_studio_sessions_router
 from app.db.database import get_db
 from app.db.models import Base, StudioSession, User, UserRole
 from app.schemas.telemetry import ImuReadingResponse, StudioSessionReadingsResponse
 from app.services import token_service
 from app.services.telemetry_service import TelemetryService
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()

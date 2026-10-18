@@ -76,9 +76,8 @@ def create_steps_router() -> APIRouter:
             resolved_from_date = from_date
 
         if resolved_from_date > resolved_to_date:
-            http_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", status.HTTP_422_UNPROCESSABLE_ENTITY)
             raise HTTPException(
-                status_code=http_422,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="from_date cannot be greater than to_date",
             )
 
