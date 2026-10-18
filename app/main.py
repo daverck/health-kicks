@@ -8,12 +8,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from alembic import command
 from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router

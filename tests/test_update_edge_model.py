@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from scripts.update_edge_model import (
     find_firmware_dir,
     main,

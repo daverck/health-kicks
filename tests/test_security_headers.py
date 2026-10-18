@@ -1,5 +1,6 @@
-from app.main import app
 from starlette.testclient import TestClient
+
+from app.main import app
 
 
 def test_security_headers_present_on_response() -> None:

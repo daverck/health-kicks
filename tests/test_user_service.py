@@ -1,11 +1,12 @@
 """Unit tests for user_service (SSO JIT provisioning and account linking)."""
 
 import pytest
-from app.db.models import Base, User, UserRole
-from app.services.user_service import UserProvisioningError, upsert_sso_user
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from app.db.models import Base, User, UserRole
+from app.services.user_service import UserProvisioningError, upsert_sso_user
 
 
 @pytest.fixture()

@@ -17,26 +17,26 @@ def validate_and_normalize_date_range(
       expanded to end of day (23:59:59.999999). If full timestamp, kept as is.
     - Raises HTTP 400 if start_date > end_date.
     """
-    norm_start = start_date if isinstance(start_date, (datetime, date)) else None
-    norm_end = end_date if isinstance(end_date, (datetime, date)) else None
+    norm_start: datetime | None = None
+    if isinstance(start_date, datetime):
+        norm_start = start_date
+    elif isinstance(start_date, date):
+        norm_start = datetime.combine(start_date, time.min)
 
-    # Normalize pure date to datetime
-    if norm_start is not None and type(norm_start) is date:
-        norm_start = datetime.combine(norm_start, time.min)
-
-    if norm_end is not None:
-        if type(norm_end) is date:
-            norm_end = datetime.combine(norm_end, time.max)
-        elif isinstance(norm_end, datetime):
-            is_date_only = False
-            if raw_end_date is not None:
-                stripped = raw_end_date.strip()
-                if "T" not in stripped and " " not in stripped and ":" not in stripped:
-                    is_date_only = True
-            if is_date_only:
-                norm_end = norm_end.replace(
-                    hour=23, minute=59, second=59, microsecond=999999
-                )
+    norm_end: datetime | None = None
+    if isinstance(end_date, datetime):
+        norm_end = end_date
+        is_date_only = False
+        if raw_end_date is not None:
+            stripped = raw_end_date.strip()
+            if "T" not in stripped and " " not in stripped and ":" not in stripped:
+                is_date_only = True
+        if is_date_only:
+            norm_end = norm_end.replace(
+                hour=23, minute=59, second=59, microsecond=999999
+            )
+    elif isinstance(end_date, date):
+        norm_end = datetime.combine(end_date, time.max)
 
     if norm_start is not None and norm_end is not None:
         # Align timezones if one is aware and one is naive for comparison

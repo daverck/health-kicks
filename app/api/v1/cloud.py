@@ -82,7 +82,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
-        request: Request = None,
+        request: Request = None,  # type: ignore[assignment]
     ) -> ActivityEventPage:
         target_device_ids = _resolve_target_device_ids(device_id=device_id, user=user, db=db)
         if not target_device_ids:
@@ -173,7 +173,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
-        request: Request = None,
+        request: Request = None,  # type: ignore[assignment]
     ) -> HapticLogPage:
         """List haptic commands/vibrations history for a device or multiple devices."""
         target_device_ids = _resolve_target_device_ids(device_id=device_id, user=user, db=db)
@@ -243,7 +243,9 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
 
         pool_status: DatabasePoolStatus | None = None
         try:
-            pool = db.get_bind().pool
+            bind = db.get_bind()
+            engine = getattr(bind, "engine", bind)
+            pool = getattr(engine, "pool", getattr(bind, "pool", None))
             if pool is not None:
                 pool_status = DatabasePoolStatus(
                     size=int(getattr(pool, "size", lambda: 0)()),
@@ -283,7 +285,9 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         """Operational metrics and request latency breakdown."""
         database_pool: dict[str, Any] | None = None
         try:
-            pool = db.get_bind().pool
+            bind = db.get_bind()
+            engine = getattr(bind, "engine", bind)
+            pool = getattr(engine, "pool", getattr(bind, "pool", None))
             if pool is not None:
                 database_pool = {
                     "size": int(getattr(pool, "size", lambda: 0)()),

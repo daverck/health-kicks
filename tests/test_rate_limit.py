@@ -1,8 +1,9 @@
 """Unit tests for sliding-window rate limiting on sensitive API endpoints."""
 
-from app.core.rate_limit import SlidingWindowRateLimiter, rate_limit, rate_limiter
 from fastapi import APIRouter, Depends, FastAPI, status
 from fastapi.testclient import TestClient
+
+from app.core.rate_limit import SlidingWindowRateLimiter, rate_limit, rate_limiter
 
 
 def test_sliding_window_unit_logic() -> None:

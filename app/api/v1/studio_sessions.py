@@ -45,7 +45,7 @@ def create_studio_sessions_router(
         start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
         end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
         db: Session = Depends(get_db),
-        request: Request = None,
+        request: Request = None,  # type: ignore[assignment]
     ) -> PaginatedSessionsResponse:
         """List studio sessions with RBAC, pagination, and multi-value filters."""
         raw_end = request.query_params.get("end_date") if request is not None else None
@@ -65,8 +65,8 @@ def create_studio_sessions_router(
                     query = query.filter(StudioSession.user_id == -1)
 
         if label is not None:
-            target_labels = [l.strip() for l in label.split(",") if l.strip()]
-            if target_labels and not any(l.lower() == "all" for l in target_labels):
+            target_labels = [lbl.strip() for lbl in label.split(",") if lbl.strip()]
+            if target_labels and not any(lbl.lower() == "all" for lbl in target_labels):
                 query = query.filter(StudioSession.label.in_(target_labels))
 
         if device_id is not None:
@@ -156,7 +156,8 @@ def create_studio_sessions_router(
     ) -> StudioSessionDetail:
         """Fetch studio session metadata from Aurora DB (including sample_count)."""
         session = get_authorized_session(db, session_id, user)
-        return to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
+        summary = to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
+        return StudioSessionDetail.model_validate(summary.model_dump())
 
     @router.get("/{session_id}/readings", response_model=StudioSessionReadingsResponse)
     def get_session_readings(

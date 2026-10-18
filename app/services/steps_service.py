@@ -178,14 +178,14 @@ def get_hourly_steps(
     records = db.execute(stmt).scalars().all()
 
     if not records:
-        hourly_items = [
+        empty_hourly = [
             HourlyStepItem(hour=h, total_steps=0, by_activity={})
             for h in range(24)
         ]
         return HourlyStepsResponse(
             device_id=device_id,
             date=target_date,
-            hourly_data=hourly_items,
+            hourly_data=empty_hourly,
         )
 
     activity_distributions: dict[str, dict[int, int]] = {}

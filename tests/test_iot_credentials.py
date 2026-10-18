@@ -5,17 +5,18 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ClientError
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.api.deps import get_db, get_sts_service
 from app.core.config import Settings
 from app.db.models import Base, Device, DeviceOwnership, DeviceStatus, User, UserRole
 from app.main import app
 from app.services import token_service
 from app.services.aws_sts_service import AWSSTSService
-from botocore.exceptions import ClientError
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()

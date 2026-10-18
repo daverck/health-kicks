@@ -3,13 +3,14 @@
 from collections.abc import Generator
 
 import pytest
-from app.db.database import get_db
-from app.db.models import Base
-from app.main import app
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from app.db.database import get_db
+from app.db.models import Base
+from app.main import app
 
 
 @pytest.fixture()

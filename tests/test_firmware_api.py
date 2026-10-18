@@ -4,17 +4,18 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ClientError
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.api.v1.firmware import get_firmware_service
 from app.db.database import get_db
 from app.db.models import Base, User, UserRole
 from app.main import app
 from app.services import token_service
 from app.services.firmware_service import FirmwareDistributionService
-from botocore.exceptions import ClientError
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()

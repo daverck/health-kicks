@@ -4,14 +4,15 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from app.db.database import get_db
-from app.db.models import Base, Device, DeviceOwnership, DeviceStatus, User, UserRole
-from app.main import app
-from app.services import token_service
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from app.db.database import get_db
+from app.db.models import Base, Device, DeviceOwnership, DeviceStatus, User, UserRole
+from app.main import app
+from app.services import token_service
 
 
 @pytest.fixture()

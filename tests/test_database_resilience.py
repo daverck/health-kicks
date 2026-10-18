@@ -5,12 +5,13 @@ import sqlite3
 from unittest.mock import MagicMock, patch
 
 import psycopg2
-from app.core.config import Settings
-from app.db.database import _connect_with_iam, build_engine
-from app.main import app as main_app
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
+
+from app.core.config import Settings
+from app.db.database import _connect_with_iam, build_engine
+from app.main import app as main_app
 
 
 def test_build_engine_postgres_pool_and_keepalives() -> None:
@@ -50,8 +51,8 @@ def test_iam_connection_creator_regenerates_fresh_token_and_sets_keepalives() ->
     mock_rds.generate_db_auth_token.side_effect = ["fresh-token-1", "fresh-token-2"]
 
     with patch("boto3.client", return_value=mock_rds), patch("psycopg2.connect") as mock_connect:
-        conn1 = _connect_with_iam(cfg)
-        conn2 = _connect_with_iam(cfg)
+        _connect_with_iam(cfg)
+        _connect_with_iam(cfg)
 
         assert mock_rds.generate_db_auth_token.call_count == 2
         assert mock_connect.call_count == 2

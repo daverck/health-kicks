@@ -46,7 +46,10 @@ def upsert_sso_user(
     if not sub:
         raise UserProvisioningError(f"No valid user identifier found for {provider.capitalize()} account")
 
-    db_target = session.get_bind().url.render_as_string(hide_password=True)
+    bind = session.get_bind()
+    bind_engine = getattr(bind, "engine", bind)
+    bind_url = getattr(bind_engine, "url", getattr(bind, "url", None))
+    db_target = bind_url.render_as_string(hide_password=True) if bind_url is not None else "database"
     logger.info("SSO sign-in [%s]: sub=%s email=%s db=%s", provider, sub, norm_email, db_target)
 
     def _find_user() -> User | None:

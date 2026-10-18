@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from app.core.config import load_settings
 from app.core.pseudonymization import (
     get_device_pseudonym,

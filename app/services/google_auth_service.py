@@ -115,7 +115,7 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     if key is None:
         raise GoogleAuthError("No matching Google signing key")
     try:
-        public_key = RSAAlgorithm.from_jwk(json.dumps(key))
+        public_key: Any = RSAAlgorithm.from_jwk(json.dumps(key))
         # Signature + exp check (10 s leeway); iss/aud already validated above.
         jwt.decode(
             id_token,

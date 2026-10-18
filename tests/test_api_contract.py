@@ -1,14 +1,15 @@
 """Tests for the Cloud API contracts and ingestion endpoint."""
 
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.api.v1.ingestion import settings as ingestion_settings
 from app.db.database import get_db
 from app.db.models import ActivityEvent, Base, DeviceOwnership, User, UserRole
 from app.main import app
 from app.schemas.ingestion import IngestionEvent
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 
 def test_openapi_exposes_cloud_and_ingestion_endpoints() -> None:

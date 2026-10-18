@@ -31,7 +31,15 @@ class AWSIoTPublishService:
         return self._client
 
     def publish_haptic(self, device_id: str, command: HapticTrigger) -> bool:
-        """Publish one normalized haptic command without maintaining a connection."""
+        """Publish one normalized haptic command without maintaining a connection.
+
+        Args:
+            device_id: Target footwear device identifier (e.g. 'HK-2').
+            command: Haptic command with intensity and duration.
+
+        Returns:
+            bool: True if published successfully, False on BotoCore/ClientError.
+        """
         topic = self._config.aws_iot_haptic_command_topic.format(device_id=device_id)
         payload = {"intensity": command.intensity, "duration_ms": command.duration_ms}
         try:
@@ -45,7 +53,16 @@ class AWSIoTPublishService:
         return True
 
     def send_studio_start(self, device_id: str, command: StudioStartRequest, session_id: str) -> str:
-        """Publish a studio recording start order to AWS IoT Core."""
+        """Publish a studio recording start order to AWS IoT Core.
+
+        Args:
+            device_id: Target footwear device identifier.
+            command: Studio capture parameters (duration, haptic countdown pulses).
+            session_id: Unique session UUID string.
+
+        Returns:
+            str: AWS IoT MQTT topic where the command was published.
+        """
         topic = self._config.aws_iot_studio_start_topic.format(device_id=device_id)
         payload = {
             "session_id": session_id,
