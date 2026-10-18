@@ -1,5 +1,6 @@
 """Common API utilities for query parameter validation and date filtering."""
 
+import base64
 from datetime import date, datetime, time
 
 from fastapi import HTTPException, status
@@ -54,3 +55,21 @@ def validate_and_normalize_date_range(
             )
 
     return norm_start, norm_end
+
+
+def encode_cursor(timestamp: datetime, record_id: int | str) -> str:
+    """Encode timestamp and record ID into an opaque URL-safe base64 cursor."""
+    raw = f"{timestamp.isoformat()}|{record_id}"
+    return base64.urlsafe_b64encode(raw.encode("ascii")).decode("ascii")
+
+
+def decode_cursor(cursor_str: str | None) -> tuple[datetime, str] | None:
+    """Safely decode an opaque cursor into (datetime, record_id_str) or return None."""
+    if not cursor_str:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(cursor_str.encode("ascii")).decode("ascii")
+        ts_part, id_part = raw.split("|", 1)
+        return datetime.fromisoformat(ts_part), id_part
+    except Exception:
+        return None

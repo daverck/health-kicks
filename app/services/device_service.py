@@ -4,8 +4,10 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
+from app.api.v1.utils import decode_cursor
 from app.core.config import settings
 from app.db.models import Device, DeviceOwnership, DeviceStatus, User, UserRole
 from app.schemas.device import DeviceCreate, DeviceResponse
@@ -136,17 +138,38 @@ def list_user_devices(
     user_id: int,
     skip: int = 0,
     limit: int = 100,
+    cursor: str | None = None,
 ) -> list[DeviceResponse]:
     """Retrieve all devices bound to a user, joined with ownership for bound_at_utc."""
-    rows = (
+    query = (
         db.query(Device, DeviceOwnership.bound_at_utc)
         .join(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
         .filter(DeviceOwnership.user_id == user_id)
-        .order_by(DeviceOwnership.bound_at_utc.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
     )
+
+    decoded = decode_cursor(cursor)
+    if decoded is not None:
+        cur_ts, cur_id_str = decoded
+        try:
+            cur_id = int(cur_id_str)
+            query = query.filter(
+                or_(
+                    DeviceOwnership.bound_at_utc < cur_ts,
+                    and_(
+                        DeviceOwnership.bound_at_utc == cur_ts,
+                        Device.id < cur_id,
+                    ),
+                )
+            )
+        except ValueError:
+            pass
+
+    query = query.order_by(DeviceOwnership.bound_at_utc.desc(), Device.id.desc())
+
+    if decoded is None and skip > 0:
+        query = query.offset(skip)
+
+    rows = query.limit(limit).all()
     return [
         DeviceResponse(
             id=device.id,
@@ -169,16 +192,37 @@ def list_all_devices(
     db: Session,
     skip: int = 0,
     limit: int = 100,
+    cursor: str | None = None,
 ) -> list[DeviceResponse]:
     """Retrieve all registered devices for administrator overview."""
-    rows = (
+    query = (
         db.query(Device, DeviceOwnership.bound_at_utc)
         .outerjoin(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
-        .order_by(Device.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
     )
+
+    decoded = decode_cursor(cursor)
+    if decoded is not None:
+        cur_ts, cur_id_str = decoded
+        try:
+            cur_id = int(cur_id_str)
+            query = query.filter(
+                or_(
+                    Device.created_at < cur_ts,
+                    and_(
+                        Device.created_at == cur_ts,
+                        Device.id < cur_id,
+                    ),
+                )
+            )
+        except ValueError:
+            pass
+
+    query = query.order_by(Device.created_at.desc(), Device.id.desc())
+
+    if decoded is None and skip > 0:
+        query = query.offset(skip)
+
+    rows = query.limit(limit).all()
     return [
         DeviceResponse(
             id=device.id,

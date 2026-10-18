@@ -288,14 +288,28 @@ def test_list_user_devices_isolation_and_pagination(
     # Pagination for User A: limit=2
     paginated_page1 = client.get(
         "/api/v1/devices?skip=0&limit=2", headers=auth_headers_a
-    ).json()
-    assert len(paginated_page1) == 2
+    )
+    assert paginated_page1.status_code == 200
+    p1_items = paginated_page1.json()
+    assert len(p1_items) == 2
+    cursor_header = paginated_page1.headers.get("X-Next-Cursor")
+    assert cursor_header is not None
 
+    # Keyset cursor pagination for page 2
+    cursor_page2 = client.get(
+        f"/api/v1/devices?cursor={cursor_header}&limit=2", headers=auth_headers_a
+    )
+    assert cursor_page2.status_code == 200
+    c2_items = cursor_page2.json()
+    assert len(c2_items) == 1
+    assert c2_items[0]["device_id"] not in {d["device_id"] for d in p1_items}
+
+    # Offset pagination for User A: limit=2
     paginated_page2 = client.get(
         "/api/v1/devices?skip=2&limit=2", headers=auth_headers_a
     ).json()
     assert len(paginated_page2) == 1
-    assert paginated_page2[0]["device_id"] not in {d["device_id"] for d in paginated_page1}
+    assert paginated_page2[0]["device_id"] not in {d["device_id"] for d in p1_items}
 
 
 def test_unbind_device(client, auth_headers_a, db_session, user_a) -> None:

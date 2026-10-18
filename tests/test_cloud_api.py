@@ -1,7 +1,7 @@
 """Focused tests for Cloud persistence and AWS publication."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -417,3 +417,60 @@ def test_temporal_isolation_for_rebound_device() -> None:
     assert {item.intensity for item in hap_doc.items} == {100, 150}
 
     session.close()
+
+
+def test_list_haptic_history_cursor_pagination() -> None:
+    class DummyPublisher:
+        def publish_haptic(self, device_id, command):
+            return True
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
+    router = create_cloud_router(DummyPublisher())
+    haptic_history_endpoint = next(
+        route.endpoint for route in router.routes if route.path.endswith("haptic/history")
+    )
+
+    t0 = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
+    for i in range(5):
+        session.add(
+            HapticLog(
+                device_id=TEST_DEVICE_ID,
+                intensity=50 + i * 10,
+                duration_ms=200,
+                triggered_at_utc=t0 + timedelta(minutes=i),
+                triggered_by_user=True,
+            )
+        )
+    session.commit()
+
+    # Query page 1 with page_size=2
+    page1 = haptic_history_endpoint(
+        TEST_DEVICE_ID,
+        user=admin,
+        page=1,
+        page_size=2,
+        db=session,
+    )
+    assert page1.total == 5
+    assert len(page1.items) == 2
+    assert page1.next_cursor is not None
+
+    # Query page 2 via cursor
+    page2 = haptic_history_endpoint(
+        TEST_DEVICE_ID,
+        user=admin,
+        cursor=page1.next_cursor,
+        page=1,
+        page_size=2,
+        db=session,
+    )
+    assert len(page2.items) == 2
+    assert page2.items[0].intensity == 70  # minute 2
+    assert page2.items[1].intensity == 60  # minute 1
+    assert page2.next_cursor is not None
+
+    session.close()
+

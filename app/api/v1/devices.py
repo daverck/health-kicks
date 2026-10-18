@@ -1,9 +1,10 @@
 """Device association and management routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
+from app.api.v1.utils import encode_cursor
 from app.db.database import get_db
 from app.db.models import UserRole
 from app.schemas.device import DeviceCreate, DeviceResponse
@@ -35,16 +36,41 @@ def create_devices_router() -> APIRouter:
     def list_devices(
         user: CurrentUser,
         user_id: int | None = Query(None, description="Optional user ID filter for admins"),
+        cursor: str | None = Query(None, description="Opaque cursor (timestamp_utc|id) for keyset pagination"),
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=1000),
         db: Session = Depends(get_db),
+        response: Response = None,  # type: ignore[assignment]
     ) -> list[DeviceResponse]:
         """List devices bound to the authenticated user (or all devices if admin)."""
+        fetch_limit = limit + 1
         if user.role == UserRole.admin:
             if user_id is not None:
-                return device_service.list_user_devices(db=db, user_id=user_id, skip=skip, limit=limit)
-            return device_service.list_all_devices(db=db, skip=skip, limit=limit)
-        return device_service.list_user_devices(db=db, user_id=user.id, skip=skip, limit=limit)
+                devices = device_service.list_user_devices(
+                    db=db, user_id=user_id, skip=skip, limit=fetch_limit, cursor=cursor
+                )
+            else:
+                devices = device_service.list_all_devices(
+                    db=db, skip=skip, limit=fetch_limit, cursor=cursor
+                )
+        else:
+            devices = device_service.list_user_devices(
+                db=db, user_id=user.id, skip=skip, limit=fetch_limit, cursor=cursor
+            )
+
+        if len(devices) > limit:
+            items = devices[:limit]
+            last_item = items[-1]
+            last_ts = last_item.bound_at_utc or last_item.created_at
+            next_cursor = encode_cursor(last_ts, last_item.id)
+        else:
+            items = devices
+            next_cursor = None
+
+        if response is not None and next_cursor:
+            response.headers["X-Next-Cursor"] = next_cursor
+
+        return items
 
     @router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
     def unbind_device(

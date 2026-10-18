@@ -169,8 +169,21 @@ def test_list_activities_pagination_and_sorting(client, db_session, auth_headers
 
     assert data["items"][1]["event_type"] == "idle"
     assert data["items"][1]["confidence_score"] == 0.98
+    assert data.get("next_cursor") is not None
+    assert response.headers.get("X-Next-Cursor") == data["next_cursor"]
 
-    # Query page 2
+    # Query page 2 via cursor keyset pagination
+    cursor_res = client.get(
+        f"/api/v1/devices/HK-1/events/activities?cursor={data['next_cursor']}&page_size=2",
+        headers=auth_headers,
+    )
+    assert cursor_res.status_code == 200
+    cursor_data = cursor_res.json()
+    assert len(cursor_data["items"]) == 2
+    assert cursor_data["items"][0]["event_type"] == "walk"  # -10 min
+    assert cursor_data["items"][1]["event_type"] == "stairs_up"  # -15 min
+
+    # Query page 2 via legacy page=2
     response2 = client.get(
         "/api/v1/devices/HK-1/events/activities?page=2&page_size=2",
         headers=auth_headers,

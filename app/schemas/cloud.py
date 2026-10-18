@@ -39,6 +39,7 @@ class ActivityEventPage(StrictModel):
     page: int
     page_size: int
     total: int
+    next_cursor: str | None = None
 
 
 class DatabasePoolStatus(StrictModel):
@@ -74,3 +75,4 @@ class HapticLogPage(StrictModel):
     page: int
     page_size: int
     total: int
+    next_cursor: str | None = None

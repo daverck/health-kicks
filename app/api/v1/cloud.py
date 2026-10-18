@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
-from app.api.v1.utils import validate_and_normalize_date_range
+from app.api.v1.utils import decode_cursor, encode_cursor, validate_and_normalize_date_range
 from app.core.config import settings
 from app.core.metrics import metrics_collector
 from app.core.rate_limit import rate_limit
@@ -79,10 +79,12 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         event_type: str | None = Query(None, description="Filtre par type d'activité (ex: 'walk', 'run', ou 'falls' pour toutes les chutes)"),
         start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
         end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
+        cursor: str | None = Query(None, description="Opaque cursor (timestamp_utc|id) for keyset pagination"),
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
+        response: Response = None,  # type: ignore[assignment]
     ) -> ActivityEventPage:
         target_device_ids = _resolve_target_device_ids(device_id=device_id, user=user, db=db)
         if not target_device_ids:
@@ -129,13 +131,39 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         if norm_end is not None:
             query = query.filter(ActivityEvent.timestamp_utc <= norm_end)
 
+        decoded = decode_cursor(cursor)
+        if decoded is not None:
+            cur_ts, cur_id_str = decoded
+            try:
+                cur_id = int(cur_id_str)
+                query = query.filter(
+                    or_(
+                        ActivityEvent.timestamp_utc < cur_ts,
+                        and_(
+                            ActivityEvent.timestamp_utc == cur_ts,
+                            ActivityEvent.id < cur_id,
+                        ),
+                    )
+                )
+            except ValueError:
+                pass
+
         total = query.with_entities(func.count(ActivityEvent.id)).scalar() or 0
-        events = (
-            query.order_by(ActivityEvent.timestamp_utc.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
+        query = query.order_by(ActivityEvent.timestamp_utc.desc(), ActivityEvent.id.desc())
+
+        if decoded is None and page > 1:
+            query = query.offset((page - 1) * page_size)
+
+        events_plus_one = query.limit(page_size + 1).all()
+        if len(events_plus_one) > page_size:
+            events = events_plus_one[:page_size]
+            next_cursor = encode_cursor(events[-1].timestamp_utc, events[-1].id)
+        else:
+            events = events_plus_one
+            next_cursor = None
+
+        if response is not None and next_cursor:
+            response.headers["X-Next-Cursor"] = next_cursor
 
         user_owned_devs: set[str] = set()
         if user.role in (UserRole.admin, UserRole.clinician):
@@ -161,6 +189,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
             page=page,
             page_size=page_size,
             total=total,
+            next_cursor=next_cursor,
         )
 
     @router.get("/devices/{device_id}/haptic/history", response_model=HapticLogPage)
@@ -170,10 +199,12 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         user: CurrentUser,
         start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
         end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
+        cursor: str | None = Query(None, description="Opaque cursor (timestamp_utc|id) for keyset pagination"),
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
+        response: Response = None,  # type: ignore[assignment]
     ) -> HapticLogPage:
         """List haptic commands/vibrations history for a device or multiple devices."""
         target_device_ids = _resolve_target_device_ids(device_id=device_id, user=user, db=db)
@@ -208,18 +239,46 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         if norm_end is not None:
             query = query.filter(HapticLog.triggered_at_utc <= norm_end)
 
+        decoded = decode_cursor(cursor)
+        if decoded is not None:
+            cur_ts, cur_id_str = decoded
+            try:
+                cur_id = int(cur_id_str)
+                query = query.filter(
+                    or_(
+                        HapticLog.triggered_at_utc < cur_ts,
+                        and_(
+                            HapticLog.triggered_at_utc == cur_ts,
+                            HapticLog.id < cur_id,
+                        ),
+                    )
+                )
+            except ValueError:
+                pass
+
         total = query.with_entities(func.count(HapticLog.id)).scalar() or 0
-        logs = (
-            query.order_by(HapticLog.triggered_at_utc.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
+        query = query.order_by(HapticLog.triggered_at_utc.desc(), HapticLog.id.desc())
+
+        if decoded is None and page > 1:
+            query = query.offset((page - 1) * page_size)
+
+        logs_plus_one = query.limit(page_size + 1).all()
+        if len(logs_plus_one) > page_size:
+            logs = logs_plus_one[:page_size]
+            next_cursor = encode_cursor(logs[-1].triggered_at_utc, logs[-1].id)
+        else:
+            logs = logs_plus_one
+            next_cursor = None
+
+        if response is not None and next_cursor:
+            response.headers["X-Next-Cursor"] = next_cursor
+
         return HapticLogPage(
             items=[HapticLogResponse.model_validate(log, from_attributes=True) for log in logs],
             page=page,
             page_size=page_size,
             total=total,
+            next_cursor=next_cursor,
         )
 
     @router.get("/health", response_model=HealthResponse)
