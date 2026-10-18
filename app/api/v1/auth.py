@@ -11,7 +11,6 @@ import base64
 import hashlib
 import logging
 import secrets
-import time
 from typing import Any
 from urllib.parse import quote
 
@@ -34,11 +33,12 @@ from app.schemas.auth import (
 from app.schemas.cloud import StrictModel
 from app.services import azure_auth_service, google_auth_service, token_service
 from app.services.aws_sts_service import AWSSTSService
+from app.services.oauth_ticket_service import oauth_ticket_store
 
 _timed_serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
 logger = logging.getLogger(__name__)
 
-_ONE_TIME_TICKETS: dict[str, dict[str, Any]] = {}
+_ONE_TIME_TICKETS = oauth_ticket_store._memory_store
 TICKET_TTL_SECONDS = 60
 
 
@@ -124,22 +124,12 @@ def _create_one_time_ticket(
     code_challenge: str | None = None,
 ) -> str:
     """Create a short-lived one-time authentication ticket to avoid exposing JWTs in redirect URLs."""
-    now = time.time()
-    expired_keys = [
-        k for k, v in _ONE_TIME_TICKETS.items() if now - v["created_at"] > TICKET_TTL_SECONDS
-    ]
-    for k in expired_keys:
-        _ONE_TIME_TICKETS.pop(k, None)
-
-    ticket = secrets.token_urlsafe(32)
-    _ONE_TIME_TICKETS[ticket] = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "user": user_resp,
-        "code_challenge": code_challenge,
-        "created_at": now,
-    }
-    return ticket
+    return oauth_ticket_store.create_ticket(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=user_resp,
+        code_challenge=code_challenge,
+    )
 
 
 class TokenResponse(StrictModel):
@@ -443,23 +433,20 @@ def create_auth_router() -> APIRouter:
     )
     def exchange_auth_ticket(payload: OAuthTicketExchangeRequest) -> TokenResponse:
         """Atomically exchange a one-time OAuth ticket for access and refresh tokens."""
-        entry = _ONE_TIME_TICKETS.pop(payload.ticket, None)
+        entry = oauth_ticket_store.consume_ticket(payload.ticket)
         if entry is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or already consumed authentication ticket",
             )
-        if time.time() - entry["created_at"] > TICKET_TTL_SECONDS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Authentication ticket expired",
-            )
         _verify_pkce_challenge(entry.get("code_challenge"), payload.code_verifier)
+        user_val = entry["user"]
+        user_resp = UserResponse(**user_val) if isinstance(user_val, dict) else user_val
         return TokenResponse(
             access_token=entry["access_token"],
             refresh_token=entry["refresh_token"],
             token_type="bearer",
-            user=entry["user"],
+            user=user_resp,
         )
 
     @router.post(

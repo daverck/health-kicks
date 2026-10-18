@@ -1,10 +1,18 @@
-"""In-memory thread-safe sliding-window rate limiter for sensitive endpoints."""
+"""Distributed rate limiter backed by Amazon DynamoDB atomic counters with TTL and in-memory fallback."""
 
+import logging
 import threading
 import time
 from collections import defaultdict
+from typing import Any
 
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, Request, status
+
+from app.core.config import Settings, settings
+
+logger = logging.getLogger(__name__)
 
 
 class SlidingWindowRateLimiter:
@@ -44,7 +52,72 @@ class SlidingWindowRateLimiter:
             self._records.clear()
 
 
-rate_limiter = SlidingWindowRateLimiter()
+class DynamoDbRateLimiter:
+    """Multi-worker distributed rate limiter backed by Amazon DynamoDB atomic counters with TTL."""
+
+    def __init__(
+        self,
+        table: Any | None = None,
+        config: Settings = settings,
+        fallback_limiter: SlidingWindowRateLimiter | None = None,
+    ) -> None:
+        self._table = table
+        self._config = config
+        self._fallback = fallback_limiter or SlidingWindowRateLimiter()
+        self._dynamo_unavailable = False
+
+    def _get_table(self) -> Any | None:
+        if self._dynamo_unavailable:
+            return None
+        if self._table is not None:
+            return self._table
+        try:
+            dynamodb = boto3.resource("dynamodb", region_name=self._config.aws_region)
+            self._table = dynamodb.Table(self._config.dynamodb_rate_limits_table)
+            return self._table
+        except Exception as exc:
+            logger.debug("DynamoDB rate limit table unavailable, using in-memory fallback: %s", exc)
+            self._dynamo_unavailable = True
+            return None
+
+    def is_allowed(self, key: str, max_requests: int, window_seconds: float) -> tuple[bool, int]:
+        """Check rate limit atomically via DynamoDB UpdateItem ADD with TTL."""
+        table = self._get_table()
+        if table is None:
+            return self._fallback.is_allowed(key, max_requests, window_seconds)
+
+        now = int(time.time())
+        window_sec_int = max(1, int(window_seconds))
+        bucket = now // window_sec_int
+        pk = f"{key}:{bucket}"
+        expires_at = now + (window_sec_int * 2)
+
+        try:
+            response = table.update_item(
+                Key={"key": pk},
+                UpdateExpression="ADD req_count :inc SET expires_at = :exp",
+                ExpressionAttributeValues={
+                    ":inc": 1,
+                    ":exp": expires_at,
+                },
+                ReturnValues="UPDATED_NEW",
+            )
+            count = int(response.get("Attributes", {}).get("req_count", 1))
+            if count > max_requests:
+                elapsed_in_window = now % window_sec_int
+                retry_after = max(1, window_sec_int - elapsed_in_window)
+                return False, retry_after
+            return True, 0
+        except (BotoCoreError, ClientError, Exception) as exc:
+            logger.debug("DynamoDB rate limit update failed, using in-memory fallback: %s", exc)
+            return self._fallback.is_allowed(key, max_requests, window_seconds)
+
+    def reset(self) -> None:
+        """Reset rate limiter state (clears in-memory fallback records)."""
+        self._fallback.reset()
+
+
+rate_limiter = DynamoDbRateLimiter()
 
 
 def rate_limit(name: str, max_requests: int, window_seconds: float = 60.0):
@@ -66,4 +139,5 @@ def rate_limit(name: str, max_requests: int, window_seconds: float = 60.0):
             )
 
     return dependency
+
 

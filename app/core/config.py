@@ -51,8 +51,10 @@ class Settings:
     azure_mobile_redirect_uri: str = "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
     # Frontend application URL for OAuth redirects
     frontend_url: str = "https://healthkicks.duckdns.org"
-    # DynamoDB Telemetry (Studio mode)
+    # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting)
     dynamodb_telemetry_table: str = "healthkicks_telemetry"
+    dynamodb_oauth_tickets_table: str = "healthkicks_oauth_tickets"
+    dynamodb_rate_limits_table: str = "healthkicks_rate_limits"
     # Database pool resilience & configuration
     database_pool_size: int = 5
     database_max_overflow: int = 10
@@ -158,10 +160,18 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             "frontend_url",
             _nested_value(yaml_values, "auth", "frontend_url", defaults.frontend_url),
         ),
-        # DynamoDB Telemetry (Studio mode)
+        # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting)
         "dynamodb_telemetry_table": yaml_values.get(
             "dynamodb_telemetry_table",
             _nested_value(yaml_values, "aws", "telemetry_table", defaults.dynamodb_telemetry_table),
+        ),
+        "dynamodb_oauth_tickets_table": yaml_values.get(
+            "dynamodb_oauth_tickets_table",
+            _nested_value(yaml_values, "aws", "oauth_tickets_table", defaults.dynamodb_oauth_tickets_table),
+        ),
+        "dynamodb_rate_limits_table": yaml_values.get(
+            "dynamodb_rate_limits_table",
+            _nested_value(yaml_values, "aws", "rate_limits_table", defaults.dynamodb_rate_limits_table),
         ),
         # Database pool resilience
         "database_pool_size": int(
@@ -256,9 +266,17 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             str,
         ),
         "frontend_url": (("HEALTHKICKS_FRONTEND_URL", "FRONTEND_URL"), str),
-        # DynamoDB Telemetry (Studio mode)
+        # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting)
         "dynamodb_telemetry_table": (
             ("HEALTHKICKS_DYNAMODB_TELEMETRY_TABLE", "DYNAMODB_TELEMETRY_TABLE"),
+            str,
+        ),
+        "dynamodb_oauth_tickets_table": (
+            ("HEALTHKICKS_DYNAMODB_OAUTH_TICKETS_TABLE", "DYNAMODB_OAUTH_TICKETS_TABLE"),
+            str,
+        ),
+        "dynamodb_rate_limits_table": (
+            ("HEALTHKICKS_DYNAMODB_RATE_LIMITS_TABLE", "DYNAMODB_RATE_LIMITS_TABLE"),
             str,
         ),
         # Database pool resilience
