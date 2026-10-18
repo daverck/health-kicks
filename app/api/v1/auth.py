@@ -7,17 +7,12 @@ SPA Frontend-First flow:
 4. Backend verifies state, exchanges code for user profile, and returns the session JWT as JSON.
 """
 
-import base64
-import hashlib
 import logging
-import secrets
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
-from itsdangerous import BadData, SignatureExpired, URLSafeTimedSerializer
-from pydantic import Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_sts_service
@@ -26,95 +21,35 @@ from app.core.rate_limit import rate_limit
 from app.db.database import get_db
 from app.db.models import DeviceOwnership, User, UserRole
 from app.schemas.auth import (
+    AzureCallbackRequest,
+    AzureLoginResponse,
+    GoogleCallbackRequest,
+    GoogleLoginResponse,
     IoTCredentialsRequest,
     IoTCredentialsResponse,
+    OAuthCallbackRequest,
+    OAuthLoginResponse,
     OAuthTicketExchangeRequest,
+    RefreshTokenRequest,
+    TokenResponse,
+    UserResponse,
 )
-from app.schemas.cloud import StrictModel
 from app.services import azure_auth_service, google_auth_service, token_service
 from app.services.aws_sts_service import AWSSTSService
-from app.services.oauth_ticket_service import oauth_ticket_store
+from app.services.oauth_ticket_service import TICKET_TTL_SECONDS, oauth_ticket_store
+from app.services.pkce_service import (
+    generate_oauth_state,
+    get_state_platform,
+    get_timed_serializer,
+    verify_oauth_state,
+    verify_pkce_challenge,
+)
 
-_timed_serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
 logger = logging.getLogger(__name__)
 
+# Expose aliases and memory store for tests / backward compatibility
 _ONE_TIME_TICKETS = oauth_ticket_store._memory_store
-TICKET_TTL_SECONDS = 60
-
-
-def generate_oauth_state(
-    provider: str, platform: str = "web", code_challenge: str | None = None
-) -> str:
-    """Generate a signed anti-CSRF OAuth state containing a nonce, provider name, platform, and optional PKCE challenge."""
-    payload: dict[str, Any] = {
-        "platform": platform,
-        "provider": provider,
-        "nonce": secrets.token_hex(16),
-    }
-    if code_challenge is not None:
-        payload["cc"] = code_challenge
-    return _timed_serializer.dumps(payload)
-
-
-def verify_oauth_state(state: str, expected_provider: str, max_age: int = 600) -> dict:
-    """Validate the cryptographic signature, expiration (max_age seconds), and provider."""
-    try:
-        data = _timed_serializer.loads(state, max_age=max_age)
-    except SignatureExpired as error:
-        logger.warning("Expired OAuth state token: %s", error)
-        raise HTTPException(status_code=400, detail="Invalid OAuth state: state expired") from error
-    except BadData as error:
-        logger.warning("Invalid OAuth state signature: %s", error)
-        raise HTTPException(status_code=400, detail="Invalid OAuth state") from error
-
-    if not isinstance(data, dict) or data.get("provider") != expected_provider:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
-    return data
-
-
-def _verify_pkce_challenge(code_challenge: str | None, code_verifier: str | None) -> None:
-    """Verify S256 PKCE code_verifier against the stored code_challenge when present."""
-    if not code_challenge:
-        return
-    if not code_verifier:
-        raise HTTPException(status_code=400, detail="Missing PKCE code_verifier")
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    if not secrets.compare_digest(computed, code_challenge):
-        raise HTTPException(status_code=400, detail="Invalid PKCE code_verifier")
-
-
-def get_state_platform(state: str | None) -> str:
-    """Extract the target platform ('mobile' or 'web') from the state payload without enforcing strict signature/expiry."""
-    if not state:
-        return "web"
-    try:
-        _, payload = _timed_serializer.loads_unsafe(state)
-        if isinstance(payload, dict) and "platform" in payload:
-            return str(payload["platform"])
-    except Exception:
-        pass
-    return "web"
-
-
-class UserResponse(StrictModel):
-    id: int
-    email: str
-    name: str | None = None
-    avatar_url: str | None = None
-    role: str
-    is_active: bool
-
-    @classmethod
-    def from_user(cls, user: User) -> "UserResponse":
-        return cls(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            avatar_url=user.avatar_url,
-            role=user.role.value if hasattr(user.role, "value") else str(user.role),
-            is_active=user.is_active,
-        )
+_verify_pkce_challenge = verify_pkce_challenge
 
 
 def _create_one_time_ticket(
@@ -132,48 +67,62 @@ def _create_one_time_ticket(
     )
 
 
-class TokenResponse(StrictModel):
-    access_token: str
-    refresh_token: str | None = None
-    token_type: str = "bearer"
-    user: UserResponse
+def _handle_oauth_get_callback(
+    provider: str,
+    code: str | None,
+    state: str | None,
+    error: str | None,
+    error_description: str | None,
+    db: Session,
+    exchange_and_provision: Callable[[str, bool, Session], User],
+) -> RedirectResponse:
+    """Common handler for browser GET redirect callbacks from SSO providers."""
+    raw_platform = get_state_platform(state, config=settings)
+    is_mobile = (raw_platform == "mobile")
+    frontend_base = getattr(settings, "frontend_url", "https://healthkicks.duckdns.org").rstrip("/")
 
-    @classmethod
-    def build(cls, user: User, access_token: str, refresh_token: str | None = None) -> "TokenResponse":
-        return cls(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_type="bearer",
-            user=UserResponse.from_user(user),
-        )
+    def _redirect_error(message: str) -> RedirectResponse:
+        encoded_msg = quote(message, safe="")
+        if is_mobile:
+            return RedirectResponse(f"healthkicks://auth/callback?error={encoded_msg}")
+        return RedirectResponse(f"{frontend_base}/login?error={encoded_msg}")
 
+    if error:
+        err_detail = error_description or error
+        logger.warning("%s SSO callback GET received error: %s", provider.capitalize(), err_detail)
+        return _redirect_error(err_detail)
 
-class RefreshTokenRequest(StrictModel):
-    refresh_token: str
+    if not code or not state:
+        return _redirect_error("Paramètres d'autorisation manquants (code ou state absent)")
 
+    try:
+        state_data = verify_oauth_state(state, expected_provider=provider, config=settings)
+        is_mobile = (state_data.get("platform") == "mobile")
+    except HTTPException as exc:
+        return _redirect_error(exc.detail or "Paramètre state invalide ou expiré")
 
-class OAuthLoginResponse(StrictModel):
-    authorization_url: str
-    state: str
+    try:
+        user = exchange_and_provision(code, is_mobile, db)
+        access_token = token_service.issue_access_token(user)
+        refresh_token = token_service.issue_refresh_token(user)
+    except Exception as err:
+        logger.exception("%s SSO callback GET failed: %s", provider.capitalize(), err)
+        return _redirect_error(str(err) if isinstance(err, (google_auth_service.GoogleAuthError, azure_auth_service.AzureAuthError)) else f"Erreur lors de l'authentification {provider}")
 
-
-class OAuthCallbackRequest(StrictModel):
-    code: str
-    state: str
-    code_verifier: str | None = Field(default=None, min_length=43, max_length=128)
-
-
-GoogleLoginResponse = OAuthLoginResponse
-GoogleCallbackRequest = OAuthCallbackRequest
-AzureLoginResponse = OAuthLoginResponse
-AzureCallbackRequest = OAuthCallbackRequest
+    ticket = _create_one_time_ticket(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user_resp=UserResponse.from_user(user),
+        code_challenge=state_data.get("cc"),
+    )
+    logger.info("%s SSO callback GET: success for user id=%s (is_mobile=%s)", provider.capitalize(), user.id, is_mobile)
+    if is_mobile:
+        return RedirectResponse(f"healthkicks://auth/callback?ticket={ticket}&state={state}")
+    return RedirectResponse(f"{frontend_base}/auth/{provider}/callback?ticket={ticket}&state={state}")
 
 
 def create_auth_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
-
-    def _get_frontend_base() -> str:
-        return getattr(settings, "frontend_url", "https://healthkicks.duckdns.org").rstrip("/")
 
     @router.get("/google/login", response_model=GoogleLoginResponse)
     def google_login(
@@ -192,7 +141,7 @@ def create_auth_router() -> APIRouter:
         is_mobile = (redirect or platform == "mobile")
         target_platform = "mobile" if is_mobile else "web"
         state = generate_oauth_state(
-            "google", platform=target_platform, code_challenge=code_challenge
+            "google", platform=target_platform, code_challenge=code_challenge, config=settings
         )
         url = google_auth_service.google_authorization_url(state, is_mobile=is_mobile)
 
@@ -210,73 +159,24 @@ def create_auth_router() -> APIRouter:
         error_description: str | None = None,
         db: Session = Depends(get_db),
     ):
-        """Browser redirect handler for Google OAuth2.
+        def _exchange_google(auth_code: str, mobile_flag: bool, session: Session) -> User:
+            claims = google_auth_service.exchange_code_for_id_token(auth_code, is_mobile=mobile_flag)
+            return google_auth_service.get_or_create_user(session, claims)
 
-        Extracts the authorization code and state parameter, validates CSRF & expiration,
-        exchanges code for user profile, and redirects with a short-lived one-time ticket to:
-        - `healthkicks://auth/callback` if target platform is mobile
-        - `{frontend_url}/auth/google/callback` (or `/login?error=`) for web clients
-        """
-        raw_platform = get_state_platform(state)
-        is_mobile = (raw_platform == "mobile")
-        frontend_base = _get_frontend_base()
-
-        def _redirect_error(message: str) -> RedirectResponse:
-            encoded_msg = quote(message, safe="")
-            if is_mobile:
-                return RedirectResponse(f"healthkicks://auth/callback?error={encoded_msg}")
-            return RedirectResponse(f"{frontend_base}/login?error={encoded_msg}")
-
-        if error:
-            err_detail = error_description or error
-            logger.warning("Google SSO callback GET received error: %s", err_detail)
-            return _redirect_error(err_detail)
-
-        if not code or not state:
-            return _redirect_error("Paramètres d'autorisation manquants (code ou state absent)")
-
-        try:
-            state_data = verify_oauth_state(state, expected_provider="google")
-            is_mobile = (state_data.get("platform") == "mobile")
-        except HTTPException as exc:
-            return _redirect_error(exc.detail or "Paramètre state invalide ou expiré")
-
-        try:
-            claims = google_auth_service.exchange_code_for_id_token(code, is_mobile=is_mobile)
-        except google_auth_service.GoogleAuthError as err:
-            logger.error("Google SSO callback GET: token exchange failed: %s", err)
-            return _redirect_error(str(err))
-        except Exception as err:
-            logger.exception("Google SSO callback GET: unexpected error: %s", err)
-            return _redirect_error("Erreur serveur lors de l'authentification Google")
-
-        try:
-            user = google_auth_service.get_or_create_user(db, claims)
-            access_token = token_service.issue_access_token(user)
-            refresh_token = token_service.issue_refresh_token(user)
-        except Exception as err:
-            logger.exception("Google SSO callback GET: user provisioning failed: %s", err)
-            return _redirect_error("Échec de persistance de l'utilisateur")
-
-        ticket = _create_one_time_ticket(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            user_resp=UserResponse.from_user(user),
-            code_challenge=state_data.get("cc"),
-        )
-        logger.info("Google SSO callback GET: success for user id=%s (is_mobile=%s)", user.id, is_mobile)
-        if is_mobile:
-            return RedirectResponse(
-                f"healthkicks://auth/callback?ticket={ticket}&state={state}"
-            )
-        return RedirectResponse(
-            f"{frontend_base}/auth/google/callback?ticket={ticket}&state={state}"
+        return _handle_oauth_get_callback(
+            provider="google",
+            code=code,
+            state=state,
+            error=error,
+            error_description=error_description,
+            db=db,
+            exchange_and_provision=_exchange_google,
         )
 
     @router.post("/google/callback", response_model=TokenResponse)
     def google_callback(payload: GoogleCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        state_data = verify_oauth_state(payload.state, expected_provider="google")
-        _verify_pkce_challenge(state_data.get("cc"), payload.code_verifier)
+        state_data = verify_oauth_state(payload.state, expected_provider="google", config=settings)
+        verify_pkce_challenge(state_data.get("cc"), payload.code_verifier)
         is_mobile = (state_data.get("platform") == "mobile")
 
         try:
@@ -316,7 +216,7 @@ def create_auth_router() -> APIRouter:
         is_mobile = (redirect or platform == "mobile")
         target_platform = "mobile" if is_mobile else "web"
         state = generate_oauth_state(
-            "azure", platform=target_platform, code_challenge=code_challenge
+            "azure", platform=target_platform, code_challenge=code_challenge, config=settings
         )
         try:
             url = azure_auth_service.azure_authorization_url(state, is_mobile=is_mobile)
@@ -337,73 +237,24 @@ def create_auth_router() -> APIRouter:
         error_description: str | None = None,
         db: Session = Depends(get_db),
     ):
-        """Browser redirect handler for Azure AD / Microsoft Entra ID.
+        def _exchange_azure(auth_code: str, mobile_flag: bool, session: Session) -> User:
+            user_info = azure_auth_service.exchange_code_for_azure_user(auth_code, is_mobile=mobile_flag)
+            return azure_auth_service.get_or_create_azure_user(session, user_info)
 
-        Extracts the authorization code and state parameter, validates CSRF & expiration,
-        exchanges code for user profile, and redirects with a short-lived one-time ticket to:
-        - `healthkicks://auth/callback` if target platform is mobile
-        - `{frontend_url}/auth/azure/callback` (or `/login?error=`) for web clients
-        """
-        raw_platform = get_state_platform(state)
-        is_mobile = (raw_platform == "mobile")
-        frontend_base = _get_frontend_base()
-
-        def _redirect_error(message: str) -> RedirectResponse:
-            encoded_msg = quote(message, safe="")
-            if is_mobile:
-                return RedirectResponse(f"healthkicks://auth/callback?error={encoded_msg}")
-            return RedirectResponse(f"{frontend_base}/login?error={encoded_msg}")
-
-        if error:
-            err_detail = error_description or error
-            logger.warning("Azure SSO callback GET received error: %s", err_detail)
-            return _redirect_error(err_detail)
-
-        if not code or not state:
-            return _redirect_error("Paramètres d'autorisation manquants (code ou state absent)")
-
-        try:
-            state_data = verify_oauth_state(state, expected_provider="azure")
-            is_mobile = (state_data.get("platform") == "mobile")
-        except HTTPException as exc:
-            return _redirect_error(exc.detail or "Paramètre state invalide ou expiré")
-
-        try:
-            user_info = azure_auth_service.exchange_code_for_azure_user(code, is_mobile=is_mobile)
-        except azure_auth_service.AzureAuthError as err:
-            logger.error("Azure SSO callback GET: token exchange failed: %s", err)
-            return _redirect_error(str(err))
-        except Exception as err:
-            logger.exception("Azure SSO callback GET: unexpected error: %s", err)
-            return _redirect_error("Erreur serveur lors de l'authentification Azure")
-
-        try:
-            user = azure_auth_service.get_or_create_azure_user(db, user_info)
-            access_token = token_service.issue_access_token(user)
-            refresh_token = token_service.issue_refresh_token(user)
-        except Exception as err:
-            logger.exception("Azure SSO callback GET: user provisioning failed: %s", err)
-            return _redirect_error("Échec de persistance de l'utilisateur")
-
-        ticket = _create_one_time_ticket(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            user_resp=UserResponse.from_user(user),
-            code_challenge=state_data.get("cc"),
-        )
-        logger.info("Azure SSO callback GET: success for user id=%s (is_mobile=%s)", user.id, is_mobile)
-        if is_mobile:
-            return RedirectResponse(
-                f"healthkicks://auth/callback?ticket={ticket}&state={state}"
-            )
-        return RedirectResponse(
-            f"{frontend_base}/auth/azure/callback?ticket={ticket}&state={state}"
+        return _handle_oauth_get_callback(
+            provider="azure",
+            code=code,
+            state=state,
+            error=error,
+            error_description=error_description,
+            db=db,
+            exchange_and_provision=_exchange_azure,
         )
 
     @router.post("/azure/callback", response_model=TokenResponse)
     def azure_callback(payload: AzureCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        state_data = verify_oauth_state(payload.state, expected_provider="azure")
-        _verify_pkce_challenge(state_data.get("cc"), payload.code_verifier)
+        state_data = verify_oauth_state(payload.state, expected_provider="azure", config=settings)
+        verify_pkce_challenge(state_data.get("cc"), payload.code_verifier)
         is_mobile = (state_data.get("platform") == "mobile")
 
         try:
@@ -439,7 +290,7 @@ def create_auth_router() -> APIRouter:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or already consumed authentication ticket",
             )
-        _verify_pkce_challenge(entry.get("code_challenge"), payload.code_verifier)
+        verify_pkce_challenge(entry.get("code_challenge"), payload.code_verifier)
         user_val = entry["user"]
         user_resp = UserResponse(**user_val) if isinstance(user_val, dict) else user_val
         return TokenResponse(
@@ -480,18 +331,13 @@ def create_auth_router() -> APIRouter:
         db: Session = Depends(get_db),
         sts_service: AWSSTSService = Depends(get_sts_service),
     ) -> IoTCredentialsResponse:
-        """Exchange authenticated user session for temporary AWS STS IoT credentials.
-
-        Allows clients (mobile app, web dashboard) to connect directly to AWS IoT Core
-        via WebSockets SigV4, dynamically scoped to the user's bound devices.
-        """
+        """Exchange authenticated user session for temporary AWS STS IoT credentials."""
         requested_device_id = None
         if payload and payload.device_id:
             requested_device_id = payload.device_id.strip()
         elif device_id:
             requested_device_id = device_id.strip()
 
-        # Query user's bound devices from database
         ownerships = (
             db.query(DeviceOwnership)
             .filter_by(user_id=user.id)
