@@ -135,6 +135,12 @@ def test_top_level_metrics_prometheus_format(client: TestClient) -> None:
     assert "healthkicks_uptime_seconds" in text_content
     assert "# HELP healthkicks_http_requests_total" in text_content
     assert 'healthkicks_http_requests_total{status_class="2xx"}' in text_content
+    assert "# HELP healthkicks_http_request_duration_seconds" in text_content
+    assert "# TYPE healthkicks_http_request_duration_seconds histogram" in text_content
+    assert 'healthkicks_http_request_duration_seconds_bucket{le="1.0"}' in text_content
+    assert 'healthkicks_http_request_duration_seconds_bucket{le="+Inf"}' in text_content
+    assert "healthkicks_http_request_duration_seconds_sum" in text_content
+    assert "healthkicks_http_request_duration_seconds_count" in text_content
 
 
 def test_api_v1_metrics_prometheus_query_param(client: TestClient) -> None:

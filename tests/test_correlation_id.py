@@ -48,3 +48,22 @@ def test_correlation_id_fallback_to_request_id(client: TestClient) -> None:
     assert res.status_code == 200
     assert res.headers.get(CORRELATION_HEADER) == test_rid
 
+
+def test_w3c_traceparent_propagation(client: TestClient) -> None:
+    """When client passes standard W3C traceparent header, API parses trace_id and echoes traceparent."""
+    test_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    test_span_id = "00f067aa0ba902b7"
+    raw_traceparent = f"00-{test_trace_id}-{test_span_id}-01"
+
+    res = client.get("/health", headers={"traceparent": raw_traceparent})
+    assert res.status_code == 200
+    assert "traceparent" in res.headers
+    out_tp = res.headers["traceparent"]
+    # Verify traceparent format and that trace_id was preserved
+    parts = out_tp.split("-")
+    assert len(parts) == 4
+    assert parts[0] == "00"
+    assert parts[1] == test_trace_id
+    assert res.headers.get(CORRELATION_HEADER) == test_trace_id
+
+

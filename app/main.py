@@ -28,7 +28,10 @@ from app.core.config import settings
 from app.core.correlation import (
     CORRELATION_HEADER,
     REQUEST_ID_HEADER,
+    TRACEPARENT_HEADER,
     correlation_id_ctx,
+    generate_traceparent,
+    parse_traceparent,
     sanitize_correlation_id,
 )
 from app.core.logging import setup_logging
@@ -94,12 +97,23 @@ app = FastAPI(
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next: Any) -> Response:
-    raw_cid = request.headers.get(CORRELATION_HEADER.lower()) or request.headers.get(REQUEST_ID_HEADER.lower())
-    cid = sanitize_correlation_id(raw_cid)
+    raw_tp = request.headers.get(TRACEPARENT_HEADER.lower())
+    parsed_tp = parse_traceparent(raw_tp)
+    if parsed_tp:
+        trace_id, _, _ = parsed_tp
+        cid = trace_id
+        tp = generate_traceparent(trace_id=trace_id)
+    else:
+        raw_cid = request.headers.get(CORRELATION_HEADER.lower()) or request.headers.get(REQUEST_ID_HEADER.lower())
+        cid = sanitize_correlation_id(raw_cid)
+        trace_id_hex = cid if (len(cid) == 32 and all(c in "0123456789abcdefABCDEF" for c in cid)) else None
+        tp = generate_traceparent(trace_id=trace_id_hex)
+
     token = correlation_id_ctx.set(cid)
     try:
         response = await call_next(request)
         response.headers[CORRELATION_HEADER] = cid
+        response.headers[TRACEPARENT_HEADER] = tp
         return response
     finally:
         correlation_id_ctx.reset(token)

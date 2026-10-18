@@ -7,10 +7,11 @@ import time
 from typing import Any
 
 
+DEFAULT_LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 class MetricsCollector:
     """Thread-safe in-memory operational metrics collector."""
 
-    def __init__(self) -> None:
+    def __init__(self, buckets: tuple[float, ...] = DEFAULT_LATENCY_BUCKETS) -> None:
         self._lock = threading.Lock()
         self._start_time = time.monotonic()
         self._total_requests = 0
@@ -20,10 +21,13 @@ class MetricsCollector:
         self._status_4xx = 0
         self._status_5xx = 0
         self._routes: dict[str, int] = {}
+        self._buckets = buckets
+        self._bucket_counts: dict[float, int] = {b: 0 for b in self._buckets}
 
     def record_request(self, method: str, path: str, status_code: int, duration_ms: float) -> None:
         """Record telemetry for a single HTTP transaction."""
         key = f"{method} {path}"
+        dur_sec = duration_ms / 1000.0
         with self._lock:
             self._total_requests += 1
             self._total_duration_ms += duration_ms
@@ -36,6 +40,10 @@ class MetricsCollector:
                 self._status_4xx += 1
             elif status_code >= 500:
                 self._status_5xx += 1
+
+            for b in self._buckets:
+                if dur_sec <= b:
+                    self._bucket_counts[b] += 1
 
             self._routes[key] = self._routes.get(key, 0) + 1
 
@@ -81,6 +89,17 @@ class MetricsCollector:
             lines.append(f'healthkicks_http_requests_total{{status_class="3xx"}} {self._status_3xx}')
             lines.append(f'healthkicks_http_requests_total{{status_class="4xx"}} {self._status_4xx}')
             lines.append(f'healthkicks_http_requests_total{{status_class="5xx"}} {self._status_5xx}')
+            lines.append("")
+
+            lines.extend([
+                "# HELP healthkicks_http_request_duration_seconds Latency histogram for HTTP requests",
+                "# TYPE healthkicks_http_request_duration_seconds histogram",
+            ])
+            for b in self._buckets:
+                lines.append(f'healthkicks_http_request_duration_seconds_bucket{{le="{b}"}} {self._bucket_counts[b]}')
+            lines.append(f'healthkicks_http_request_duration_seconds_bucket{{le="+Inf"}} {self._total_requests}')
+            lines.append(f'healthkicks_http_request_duration_seconds_sum {round(self._total_duration_ms / 1000.0, 6)}')
+            lines.append(f'healthkicks_http_request_duration_seconds_count {self._total_requests}')
             lines.append("")
 
             avg_latency = (
