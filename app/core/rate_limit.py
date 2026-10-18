@@ -72,8 +72,18 @@ class DynamoDbRateLimiter:
         if self._table is not None:
             return self._table
         try:
-            dynamodb = boto3.resource("dynamodb", region_name=self._config.aws_region)
-            self._table = dynamodb.Table(self._config.dynamodb_rate_limits_table)
+            kwargs: dict[str, Any] = {"region_name": self._config.aws_region}
+            if getattr(self._config, "dynamodb_endpoint_url", None):
+                kwargs["endpoint_url"] = self._config.dynamodb_endpoint_url
+            if getattr(self._config, "aws_access_key_id", None) and getattr(self._config, "aws_secret_access_key", None):
+                kwargs["aws_access_key_id"] = self._config.aws_access_key_id
+                kwargs["aws_secret_access_key"] = self._config.aws_secret_access_key
+
+            dynamodb = boto3.resource("dynamodb", **kwargs)
+            table = dynamodb.Table(self._config.dynamodb_rate_limits_table)
+            if getattr(self._config, "dynamodb_endpoint_url", None):
+                table.load()
+            self._table = table
             return self._table
         except Exception as exc:
             logger.debug("DynamoDB rate limit table unavailable, using in-memory fallback: %s", exc)
@@ -114,6 +124,7 @@ class DynamoDbRateLimiter:
 
     def reset(self) -> None:
         """Reset rate limiter state (clears in-memory fallback records)."""
+        self._dynamo_unavailable = False
         self._fallback.reset()
 
 

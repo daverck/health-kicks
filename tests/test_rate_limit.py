@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, FastAPI, status
 from fastapi.testclient import TestClient
 
-from app.core.rate_limit import SlidingWindowRateLimiter, rate_limit, rate_limiter
+from app.core.rate_limit import DynamoDbRateLimiter, SlidingWindowRateLimiter, rate_limit, rate_limiter
 
 
 def test_sliding_window_unit_logic() -> None:
@@ -54,4 +54,60 @@ def test_fastapi_rate_limit_dependency_blocks_excess_requests() -> None:
     assert "Retry-After" in res3.headers
 
     rate_limiter.reset()
+
+
+def test_dynamodb_rate_limiter_allows_and_blocks() -> None:
+    calls: list[dict] = []
+
+    class MockDynamoTable:
+        def __init__(self):
+            self.count = 0
+
+        def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, ReturnValues):
+            calls.append({"key": Key, "exp": UpdateExpression, "vals": ExpressionAttributeValues})
+            self.count += 1
+            return {"Attributes": {"req_count": self.count}}
+
+    mock_table = MockDynamoTable()
+    limiter = DynamoDbRateLimiter(table=mock_table)
+
+    # 1st request allowed
+    allowed, retry = limiter.is_allowed("user:123", max_requests=2, window_seconds=60.0)
+    assert allowed is True
+    assert retry == 0
+    assert len(calls) == 1
+    assert "user:123:" in calls[0]["key"]["key"]
+    assert calls[0]["vals"][":inc"] == 1
+    assert calls[0]["vals"][":exp"] > 0
+
+    # 2nd request allowed
+    allowed, retry = limiter.is_allowed("user:123", max_requests=2, window_seconds=60.0)
+    assert allowed is True
+    assert retry == 0
+
+    # 3rd request blocked
+    allowed, retry = limiter.is_allowed("user:123", max_requests=2, window_seconds=60.0)
+    assert allowed is False
+    assert retry >= 1
+
+
+def test_dynamodb_rate_limiter_falls_back_on_error() -> None:
+    class FailingDynamoTable:
+        def update_item(self, **kwargs):
+            raise RuntimeError("DynamoDB service unreachable")
+
+    limiter = DynamoDbRateLimiter(table=FailingDynamoTable())
+
+    # Fallback to in-memory should succeed
+    allowed, retry = limiter.is_allowed("fallback_key", max_requests=2, window_seconds=60.0)
+    assert allowed is True
+
+    allowed, retry = limiter.is_allowed("fallback_key", max_requests=2, window_seconds=60.0)
+    assert allowed is True
+
+    # Exceeding fallback limit returns False
+    allowed, retry = limiter.is_allowed("fallback_key", max_requests=2, window_seconds=60.0)
+    assert allowed is False
+    assert retry >= 1
+
 

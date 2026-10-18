@@ -55,6 +55,7 @@ class Settings:
     dynamodb_telemetry_table: str = "healthkicks_telemetry"
     dynamodb_oauth_tickets_table: str = "healthkicks_oauth_tickets"
     dynamodb_rate_limits_table: str = "healthkicks_rate_limits"
+    dynamodb_endpoint_url: str | None = None
     # Database pool resilience & configuration
     database_pool_size: int = 5
     database_max_overflow: int = 10
@@ -173,6 +174,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             "dynamodb_rate_limits_table",
             _nested_value(yaml_values, "aws", "rate_limits_table", defaults.dynamodb_rate_limits_table),
         ),
+        "dynamodb_endpoint_url": yaml_values.get(
+            "dynamodb_endpoint_url",
+            _nested_value(yaml_values, "aws", "dynamodb_endpoint_url", defaults.dynamodb_endpoint_url),
+        ),
         # Database pool resilience
         "database_pool_size": int(
             _nested_value(yaml_values, "database", "pool_size", defaults.database_pool_size)
@@ -277,6 +282,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         ),
         "dynamodb_rate_limits_table": (
             ("HEALTHKICKS_DYNAMODB_RATE_LIMITS_TABLE", "DYNAMODB_RATE_LIMITS_TABLE"),
+            str,
+        ),
+        "dynamodb_endpoint_url": (
+            ("HEALTHKICKS_DYNAMODB_ENDPOINT_URL", "DYNAMODB_ENDPOINT_URL"),
             str,
         ),
         # Database pool resilience
