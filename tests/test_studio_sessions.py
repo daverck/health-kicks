@@ -245,6 +245,49 @@ def test_list_sessions_invalid_date_range_400(client, user_a) -> None:
     assert res.json()["detail"] == "start_date must be before or equal to end_date"
 
 
+def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
+    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 6, 1, 10, 0, tzinfo=UTC))
+    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 6, 2, 10, 0, tzinfo=UTC))
+    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="stairs", created_at=datetime(2026, 6, 3, 10, 0, tzinfo=UTC))
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
+
+    # Page 1 with size 1
+    res1 = client.get("/api/v1/studio/sessions?size=1", headers=_auth_headers(user_a))
+    assert res1.status_code == 200
+    data1 = res1.json()
+    assert len(data1["items"]) == 1
+    assert data1["items"][0]["id"] == str(s3.id)
+    assert data1["next_cursor"] is not None
+
+    # Page 2 via next_cursor
+    cursor1 = data1["next_cursor"]
+    res2 = client.get(f"/api/v1/studio/sessions?cursor={cursor1}&size=1", headers=_auth_headers(user_a))
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert len(data2["items"]) == 1
+    assert data2["items"][0]["id"] == str(s2.id)
+    assert data2["next_cursor"] is not None
+
+    # Page 3 via next_cursor
+    cursor2 = data2["next_cursor"]
+    res3 = client.get(f"/api/v1/studio/sessions?cursor={cursor2}&size=1", headers=_auth_headers(user_a))
+    assert res3.status_code == 200
+    data3 = res3.json()
+    assert len(data3["items"]) == 1
+    assert data3["items"][0]["id"] == str(s1.id)
+    assert data3["next_cursor"] is None
+
+
+def test_list_sessions_invalid_cursor_400(client, user_a) -> None:
+    res = client.get(
+        "/api/v1/studio/sessions?cursor=invalid-not-base64",
+        headers=_auth_headers(user_a),
+    )
+    assert res.status_code == 400
+    assert "Invalid pagination cursor" in res.json()["detail"]
+
+
 # ---------------------------------------------------------------------------
 # Readings Inspection Tests (GET /api/v1/studio/sessions/{session_id}/readings)
 # ---------------------------------------------------------------------------

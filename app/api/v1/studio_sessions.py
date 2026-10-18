@@ -1,10 +1,11 @@
-"""FastAPI router for Studio sessions history, curation, and IMU inspection."""
-
+import base64
 import logging
 from datetime import datetime
+from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import RequireClinicianOrAdmin
@@ -26,6 +27,22 @@ from app.services.telemetry_service import TelemetryService
 logger = logging.getLogger(__name__)
 
 
+def encode_cursor(created_at: datetime, session_id: UUID) -> str:
+    """Encode created_at timestamp and session UUID into an opaque URL-safe base64 cursor."""
+    raw = f"{created_at.isoformat()}|{str(session_id)}"
+    return base64.urlsafe_b64encode(raw.encode("ascii")).decode("ascii")
+
+
+def decode_cursor(cursor_str: str) -> tuple[datetime, UUID] | None:
+    """Safely decode an opaque cursor into (created_at, session_id) or return None."""
+    try:
+        raw = base64.urlsafe_b64decode(cursor_str.encode("ascii")).decode("ascii")
+        ts_part, id_part = raw.split("|", 1)
+        return datetime.fromisoformat(ts_part), UUID(id_part)
+    except Exception:
+        return None
+
+
 def create_studio_sessions_router(
     service: TelemetryService | None = None,
 ) -> APIRouter:
@@ -38,6 +55,7 @@ def create_studio_sessions_router(
         user: RequireClinicianOrAdmin,
         page: int = Query(default=1, ge=1),
         size: int = Query(default=20, ge=1, le=100),
+        cursor: str | None = Query(default=None, description="Opaque cursor for keyset pagination"),
         label: str | None = Query(default=None, description="Single activity label or comma-separated list of labels"),
         device_id: str | None = Query(default=None, description="Single device ID or comma-separated list of device IDs"),
         user_id: str | None = Query(default=None, description="Single user ID or comma-separated list of user IDs"),
@@ -47,7 +65,7 @@ def create_studio_sessions_router(
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
     ) -> PaginatedSessionsResponse:
-        """List studio sessions with RBAC, pagination, and multi-value filters."""
+        """List studio sessions with RBAC, cursor keyset pagination, and multi-value filters."""
         raw_end = request.query_params.get("end_date") if request is not None else None
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
@@ -84,12 +102,45 @@ def create_studio_sessions_router(
             query = query.filter(StudioSession.created_at <= norm_end)
 
         total = query.count()
-        sessions = (
-            query.order_by(StudioSession.created_at.desc())
-            .offset((page - 1) * size)
-            .limit(size)
-            .all()
-        )
+        next_cursor: str | None = None
+
+        if cursor is not None:
+            decoded = decode_cursor(cursor)
+            if decoded is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid pagination cursor format",
+                )
+            cursor_dt, cursor_id = decoded
+            query = query.filter(
+                or_(
+                    StudioSession.created_at < cursor_dt,
+                    and_(
+                        StudioSession.created_at == cursor_dt,
+                        StudioSession.id < cursor_id,
+                    ),
+                )
+            )
+            # Query size + 1 to detect if next page exists without full table count
+            sessions_plus_one = (
+                query.order_by(StudioSession.created_at.desc(), StudioSession.id.desc())
+                .limit(size + 1)
+                .all()
+            )
+            if len(sessions_plus_one) > size:
+                sessions = sessions_plus_one[:size]
+                next_cursor = encode_cursor(sessions[-1].created_at, sessions[-1].id)
+            else:
+                sessions = sessions_plus_one
+        else:
+            sessions = (
+                query.order_by(StudioSession.created_at.desc(), StudioSession.id.desc())
+                .offset((page - 1) * size)
+                .limit(size)
+                .all()
+            )
+            if sessions and (page * size) < total:
+                next_cursor = encode_cursor(sessions[-1].created_at, sessions[-1].id)
 
         items = [to_session_summary(s, is_admin=user.is_admin, current_user_id=user.id) for s in sessions]
         return PaginatedSessionsResponse(
@@ -97,6 +148,7 @@ def create_studio_sessions_router(
             total=total,
             page=page,
             size=size,
+            next_cursor=next_cursor,
         )
 
     @router.get("/authors", response_model=list[StudioAuthorSummary])

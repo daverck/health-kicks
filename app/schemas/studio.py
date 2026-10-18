@@ -62,6 +62,8 @@ class PaginatedSessionsResponse(StrictModel):
     total: int
     page: int
     size: int
+    next_cursor: str | None = Field(default=None, description="Opaque cursor for keyset pagination of next page")
+    prev_cursor: str | None = Field(default=None, description="Opaque cursor for keyset pagination of previous page")
 
 
 class StudioAuthorSummary(StrictModel):
