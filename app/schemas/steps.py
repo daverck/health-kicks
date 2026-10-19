@@ -60,13 +60,9 @@ class DailyStepsSyncPayload(BaseModel):
         ...,
         description="Calendar date of the recorded steps (YYYY-MM-DD)",
     )
-    activities: list[ActivityStepItem] = Field(
+    hourly_steps: list[HourlyActivityStepItem] = Field(
         ...,
-        description="List of step counts broken down by activity type",
-    )
-    hourly_steps: list[HourlyActivityStepItem] | None = Field(
-        default=None,
-        description="Optional fine-grained hourly step counts recorded throughout the day",
+        description="Fine-grained hourly step counts recorded throughout the day",
     )
 
     model_config = ConfigDict(from_attributes=True)

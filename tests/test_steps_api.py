@@ -115,11 +115,11 @@ def test_sync_steps_nominal(client, auth_headers_regular, db_session) -> None:
     payload = {
         "device_id": "HK-SHOE-001",
         "date": "2026-09-22",
-        "activities": [
-            {"activity_type": "walk", "step_count": 4120},
-            {"activity_type": "run", "step_count": 1850},
-            {"activity_type": "stairs", "step_count": 310},
-            {"activity_type": "unclassified", "step_count": 45},
+        "hourly_steps": [
+            {"hour": 8, "activity_type": "walk", "step_count": 4120},
+            {"hour": 9, "activity_type": "run", "step_count": 1850},
+            {"hour": 10, "activity_type": "stairs", "step_count": 310},
+            {"hour": 11, "activity_type": "unclassified", "step_count": 45},
         ],
     }
 
@@ -141,9 +141,9 @@ def test_sync_steps_idempotency_and_update(client, auth_headers_regular, db_sess
     initial_payload = {
         "device_id": "HK-SHOE-001",
         "date": "2026-09-22",
-        "activities": [
-            {"activity_type": "walk", "step_count": 1000},
-            {"activity_type": "run", "step_count": 500},
+        "hourly_steps": [
+            {"hour": 8, "activity_type": "walk", "step_count": 1000},
+            {"hour": 9, "activity_type": "run", "step_count": 500},
         ],
     }
     res1 = client.post("/api/v1/steps/sync", json=initial_payload, headers=auth_headers_regular)
@@ -153,10 +153,10 @@ def test_sync_steps_idempotency_and_update(client, auth_headers_regular, db_sess
     updated_payload = {
         "device_id": "HK-SHOE-001",
         "date": "2026-09-22",
-        "activities": [
-            {"activity_type": "walk", "step_count": 2500},
-            {"activity_type": "run", "step_count": 800},
-            {"activity_type": "stairs", "step_count": 150},
+        "hourly_steps": [
+            {"hour": 8, "activity_type": "walk", "step_count": 2500},
+            {"hour": 9, "activity_type": "run", "step_count": 800},
+            {"hour": 10, "activity_type": "stairs", "step_count": 150},
         ],
     }
     res2 = client.post("/api/v1/steps/sync", json=updated_payload, headers=auth_headers_regular)
@@ -177,9 +177,9 @@ def test_get_steps_history_dynamic_aggregation(client, auth_headers_regular) -> 
         json={
             "device_id": "HK-SHOE-001",
             "date": "2026-09-20",
-            "activities": [
-                {"activity_type": "walk", "step_count": 3000},
-                {"activity_type": "run", "step_count": 2000},
+            "hourly_steps": [
+                {"hour": 8, "activity_type": "walk", "step_count": 3000},
+                {"hour": 9, "activity_type": "run", "step_count": 2000},
             ],
         },
         headers=auth_headers_regular,
@@ -191,9 +191,9 @@ def test_get_steps_history_dynamic_aggregation(client, auth_headers_regular) -> 
         json={
             "device_id": "HK-SHOE-001",
             "date": "2026-09-21",
-            "activities": [
-                {"activity_type": "walk", "step_count": 4500},
-                {"activity_type": "stairs", "step_count": 500},
+            "hourly_steps": [
+                {"hour": 10, "activity_type": "walk", "step_count": 4500},
+                {"hour": 11, "activity_type": "stairs", "step_count": 500},
             ],
         },
         headers=auth_headers_regular,
@@ -233,7 +233,7 @@ def test_get_steps_history_invalid_range(client, auth_headers_regular) -> None:
 
 def test_steps_unauthenticated_access(client) -> None:
     """Test 401 unauthorized when accessing steps endpoints without token."""
-    res_sync = client.post("/api/v1/steps/sync", json={"device_id": "HK-1", "date": "2026-09-22", "activities": []})
+    res_sync = client.post("/api/v1/steps/sync", json={"device_id": "HK-1", "date": "2026-09-22", "hourly_steps": []})
     assert res_sync.status_code == 401
 
     res_hist = client.get("/api/v1/steps/history?device_id=HK-1")
@@ -247,7 +247,7 @@ def test_steps_rbac_isolation(client, auth_headers_regular, auth_headers_other, 
         json={
             "device_id": "HK-SHARED-DEV",
             "date": "2026-09-22",
-            "activities": [{"activity_type": "walk", "step_count": 5000}],
+            "hourly_steps": [{"hour": 8, "activity_type": "walk", "step_count": 5000}],
         },
         headers=auth_headers_regular,
     )
@@ -271,17 +271,17 @@ def test_steps_rbac_isolation(client, auth_headers_regular, auth_headers_other, 
 
 
 def test_get_hourly_steps_populated(client, auth_headers_regular) -> None:
-    """Test retrieving hourly step breakdown when daily steps exist."""
+    """Test retrieving hourly step breakdown when hourly steps exist."""
     # Sync steps for a test day
     client.post(
         "/api/v1/steps/sync",
         json={
             "device_id": "HK-SHOE-001",
             "date": "2026-10-06",
-            "activities": [
-                {"activity_type": "walk", "step_count": 4500},
-                {"activity_type": "run", "step_count": 1200},
-                {"activity_type": "stairs", "step_count": 300},
+            "hourly_steps": [
+                {"hour": 8, "activity_type": "walk", "step_count": 4500},
+                {"hour": 9, "activity_type": "run", "step_count": 1200},
+                {"hour": 10, "activity_type": "stairs", "step_count": 300},
             ],
         },
         headers=auth_headers_regular,
@@ -297,14 +297,13 @@ def test_get_hourly_steps_populated(client, auth_headers_regular) -> None:
     assert data["date"] == "2026-10-06"
     assert len(data["hourly_data"]) == 24
 
-    # Verify that the sum of hourly steps exactly equals the daily total
-    total_hourly_walk = sum(item["by_activity"].get("walk", 0) for item in data["hourly_data"])
-    total_hourly_run = sum(item["by_activity"].get("run", 0) for item in data["hourly_data"])
-    total_hourly_stairs = sum(item["by_activity"].get("stairs", 0) for item in data["hourly_data"])
-
-    assert total_hourly_walk == 4500
-    assert total_hourly_run == 1200
-    assert total_hourly_stairs == 300
+    assert data["hourly_data"][8]["total_steps"] == 4500
+    assert data["hourly_data"][8]["by_activity"] == {"walk": 4500}
+    assert data["hourly_data"][9]["total_steps"] == 1200
+    assert data["hourly_data"][9]["by_activity"] == {"run": 1200}
+    assert data["hourly_data"][10]["total_steps"] == 300
+    assert data["hourly_data"][10]["by_activity"] == {"stairs": 300}
+    assert data["hourly_data"][11]["total_steps"] == 0
 
     total_all_hourly = sum(item["total_steps"] for item in data["hourly_data"])
     assert total_all_hourly == 6000
@@ -343,10 +342,6 @@ def test_sync_and_get_real_hourly_steps(client, auth_headers_regular, db_session
     payload = {
         "device_id": "HK-SHOE-001",
         "date": "2026-10-19",
-        "activities": [
-            {"activity_type": "walk", "step_count": 350},
-            {"activity_type": "run", "step_count": 150},
-        ],
         "hourly_steps": [
             {"hour": 14, "activity_type": "walk", "step_count": 150},
             {"hour": 15, "activity_type": "walk", "step_count": 200},
@@ -357,7 +352,7 @@ def test_sync_and_get_real_hourly_steps(client, auth_headers_regular, db_session
     res_sync = client.post("/api/v1/steps/sync", json=payload, headers=auth_headers_regular)
     assert res_sync.status_code == 200
     assert res_sync.json()["status"] == "synchronized"
-    assert res_sync.json()["synced_records"] == 5
+    assert res_sync.json()["synced_records"] == 3
 
     h_records = db_session.query(HourlyActivityStep).filter_by(device_id="HK-SHOE-001").all()
     assert len(h_records) == 3
@@ -383,5 +378,6 @@ def test_sync_and_get_real_hourly_steps(client, auth_headers_regular, db_session
     # Other hours must be exactly 0
     assert hourly_items[7]["total_steps"] == 0
     assert hourly_items[18]["total_steps"] == 0
+
 
 
