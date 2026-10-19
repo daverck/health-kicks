@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyActivityStep, UserRole
+from app.db.models import DailyActivityStep, HourlyActivityStep, UserRole
 from app.schemas.steps import (
     DailyStepsHistoryResponse,
     DailyStepsSummary,
@@ -49,6 +49,33 @@ def sync_daily_steps(db: Session, user_id: int, payload: DailyStepsSyncPayload) 
             )
             db.add(new_record)
         synced_count += 1
+
+    if payload.hourly_steps:
+        for hourly_item in payload.hourly_steps:
+            h_stmt = select(HourlyActivityStep).where(
+                HourlyActivityStep.device_id == payload.device_id,
+                HourlyActivityStep.date == payload.date,
+                HourlyActivityStep.hour == hourly_item.hour,
+                HourlyActivityStep.activity_type == hourly_item.activity_type,
+            )
+            existing_h = db.execute(h_stmt).scalar_one_or_none()
+
+            if existing_h:
+                existing_h.step_count = hourly_item.step_count
+                existing_h.user_id = user_id
+                existing_h.updated_at = now_utc
+            else:
+                new_h = HourlyActivityStep(
+                    user_id=user_id,
+                    device_id=payload.device_id,
+                    date=payload.date,
+                    hour=hourly_item.hour,
+                    activity_type=hourly_item.activity_type,
+                    step_count=hourly_item.step_count,
+                    updated_at=now_utc,
+                )
+                db.add(new_h)
+            synced_count += 1
 
     db.commit()
     return synced_count
@@ -165,9 +192,41 @@ def get_hourly_steps(
 ) -> HourlyStepsResponse:
     """Retrieve 24-hour step breakdown for a given device and calendar date.
 
-    Distributes daily steps recorded per activity realistically across waking hours,
-    guaranteeing that the sum of hourly steps for each activity exactly equals the recorded daily total.
+    If fine-grained hourly steps are recorded, returns the exact measured distribution.
+    Otherwise, falls back to deterministic diurnal distribution of recorded daily steps.
     """
+    stmt_hourly = select(HourlyActivityStep).where(
+        HourlyActivityStep.device_id == device_id,
+        HourlyActivityStep.date == target_date,
+    )
+    if user_role not in (UserRole.admin, UserRole.clinician):
+        stmt_hourly = stmt_hourly.where(HourlyActivityStep.user_id == user_id)
+
+    hourly_records = db.execute(stmt_hourly).scalars().all()
+
+    if hourly_records:
+        hourly_data_by_hour: dict[int, dict[str, int]] = {h: {} for h in range(24)}
+        for rec in hourly_records:
+            if 0 <= rec.hour <= 23:
+                hourly_data_by_hour[rec.hour][rec.activity_type] = rec.step_count
+
+        items: list[HourlyStepItem] = []
+        for h in range(24):
+            by_act = hourly_data_by_hour[h]
+            tot = sum(by_act.values())
+            items.append(
+                HourlyStepItem(
+                    hour=h,
+                    total_steps=tot,
+                    by_activity=by_act,
+                )
+            )
+        return HourlyStepsResponse(
+            device_id=device_id,
+            date=target_date,
+            hourly_data=items,
+        )
+
     stmt = select(DailyActivityStep).where(
         DailyActivityStep.device_id == device_id,
         DailyActivityStep.date == target_date,

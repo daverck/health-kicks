@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     UniqueConstraint,
     Uuid,
@@ -180,6 +181,32 @@ class DailyActivityStep(Base):
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     device_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    activity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    user: Mapped["User"] = relationship("User", lazy="joined")
+
+
+class HourlyActivityStep(Base):
+    """Hourly step counts aggregated per activity type, hour and device."""
+
+    __tablename__ = "hourly_activity_steps"
+    __table_args__ = (
+        UniqueConstraint("device_id", "date", "hour", "activity_type", name="uq_device_date_hour_activity"),
+        Index("ix_hourly_activity_steps_user_date", "user_id", "date"),
+        Index("ix_hourly_activity_steps_device_date", "device_id", "date"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    hour: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     activity_type: Mapped[str] = mapped_column(String(32), nullable=False)
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(

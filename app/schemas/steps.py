@@ -23,6 +23,30 @@ class ActivityStepItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class HourlyActivityStepItem(BaseModel):
+    """Hourly step count payload for a specific hour and activity type."""
+
+    hour: int = Field(
+        ...,
+        description="Hour of the day (0 to 23)",
+        ge=0,
+        le=23,
+    )
+    activity_type: str = Field(
+        ...,
+        description="Activity type name (e.g., 'walk', 'run', 'stairs', 'unclassified')",
+        min_length=1,
+        max_length=32,
+    )
+    step_count: int = Field(
+        ...,
+        description="Non-negative accumulated step count for this hour and activity",
+        ge=0,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class DailyStepsSyncPayload(BaseModel):
     """Payload to synchronize daily step counts from an edge device/mobile app."""
 
@@ -39,6 +63,10 @@ class DailyStepsSyncPayload(BaseModel):
     activities: list[ActivityStepItem] = Field(
         ...,
         description="List of step counts broken down by activity type",
+    )
+    hourly_steps: list[HourlyActivityStepItem] | None = Field(
+        default=None,
+        description="Optional fine-grained hourly step counts recorded throughout the day",
     )
 
     model_config = ConfigDict(from_attributes=True)

@@ -335,3 +335,53 @@ def test_get_hourly_steps_unauthorized_and_forbidden(client, auth_headers_other)
     )
     assert res_forbid.status_code == 403
 
+
+def test_sync_and_get_real_hourly_steps(client, auth_headers_regular, db_session) -> None:
+    """Test synchronizing fine-grained hourly steps and verifying exact hourly retrieval."""
+    from app.db.models import HourlyActivityStep
+
+    payload = {
+        "device_id": "HK-SHOE-001",
+        "date": "2026-10-19",
+        "activities": [
+            {"activity_type": "walk", "step_count": 350},
+            {"activity_type": "run", "step_count": 150},
+        ],
+        "hourly_steps": [
+            {"hour": 14, "activity_type": "walk", "step_count": 150},
+            {"hour": 15, "activity_type": "walk", "step_count": 200},
+            {"hour": 15, "activity_type": "run", "step_count": 150},
+        ],
+    }
+
+    res_sync = client.post("/api/v1/steps/sync", json=payload, headers=auth_headers_regular)
+    assert res_sync.status_code == 200
+    assert res_sync.json()["status"] == "synchronized"
+    assert res_sync.json()["synced_records"] == 5
+
+    h_records = db_session.query(HourlyActivityStep).filter_by(device_id="HK-SHOE-001").all()
+    assert len(h_records) == 3
+
+    res_hourly = client.get(
+        "/api/v1/steps/hourly?device_id=HK-SHOE-001&date=2026-10-19",
+        headers=auth_headers_regular,
+    )
+    assert res_hourly.status_code == 200
+    hourly_items = res_hourly.json()["hourly_data"]
+    assert len(hourly_items) == 24
+
+    item_14 = hourly_items[14]
+    assert item_14["hour"] == 14
+    assert item_14["total_steps"] == 150
+    assert item_14["by_activity"] == {"walk": 150}
+
+    item_15 = hourly_items[15]
+    assert item_15["hour"] == 15
+    assert item_15["total_steps"] == 350
+    assert item_15["by_activity"] == {"walk": 200, "run": 150}
+
+    # Other hours must be exactly 0
+    assert hourly_items[7]["total_steps"] == 0
+    assert hourly_items[18]["total_steps"] == 0
+
+
