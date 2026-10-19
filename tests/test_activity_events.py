@@ -603,4 +603,48 @@ def test_list_activities_unowned_device_forbidden(client, db_session) -> None:
     assert res.status_code == 403
 
 
+def test_ingest_raw_telemetry_zero_samples_ignored(client, db_session, monkeypatch):
+    """Verify /api/v1/ingest/telemetry/raw ignores payloads with 0 samples and creates no session in Aurora."""
+    import uuid
+    from app.db.models import StudioSession, User, UserRole
+
+    monkeypatch.setattr(
+        "app.api.v1.ingestion.settings",
+        ingestion_settings.__class__(ingest_token="secret-test-token", environment="production"),
+    )
+
+    user = User(
+        google_sub="sub-zero-samples-user",
+        email="zero@example.com",
+        name="Zero Samples User",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.add(DeviceOwnership(user_id=user.id, device_id="HK-ZERO"))
+    db_session.commit()
+
+    sess_id = uuid.uuid4()
+    raw_batch_payload = {
+        "device_id": "HK-ZERO",
+        "session_id": str(sess_id),
+        "label": "walk",
+        "sample_count": 0,
+        "readings": [],
+    }
+
+    headers = {"X-HealthKicks-Ingest-Token": "secret-test-token"}
+    res = client.post("/api/v1/ingest/telemetry/raw", json=raw_batch_payload, headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ignored"
+    assert data["session_id"] is None
+    assert data["sample_count"] == 0
+
+    # Ensure no session was inserted into Aurora
+    assert db_session.query(StudioSession).filter_by(id=sess_id).first() is None
+
+
+
 

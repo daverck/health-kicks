@@ -193,21 +193,6 @@ def create_telemetry_router(
                 detail="Failed to dispatch command to device",
             )
 
-        # Immediate PostgreSQL persistence
-        session_record = StudioSession(
-            id=uuid.UUID(session_id),
-            user_id=user.id,
-            device_id=device_id,
-            label=command.label,
-            duration_sec=command.duration_sec,
-            sample_count=0,
-            is_validated=False,
-            created_at=datetime.now(UTC),
-        )
-        db.add(session_record)
-        db.commit()
-        db.refresh(session_record)
-
         return StudioStartResponse(
             status="command_dispatched",
             device_id=device_id,

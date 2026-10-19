@@ -120,6 +120,8 @@ def ingest_raw_telemetry(
 
     readings = payload.get("readings") or []
     sample_count = int(payload.get("sample_count", len(readings)))
+    if sample_count <= 0:
+        return None
 
     studio_session = session.query(StudioSession).filter_by(id=sess_uuid).first()
     if studio_session is not None:
