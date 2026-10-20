@@ -47,6 +47,17 @@ class StudioSessionDetail(StudioSessionSummary):
     """Detailed metadata view of a Studio capture session."""
 
 
+class StudioSessionTrimPayload(StrictModel):
+    """Payload to shorten an unvalidated Studio recording."""
+
+    new_duration_sec: float = Field(
+        ...,
+        gt=0.5,
+        le=30.0,
+        description="Nouvelle durée tronquée de la session en secondes",
+    )
+
+
 
 class StudioSessionUpdatePayload(StrictModel):
     """Payload to update the label or confirmation status of a Studio recording."""
@@ -85,4 +96,3 @@ class StudioSessionDatasetRecord(StrictModel):
     duration_sec: float = 0.0
     sample_count: int = 0
     readings: list[dict[str, Any]] = Field(default_factory=list)
-

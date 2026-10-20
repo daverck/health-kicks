@@ -2928,6 +2928,64 @@
           }
         }
       }
+    },
+    "/api/v1/studio/sessions/{session_id}/trim": {
+      "patch": {
+        "tags": [
+          "Studio Sessions"
+        ],
+        "summary": "Trim Session",
+        "description": "Permanently remove telemetry after a requested duration for an unvalidated session.",
+        "operationId": "trim_session_api_v1_studio_sessions__session_id__trim_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioSessionTrimPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioSessionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4859,6 +4917,24 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "StudioSessionTrimPayload": {
+        "properties": {
+          "new_duration_sec": {
+            "type": "number",
+            "maximum": 30.0,
+            "exclusiveMinimum": 0.5,
+            "title": "New Duration Sec",
+            "description": "Nouvelle dur\u00e9e tronqu\u00e9e de la session en secondes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "new_duration_sec"
+        ],
+        "title": "StudioSessionTrimPayload",
+        "description": "Payload to shorten an unvalidated Studio recording."
       }
     },
     "securitySchemes": {

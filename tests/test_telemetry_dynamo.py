@@ -228,6 +228,41 @@ def test_delete_session_readings_empty(telemetry_service, mock_table) -> None:
     mock_table.batch_writer.assert_not_called()
 
 
+def test_trim_session_readings_deletes_only_frames_after_cutoff(
+    telemetry_service, mock_table
+) -> None:
+    mock_table.query.return_value = {
+        "Items": [
+            {"device_id": "HK-1", "timestamp": 2_500_001},
+            {"device_id": "HK-1", "timestamp": 1_000_000},
+            {"device_id": "HK-1", "timestamp": 2_000_000},
+            {"device_id": "HK-1", "timestamp": 1_500_000},
+        ]
+    }
+    batch_mock = MagicMock()
+    mock_table.batch_writer.return_value.__enter__.return_value = batch_mock
+
+    retained_count = telemetry_service.trim_session_readings(
+        "HK-1", "sess-trim", new_duration_sec=1.0
+    )
+
+    assert retained_count == 3
+    batch_mock.delete_item.assert_called_once_with(
+        Key={"device_id": "HK-1", "timestamp": 2_500_001}
+    )
+
+
+def test_trim_session_readings_empty(telemetry_service, mock_table) -> None:
+    mock_table.query.return_value = {"Items": []}
+
+    retained_count = telemetry_service.trim_session_readings(
+        "HK-1", "empty-session", new_duration_sec=1.0
+    )
+
+    assert retained_count == 0
+    mock_table.batch_writer.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # API Route Tests
 # ---------------------------------------------------------------------------

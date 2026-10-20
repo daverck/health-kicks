@@ -160,6 +160,67 @@ class TelemetryService:
         )
         return len(items_to_delete)
 
+    def trim_session_readings(
+        self,
+        device_id: str,
+        session_id: str,
+        new_duration_sec: float,
+    ) -> int:
+        """Delete session telemetry after its requested duration and return retained count."""
+        table = self._get_table()
+        items: list[dict[str, Any]] = []
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": Key("device_id").eq(device_id),
+            "FilterExpression": Attr("session_id").eq(session_id),
+            "ProjectionExpression": "device_id, #ts",
+            "ExpressionAttributeNames": {"#ts": "timestamp"},
+        }
+
+        while True:
+            try:
+                response = table.query(**query_kwargs)
+            except (BotoCoreError, ClientError) as error:
+                logger.error(
+                    "DynamoDB query failed while trimming session %s: %s",
+                    session_id,
+                    error,
+                )
+                raise
+
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+
+        if not items:
+            return 0
+
+        items.sort(key=lambda item: int(item["timestamp"]))
+        cutoff_timestamp = int(items[0]["timestamp"]) + round(new_duration_sec * 1_000_000)
+        items_to_delete = [
+            item for item in items if int(item["timestamp"]) > cutoff_timestamp
+        ]
+
+        if items_to_delete:
+            with table.batch_writer() as batch:
+                for item in items_to_delete:
+                    batch.delete_item(
+                        Key={
+                            "device_id": item["device_id"],
+                            "timestamp": item["timestamp"],
+                        }
+                    )
+
+        retained_count = len(items) - len(items_to_delete)
+        logger.info(
+            "Trimmed session %s to %.3f seconds, retaining %d telemetry points",
+            session_id,
+            new_duration_sec,
+            retained_count,
+        )
+        return retained_count
+
     def get_timerange_readings(
         self,
         device_id: str,
@@ -311,5 +372,3 @@ class TelemetryService:
             session_id,
         )
         return len(items_to_update)
-
-

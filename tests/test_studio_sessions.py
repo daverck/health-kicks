@@ -525,6 +525,30 @@ def test_confirm_session_success(client, user_a, db_session) -> None:
     assert s.is_validated is True
 
 
+def test_update_session_can_revert_validation(client, user_a, db_session) -> None:
+    sess_id = uuid.uuid4()
+    session = StudioSession(
+        id=sess_id,
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        is_validated=True,
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}",
+        json={"is_validated": False},
+        headers=_auth_headers(user_a),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_validated"] is False
+    db_session.refresh(session)
+    assert session.is_validated is False
+
+
 def test_confirm_session_admin_allowed(client, admin_user, user_a, db_session) -> None:
     """An admin can confirm/validate another user's session."""
     sess_id = uuid.uuid4()
@@ -616,6 +640,139 @@ def test_patch_session_update_is_validated_via_payload(client, user_a, db_sessio
 
     db_session.refresh(s)
     assert s.is_validated is True
+
+
+def test_trim_session_updates_duration_and_sample_count(
+    client, user_a, mock_telemetry_service, db_session
+) -> None:
+    sess_id = uuid.uuid4()
+    session = StudioSession(
+        id=sess_id,
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="sit_down",
+        sample_count=250,
+        duration_sec=5.0,
+        is_validated=False,
+    )
+    db_session.add(session)
+    db_session.commit()
+    mock_telemetry_service.trim_session_readings.return_value = 100
+
+    response = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}/trim",
+        json={"new_duration_sec": 2.0},
+        headers=_auth_headers(user_a),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["duration_sec"] == 2.0
+    assert response.json()["sample_count"] == 100
+    mock_telemetry_service.trim_session_readings.assert_called_once_with(
+        device_id="HK-1",
+        session_id=str(sess_id),
+        new_duration_sec=2.0,
+    )
+    db_session.refresh(session)
+    assert session.duration_sec == 2.0
+    assert session.sample_count == 100
+
+
+def test_trim_session_rejects_validated_session(
+    client, user_a, mock_telemetry_service, db_session
+) -> None:
+    sess_id = uuid.uuid4()
+    session = StudioSession(
+        id=sess_id,
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        duration_sec=5.0,
+        is_validated=True,
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}/trim",
+        json={"new_duration_sec": 2.0},
+        headers=_auth_headers(user_a),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Impossible d'écourter une session déjà confirmée/validée"
+    mock_telemetry_service.trim_session_readings.assert_not_called()
+
+
+@pytest.mark.parametrize("new_duration_sec", [5.0, 6.0])
+def test_trim_session_requires_shorter_duration(
+    client, user_a, mock_telemetry_service, db_session, new_duration_sec
+) -> None:
+    sess_id = uuid.uuid4()
+    session = StudioSession(
+        id=sess_id,
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        duration_sec=5.0,
+        is_validated=False,
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}/trim",
+        json={"new_duration_sec": new_duration_sec},
+        headers=_auth_headers(user_a),
+    )
+
+    assert response.status_code == 400
+    mock_telemetry_service.trim_session_readings.assert_not_called()
+
+
+def test_trim_session_rejects_invalid_duration_payload(client, user_a, db_session) -> None:
+    session = StudioSession(
+        id=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        duration_sec=5.0,
+        is_validated=False,
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/studio/sessions/{session.id}/trim",
+        json={"new_duration_sec": 0.5},
+        headers=_auth_headers(user_a),
+    )
+
+    assert response.status_code == 422
+
+
+def test_trim_session_forbidden_for_other_user(
+    client, user_a, user_b, mock_telemetry_service, db_session
+) -> None:
+    session = StudioSession(
+        id=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        duration_sec=5.0,
+        is_validated=False,
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/studio/sessions/{session.id}/trim",
+        json={"new_duration_sec": 2.0},
+        headers=_auth_headers(user_b),
+    )
+
+    assert response.status_code == 403
+    mock_telemetry_service.trim_session_readings.assert_not_called()
 
 
 def test_get_session_detail_returns_aurora_sample_count(client, user_a, db_session) -> None:
@@ -811,6 +968,3 @@ def test_list_studio_authors_rbac_denied(client, regular_user) -> None:
 
     # 403 regular user
     assert client.get("/api/v1/studio/sessions/authors", headers=_auth_headers(regular_user)).status_code == 403
-
-
-

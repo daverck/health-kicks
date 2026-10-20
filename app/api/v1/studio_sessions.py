@@ -18,6 +18,7 @@ from app.schemas.studio import (
     StudioAuthorSummary,
     StudioSessionDetail,
     StudioSessionSummary,
+    StudioSessionTrimPayload,
     StudioSessionUpdatePayload,
 )
 from app.schemas.telemetry import StudioSessionReadingsResponse
@@ -234,6 +235,49 @@ def create_studio_sessions_router(
             )
 
         return readings
+
+    @router.patch("/{session_id}/trim", response_model=StudioSessionSummary)
+    def trim_session(
+        session_id: str,
+        payload: StudioSessionTrimPayload,
+        user: RequireClinicianOrAdmin,
+        db: Session = Depends(get_db),
+    ) -> StudioSessionSummary:
+        """Permanently remove telemetry after a requested duration for an unvalidated session."""
+        session = get_authorized_session(db, session_id, user)
+        if session.is_validated is True:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Impossible d'écourter une session déjà confirmée/validée",
+            )
+        if payload.new_duration_sec >= session.duration_sec:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La nouvelle durée doit être strictement inférieure à la durée actuelle",
+            )
+
+        try:
+            retained_count = telemetry_service.trim_session_readings(
+                device_id=session.device_id,
+                session_id=str(session.id),
+                new_duration_sec=payload.new_duration_sec,
+            )
+        except (BotoCoreError, ClientError) as error:
+            logger.error(
+                "Could not trim readings from DynamoDB for session %s: %s",
+                session.id,
+                error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to trim studio session readings from telemetry store",
+            )
+
+        session.duration_sec = payload.new_duration_sec
+        session.sample_count = retained_count
+        db.commit()
+        db.refresh(session)
+        return to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
 
     @router.patch("/{session_id}/confirm", response_model=StudioSessionSummary)
     def confirm_session(
