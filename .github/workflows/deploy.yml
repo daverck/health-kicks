@@ -77,11 +77,15 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
+
+            IMAGE_URI=${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
             # Connexion à ECR depuis l'EC2
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-            # Récupération de la dernière image
-            docker pull ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+            # Récupération de l'image construite pour ce commit
+            docker pull "$IMAGE_URI"
 
             # Arrêt et suppression de l'ancien conteneur s'il existe
             docker stop healthkicks-backend || true
@@ -96,4 +100,4 @@ jobs:
               --restart unless-stopped \
               -p 8000:8000 \
               --env-file /home/ubuntu/.env \
-              ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+              "$IMAGE_URI"
