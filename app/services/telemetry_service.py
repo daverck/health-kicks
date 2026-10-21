@@ -164,9 +164,10 @@ class TelemetryService:
         self,
         device_id: str,
         session_id: str,
-        new_duration_sec: float,
+        start_offset_sec: float,
+        end_offset_sec: float,
     ) -> int:
-        """Delete session telemetry after its requested duration and return retained count."""
+        """Keep readings inside the requested interval and return the retained count."""
         table = self._get_table()
         items: list[dict[str, Any]] = []
         query_kwargs: dict[str, Any] = {
@@ -197,9 +198,14 @@ class TelemetryService:
             return 0
 
         items.sort(key=lambda item: int(item["timestamp"]))
-        cutoff_timestamp = int(items[0]["timestamp"]) + round(new_duration_sec * 1_000_000)
+        first_timestamp = int(items[0]["timestamp"])
+        start_timestamp = first_timestamp + round(start_offset_sec * 1_000_000)
+        end_timestamp = first_timestamp + round(end_offset_sec * 1_000_000)
         items_to_delete = [
-            item for item in items if int(item["timestamp"]) > cutoff_timestamp
+            item
+            for item in items
+            if int(item["timestamp"]) < start_timestamp
+            or int(item["timestamp"]) > end_timestamp
         ]
 
         if items_to_delete:
@@ -214,9 +220,10 @@ class TelemetryService:
 
         retained_count = len(items) - len(items_to_delete)
         logger.info(
-            "Trimmed session %s to %.3f seconds, retaining %d telemetry points",
+            "Trimmed session %s to interval %.3f-%.3f seconds, retaining %d telemetry points",
             session_id,
-            new_duration_sec,
+            start_offset_sec,
+            end_offset_sec,
             retained_count,
         )
         return retained_count

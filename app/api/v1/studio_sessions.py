@@ -243,24 +243,36 @@ def create_studio_sessions_router(
         user: RequireClinicianOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionSummary:
-        """Permanently remove telemetry after a requested duration for an unvalidated session."""
+        """Keep a selected time interval from an unvalidated session."""
         session = get_authorized_session(db, session_id, user)
         if session.is_validated is True:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Impossible d'écourter une session déjà confirmée/validée",
             )
-        if payload.new_duration_sec >= session.duration_sec:
+        end_offset_sec = payload.end_offset_sec or payload.new_duration_sec
+        if end_offset_sec is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="An end offset is required",
+            )
+        if end_offset_sec > session.duration_sec:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="La nouvelle durée doit être strictement inférieure à la durée actuelle",
+                detail="Le point de fin doit être inférieur ou égal à la durée actuelle",
+            )
+        if payload.start_offset_sec == 0 and end_offset_sec >= session.duration_sec:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="L'intervalle sélectionné doit être plus court que la session actuelle",
             )
 
         try:
             retained_count = telemetry_service.trim_session_readings(
                 device_id=session.device_id,
                 session_id=str(session.id),
-                new_duration_sec=payload.new_duration_sec,
+                start_offset_sec=payload.start_offset_sec,
+                end_offset_sec=end_offset_sec,
             )
         except (BotoCoreError, ClientError) as error:
             logger.error(
@@ -273,7 +285,7 @@ def create_studio_sessions_router(
                 detail="Failed to trim studio session readings from telemetry store",
             )
 
-        session.duration_sec = payload.new_duration_sec
+        session.duration_sec = end_offset_sec - payload.start_offset_sec
         session.sample_count = retained_count
         db.commit()
         db.refresh(session)

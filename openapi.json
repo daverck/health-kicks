@@ -2543,6 +2543,64 @@
         }
       }
     },
+    "/api/v1/studio/sessions/{session_id}/trim": {
+      "patch": {
+        "tags": [
+          "Studio Sessions"
+        ],
+        "summary": "Trim Session",
+        "description": "Keep a selected time interval from an unvalidated session.",
+        "operationId": "trim_session_api_v1_studio_sessions__session_id__trim_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioSessionTrimPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioSessionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/studio/sessions/{session_id}/confirm": {
       "patch": {
         "tags": [
@@ -2928,64 +2986,6 @@
           }
         }
       }
-    },
-    "/api/v1/studio/sessions/{session_id}/trim": {
-      "patch": {
-        "tags": [
-          "Studio Sessions"
-        ],
-        "summary": "Trim Session",
-        "description": "Permanently remove telemetry after a requested duration for an unvalidated session.",
-        "operationId": "trim_session_api_v1_studio_sessions__session_id__trim_patch",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StudioSessionTrimPayload"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StudioSessionSummary"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -3079,30 +3079,6 @@
         ],
         "title": "ActivityEventResponse"
       },
-      "ActivityStepItem": {
-        "properties": {
-          "activity_type": {
-            "type": "string",
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Activity Type",
-            "description": "Activity type name (e.g., 'walk', 'run', 'stairs', 'unclassified')"
-          },
-          "step_count": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Step Count",
-            "description": "Non-negative accumulated step count for this activity"
-          }
-        },
-        "type": "object",
-        "required": [
-          "activity_type",
-          "step_count"
-        ],
-        "title": "ActivityStepItem",
-        "description": "Step count payload for a specific activity type."
-      },
       "DailyStepsHistoryResponse": {
         "properties": {
           "device_id": {
@@ -3185,20 +3161,20 @@
             "title": "Date",
             "description": "Calendar date of the recorded steps (YYYY-MM-DD)"
           },
-          "activities": {
+          "hourly_steps": {
             "items": {
-              "$ref": "#/components/schemas/ActivityStepItem"
+              "$ref": "#/components/schemas/HourlyActivityStepItem"
             },
             "type": "array",
-            "title": "Activities",
-            "description": "List of step counts broken down by activity type"
+            "title": "Hourly Steps",
+            "description": "Fine-grained hourly step counts recorded throughout the day"
           }
         },
         "type": "object",
         "required": [
           "device_id",
           "date",
-          "activities"
+          "hourly_steps"
         ],
         "title": "DailyStepsSyncPayload",
         "description": "Payload to synchronize daily step counts from an edge device/mobile app."
@@ -3737,6 +3713,38 @@
           "database"
         ],
         "title": "HealthResponse"
+      },
+      "HourlyActivityStepItem": {
+        "properties": {
+          "hour": {
+            "type": "integer",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Hour",
+            "description": "Hour of the day (0 to 23)"
+          },
+          "activity_type": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Activity Type",
+            "description": "Activity type name (e.g., 'walk', 'run', 'stairs', 'unclassified')"
+          },
+          "step_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Step Count",
+            "description": "Non-negative accumulated step count for this hour and activity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hour",
+          "activity_type",
+          "step_count"
+        ],
+        "title": "HourlyActivityStepItem",
+        "description": "Hourly step count payload for a specific hour and activity type."
       },
       "HourlyStepItem": {
         "properties": {
@@ -4602,6 +4610,51 @@
         "title": "StudioSessionSummary",
         "description": "Metadata summary of a Studio capture session for dataset curation."
       },
+      "StudioSessionTrimPayload": {
+        "properties": {
+          "start_offset_sec": {
+            "type": "number",
+            "maximum": 29.5,
+            "minimum": 0.0,
+            "title": "Start Offset Sec",
+            "description": "Start offset of the retained session interval in seconds",
+            "default": 0.0
+          },
+          "end_offset_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 30.0,
+                "exclusiveMinimum": 0.5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Offset Sec",
+            "description": "End offset of the retained session interval in seconds"
+          },
+          "new_duration_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 30.0,
+                "exclusiveMinimum": 0.5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Duration Sec",
+            "description": "Legacy end offset for trimming from the beginning",
+            "deprecated": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StudioSessionTrimPayload",
+        "description": "Payload to keep a time interval from an unvalidated Studio recording."
+      },
       "StudioSessionUpdatePayload": {
         "properties": {
           "label": {
@@ -4917,24 +4970,6 @@
           "type"
         ],
         "title": "ValidationError"
-      },
-      "StudioSessionTrimPayload": {
-        "properties": {
-          "new_duration_sec": {
-            "type": "number",
-            "maximum": 30.0,
-            "exclusiveMinimum": 0.5,
-            "title": "New Duration Sec",
-            "description": "Nouvelle dur\u00e9e tronqu\u00e9e de la session en secondes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "new_duration_sec"
-        ],
-        "title": "StudioSessionTrimPayload",
-        "description": "Payload to shorten an unvalidated Studio recording."
       }
     },
     "securitySchemes": {

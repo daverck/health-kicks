@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.schemas.cloud import StrictModel
 
@@ -48,14 +48,38 @@ class StudioSessionDetail(StudioSessionSummary):
 
 
 class StudioSessionTrimPayload(StrictModel):
-    """Payload to shorten an unvalidated Studio recording."""
+    """Payload to keep a time interval from an unvalidated Studio recording."""
 
-    new_duration_sec: float = Field(
-        ...,
+    start_offset_sec: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=29.5,
+        description="Start offset of the retained session interval in seconds",
+    )
+    end_offset_sec: float | None = Field(
+        default=None,
         gt=0.5,
         le=30.0,
-        description="Nouvelle durée tronquée de la session en secondes",
+        description="End offset of the retained session interval in seconds",
     )
+    new_duration_sec: float | None = Field(
+        default=None,
+        gt=0.5,
+        le=30.0,
+        json_schema_extra={"deprecated": True},
+        description="Legacy end offset for trimming from the beginning",
+    )
+
+    @model_validator(mode="after")
+    def validate_trim_interval(self) -> "StudioSessionTrimPayload":
+        if self.end_offset_sec is None and self.new_duration_sec is None:
+            raise ValueError("An end_offset_sec is required")
+        if self.end_offset_sec is not None and self.new_duration_sec is not None:
+            raise ValueError("Use end_offset_sec instead of new_duration_sec")
+        end_offset_sec = self.end_offset_sec or self.new_duration_sec
+        if end_offset_sec is None or end_offset_sec - self.start_offset_sec <= 0.5:
+            raise ValueError("The retained interval must be longer than 0.5 seconds")
+        return self
 
 
 

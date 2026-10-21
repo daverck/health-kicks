@@ -27,8 +27,11 @@ def test_openapi_exposes_cloud_and_ingestion_endpoints() -> None:
     assert "/api/v1/studio/sessions/{session_id}/trim" in paths
     assert "/api/v1/studio/sessions/{session_id}" in paths
     trim_schema = app.openapi()["components"]["schemas"]["StudioSessionTrimPayload"]
-    assert trim_schema["properties"]["new_duration_sec"]["exclusiveMinimum"] == 0.5
-    assert trim_schema["properties"]["new_duration_sec"]["maximum"] == 30.0
+    assert trim_schema["properties"]["start_offset_sec"]["minimum"] == 0.0
+    end_offset_schema = trim_schema["properties"]["end_offset_sec"]["anyOf"][0]
+    assert end_offset_schema["exclusiveMinimum"] == 0.5
+    assert end_offset_schema["maximum"] == 30.0
+    assert trim_schema["properties"]["new_duration_sec"]["deprecated"] is True
     assert "/api/telemetry/latest" not in paths
 
 
