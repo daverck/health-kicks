@@ -360,6 +360,16 @@ def save_session_npz(cache_dir: Path, session_dict: dict[str, Any]) -> Path:
         label=np.array(session_dict.get("label", "")),
         duration_sec=np.array(float(session_dict.get("duration_sec") or 0.0)),
         sample_count=np.array(int(session_dict.get("sample_count", n))),
+        source_duration_sec=np.array(
+            float(session_dict.get("source_duration_sec"))
+            if session_dict.get("source_duration_sec") is not None
+            else np.nan
+        ),
+        source_sample_count=np.array(
+            int(session_dict.get("source_sample_count"))
+            if session_dict.get("source_sample_count") is not None
+            else -1
+        ),
     )
     return filepath
 
@@ -386,12 +396,25 @@ def load_session_npz(filepath: Path) -> dict[str, Any] | None:
                 "gz": float(signals[i, 5]),
             })
 
+        source_duration_sec = (
+            float(data["source_duration_sec"])
+            if "source_duration_sec" in data.files
+            and np.isfinite(float(data["source_duration_sec"]))
+            else None
+        )
+        source_sample_count = (
+            int(data["source_sample_count"])
+            if "source_sample_count" in data.files and int(data["source_sample_count"]) >= 0
+            else None
+        )
         record = StudioSessionDatasetRecord(
             session_id=str(data["session_id"]),
             device_id=str(data["device_id"]),
             label=str(data["label"]),
             duration_sec=float(data["duration_sec"]),
             sample_count=int(data["sample_count"]),
+            source_duration_sec=source_duration_sec,
+            source_sample_count=source_sample_count,
             readings=readings,
         )
         return record.model_dump()
@@ -479,6 +502,8 @@ def _fetch_single_session(
                 label=str(getattr(sess, "label", "unknown") or "unknown"),
                 duration_sec=float(getattr(sess, "duration_sec", 5.0) or 5.0),
                 sample_count=len(raw_readings),
+                source_duration_sec=float(getattr(sess, "duration_sec", 0.0) or 0.0),
+                source_sample_count=int(getattr(sess, "sample_count", len(raw_readings)) or 0),
                 readings=raw_readings,
             )
             return sess_id, record.model_dump(), None
@@ -531,8 +556,13 @@ def sync_sessions_cache(
         from app.db.models import StudioSession
 
         with SessionLocal() as db:
-            db_sessions = db.query(StudioSession).filter(StudioSession.is_validated.is_(True)).all()
-        logger.info("PostgreSQL query: %d confirmed/validated session(s) listed", len(db_sessions))
+            all_db_sessions = db.query(StudioSession).all()
+        db_sessions = [sess for sess in all_db_sessions if sess.is_validated]
+        logger.info(
+            "PostgreSQL query: %d session(s) listed, %d confirmed/validated",
+            len(all_db_sessions),
+            len(db_sessions),
+        )
     except Exception as db_err:
         err_msg = str(db_err)
         if isinstance(db_err, UnicodeDecodeError) or "codec can't decode byte" in err_msg:
@@ -546,9 +576,13 @@ def sync_sessions_cache(
         return []
 
     if not db_sessions:
-        logger.warning("No sessions found in PostgreSQL database.")
-        if cached_sessions:
-            return list(cached_sessions.values())
+        logger.warning("No validated sessions found in PostgreSQL database.")
+        for sess_id in list(cached_sessions):
+            npz_file = cache_dir / f"{sess_id}.npz"
+            try:
+                npz_file.unlink(missing_ok=True)
+            except Exception as del_err:
+                logger.warning("Unable to delete %s: %s", npz_file, del_err)
         return []
 
     active_db_session_ids = {str(sess.id).lower() for sess in db_sessions}
@@ -572,13 +606,41 @@ def sync_sessions_cache(
 
     sessions_to_download = []
     labels_updated = 0
+    modified_sessions = 0
     for sess in db_sessions:
         sess_id = str(sess.id)
         if not force_refresh and sess_id in cached_sessions:
-            if cached_sessions[sess_id].get("label") != sess.label:
-                cached_sessions[sess_id]["label"] = sess.label
+            cached_session = cached_sessions[sess_id]
+            cached_source_sample_count = cached_session.get("source_sample_count")
+            if cached_source_sample_count is None:
+                cached_source_sample_count = cached_session.get("sample_count", 0)
+            cached_source_duration_sec = cached_session.get("source_duration_sec")
+            if cached_source_duration_sec is None:
+                cached_source_duration_sec = cached_session.get("duration_sec", 0.0)
+            if (
+                int(cached_source_sample_count or 0) != int(sess.sample_count or 0)
+                or abs(
+                    float(cached_source_duration_sec or 0.0)
+                    - float(sess.duration_sec or 0.0)
+                )
+                > 1e-6
+            ):
+                sessions_to_download.append(sess)
+                modified_sessions += 1
+                cached_sessions.pop(sess_id)
+                cached_file = cache_dir / f"{sess_id}.npz"
                 try:
-                    save_session_npz(cache_dir, cached_sessions[sess_id])
+                    cached_file.unlink(missing_ok=True)
+                except Exception as del_err:
+                    logger.warning(
+                        "Unable to remove stale cache file %s: %s",
+                        cached_file,
+                        del_err,
+                    )
+            elif cached_session.get("label") != sess.label:
+                cached_session["label"] = sess.label
+                try:
+                    save_session_npz(cache_dir, cached_session)
                     labels_updated += 1
                 except Exception as write_err:
                     logger.warning("Unable to update .npz label for %s: %s", sess_id, write_err)
@@ -635,7 +697,6 @@ def sync_sessions_cache(
                 for sess in batch_chunk
             }
             for future in as_completed(future_to_sess):
-                sess_ref = future_to_sess[future]
                 sess_id, session_dict, exc = future.result()
                 if exc is not None:
                     exc_type = type(exc).__name__
@@ -664,6 +725,11 @@ def sync_sessions_cache(
         total_to_download,
         len(cached_sessions),
     )
+    if modified_sessions > 0:
+        logger.info(
+            "Detected metadata changes for %d session(s); refreshed their telemetry.",
+            modified_sessions,
+        )
 
     return list(cached_sessions.values())
 

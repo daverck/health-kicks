@@ -119,4 +119,6 @@ class StudioSessionDatasetRecord(StrictModel):
     label: str
     duration_sec: float = 0.0
     sample_count: int = 0
+    source_duration_sec: float | None = None
+    source_sample_count: int | None = None
     readings: list[dict[str, Any]] = Field(default_factory=list)

@@ -56,6 +56,7 @@ def _make_db_mock(session_id: str, device_id: str, label: str, is_validated: boo
     m.device_id = device_id
     m.label = label
     m.duration_sec = 5.0
+    m.sample_count = 3
     m.is_validated = is_validated
     return m
 
@@ -386,7 +387,6 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
     with patch("app.db.database.SessionLocal") as mock_session_maker, \
          patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = [mock_s1, mock_s2]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -404,6 +404,112 @@ def test_sync_sessions_cache_delta_logic(tmp_path: Path):
 
     # sess_2 must have been saved as .npz on disk
     assert (cache_dir / f"{sess_2_id}.npz").exists()
+
+
+def test_sync_sessions_cache_updates_changed_label_without_redownloading(tmp_path: Path):
+    cache_dir = tmp_path / "sessions"
+    session_id = str(uuid4())
+    save_session_npz(cache_dir, _make_session(session_id, label="walk"))
+    updated_session = _make_db_mock(session_id, "dev-01", "run")
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker:
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = [updated_session]
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result = sync_sessions_cache(cache_dir, force_refresh=False)
+
+    assert len(result) == 1
+    assert result[0]["label"] == "run"
+    assert load_session_npz(cache_dir / f"{session_id}.npz")["label"] == "run"
+
+
+def test_sync_sessions_cache_redownloads_only_sessions_with_changed_imu_metadata(
+    tmp_path: Path,
+):
+    cache_dir = tmp_path / "sessions"
+    changed_id = str(uuid4())
+    unchanged_id = str(uuid4())
+    save_session_npz(cache_dir, _make_session(changed_id))
+    save_session_npz(cache_dir, _make_session(unchanged_id))
+
+    changed_session = _make_db_mock(changed_id, "dev-01", "walk")
+    changed_session.duration_sec = 3.0
+    changed_session.sample_count = 2
+    unchanged_session = _make_db_mock(unchanged_id, "dev-02", "idle")
+
+    mock_reading = MagicMock()
+    mock_reading.timestamp_epoch_us = 1000
+    mock_reading.ax = 0.0
+    mock_reading.ay = 9.8
+    mock_reading.az = 0.0
+    mock_reading.gx = 0.0
+    mock_reading.gy = 0.0
+    mock_reading.gz = 0.0
+    mock_response = MagicMock(readings=[mock_reading])
+    mock_telemetry = MagicMock()
+    mock_telemetry.get_session_readings.return_value = mock_response
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker, \
+         patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry):
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = [changed_session, unchanged_session]
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result = sync_sessions_cache(cache_dir, force_refresh=False)
+        sync_sessions_cache(cache_dir, force_refresh=False)
+
+    mock_telemetry.get_session_readings.assert_called_once_with(
+        device_id="dev-01",
+        session_id=changed_id,
+    )
+    assert len(result) == 2
+    changed_cache = load_session_npz(cache_dir / f"{changed_id}.npz")
+    assert changed_cache is not None
+    assert changed_cache["source_duration_sec"] == 3.0
+    assert changed_cache["source_sample_count"] == 2
+
+
+def test_sync_sessions_cache_removes_sessions_reopened_for_editing(tmp_path: Path):
+    cache_dir = tmp_path / "sessions"
+    session_id = str(uuid4())
+    save_session_npz(cache_dir, _make_session(session_id))
+    unvalidated_session = _make_db_mock(
+        session_id, "dev-01", "walk", is_validated=False
+    )
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker:
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = [unvalidated_session]
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result = sync_sessions_cache(cache_dir, force_refresh=False)
+
+    assert result == []
+    assert not (cache_dir / f"{session_id}.npz").exists()
+
+
+def test_sync_sessions_cache_does_not_keep_stale_data_when_refresh_has_no_readings(
+    tmp_path: Path,
+):
+    cache_dir = tmp_path / "sessions"
+    session_id = str(uuid4())
+    save_session_npz(cache_dir, _make_session(session_id))
+    updated_session = _make_db_mock(session_id, "dev-01", "walk")
+    updated_session.duration_sec = 3.0
+    mock_telemetry = MagicMock()
+    mock_telemetry.get_session_readings.return_value = MagicMock(readings=[])
+
+    with patch("app.db.database.SessionLocal") as mock_session_maker, \
+         patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry):
+        mock_db = MagicMock()
+        mock_db.query.return_value.all.return_value = [updated_session]
+        mock_session_maker.return_value.__enter__.return_value = mock_db
+
+        result = sync_sessions_cache(cache_dir, force_refresh=False)
+
+    assert result == []
+    assert not (cache_dir / f"{session_id}.npz").exists()
 
 
 def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
@@ -425,7 +531,6 @@ def test_sync_sessions_cache_purges_deleted_db_sessions(tmp_path: Path):
 
     with patch("app.db.database.SessionLocal") as mock_session_maker:
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = [mock_s1, mock_s3]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -467,7 +572,6 @@ def test_sync_sessions_cache_batch_download(tmp_path: Path):
     with patch("app.db.database.SessionLocal") as mock_session_maker, \
          patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = db_mocks
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -500,7 +604,6 @@ def test_sync_sessions_cache_migrates_old_json(tmp_path: Path):
 
     with patch("app.db.database.SessionLocal") as mock_session_maker:
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value = mock_db.query.return_value
         mock_db.query.return_value.all.return_value = [mock_s]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
@@ -542,8 +645,7 @@ def test_sync_sessions_cache_ignores_unvalidated_sessions(tmp_path: Path):
     with patch("app.db.database.SessionLocal") as mock_session_maker, \
          patch("app.services.telemetry_service.TelemetryService", return_value=mock_telemetry_svc):
         mock_db = MagicMock()
-        # Filter is_validated.is_(True) returns only validated session
-        mock_db.query.return_value.filter.return_value.all.return_value = [mock_valid]
+        mock_db.query.return_value.all.return_value = [mock_valid]
         mock_session_maker.return_value.__enter__.return_value = mock_db
 
         result = sync_sessions_cache(cache_dir, force_refresh=False)
