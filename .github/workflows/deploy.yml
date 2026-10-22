@@ -39,6 +39,9 @@ jobs:
   deploy:
     name: Build & Deploy Backend to EC2
     needs: test
+    concurrency:
+      group: backend-ec2-deployment
+      cancel-in-progress: false
     # Déploiement automatique après succès des tests sur la branche main
     if: github.ref == 'refs/heads/main'
     # if: github.event_name == 'workflow_dispatch'
@@ -85,7 +88,20 @@ jobs:
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
             # Récupération de l'image construite pour ce commit
-            docker pull "$IMAGE_URI"
+            attempt=1
+            max_attempts=3
+            until docker pull "$IMAGE_URI"; do
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "Image pull failed after ${max_attempts} attempts."
+                docker system df || true
+                docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+                df -h "$docker_root" || true
+                exit 1
+              fi
+              echo "Image pull failed (attempt ${attempt}/${max_attempts}); retrying..."
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
 
             # Arrêt et suppression de l'ancien conteneur s'il existe
             docker stop healthkicks-backend || true
