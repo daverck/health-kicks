@@ -77,8 +77,8 @@ class StudioSessionTrimPayload(StrictModel):
         if self.end_offset_sec is not None and self.new_duration_sec is not None:
             raise ValueError("Use end_offset_sec instead of new_duration_sec")
         end_offset_sec = self.end_offset_sec or self.new_duration_sec
-        if end_offset_sec is None or end_offset_sec - self.start_offset_sec <= 0.5:
-            raise ValueError("The retained interval must be longer than 0.5 seconds")
+        if end_offset_sec is None or end_offset_sec - self.start_offset_sec < 2.0:
+            raise ValueError("The retained interval must be at least 2 seconds")
         return self
 
 

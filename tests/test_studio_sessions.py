@@ -752,7 +752,7 @@ def test_trim_session_rejects_invalid_duration_payload(client, user_a, db_sessio
     assert response.status_code == 422
 
 
-def test_trim_session_rejects_interval_shorter_than_minimum(client, user_a, db_session) -> None:
+def test_trim_session_rejects_interval_shorter_than_two_seconds(client, user_a, db_session) -> None:
     session = StudioSession(
         id=uuid.uuid4(),
         user_id=user_a.id,
@@ -766,7 +766,7 @@ def test_trim_session_rejects_interval_shorter_than_minimum(client, user_a, db_s
 
     response = client.patch(
         f"/api/v1/studio/sessions/{session.id}/trim",
-        json={"start_offset_sec": 2.0, "end_offset_sec": 2.5},
+        json={"start_offset_sec": 2.0, "end_offset_sec": 3.9},
         headers=_auth_headers(user_a),
     )
 
