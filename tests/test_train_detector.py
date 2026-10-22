@@ -150,6 +150,133 @@ def test_build_dataset_from_sessions_temporal_windowing():
     assert "acc_mag_max" in X.columns
 
 
+def test_build_dataset_from_sessions_tail_window_alignment_timestamped():
+    """Verifies that an extra tail window is extracted at the end of a session when the tail is not covered."""
+    base_us = 1_700_000_000_000_000
+    # 3.8s duration at 50 Hz = 190 points (dt = 20_000 µs)
+    readings = []
+    for i in range(190):
+        readings.append(
+            {
+                "timestamp": base_us + i * 20_000,
+                "ax": 5.0 if i >= 170 else 0.1,  # Special tail movement in the last 0.4s
+                "ay": 9.8,
+                "az": 0.05,
+                "gx": 0.01,
+                "gy": 0.01,
+                "gz": 0.01,
+            }
+        )
+    sessions = [
+        {
+            "session_id": "sess-tail-01",
+            "label": "walk",
+            "duration_sec": 3.8,
+            "readings": readings,
+        }
+    ]
+
+    # window=2.0s, step=0.5s over 3.8s:
+    # Regular loop: 0.0s (0-2s), 0.5s (0.5-2.5s), 1.0s (1-3s), 1.5s (1.5-3.5s) -> 4 windows
+    # Tail window alignment adds: 1.8s - 3.8s -> 5th window!
+    X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
+
+    assert len(X) == 5
+    assert len(y) == 5
+    # The tail window (last row) must capture the tail spike
+    assert X["acc_mag_max"].iloc[-1] >= 9.8
+
+
+def test_build_dataset_from_sessions_tail_window_alignment_punctual_event():
+    """Verifies tail window alignment with punctual events (e.g. sit_down / fall)."""
+    base_us = 1_700_000_000_000_000
+    # 3.8s duration at 50 Hz = 190 points. Peak is at index 170 (3.4s).
+    readings = []
+    for i in range(190):
+        readings.append(
+            {
+                "timestamp": base_us + i * 20_000,
+                "ax": 5.0 if i >= 170 else 0.1,
+                "ay": 9.8,
+                "az": 0.05,
+                "gx": 0.01,
+                "gy": 0.01,
+                "gz": 0.01,
+            }
+        )
+    sessions = [
+        {
+            "session_id": "sess-tail-punctual",
+            "label": "sit_down",
+            "duration_sec": 3.8,
+            "readings": readings,
+        }
+    ]
+
+    # For punctual event at 3.4s:
+    # Regular loop: only window starting at 1.5s (1.5-3.5s) covers 3.4s -> 1 window
+    # Tail window (1.8-3.8s) also covers 3.4s -> 2nd window!
+    X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
+    assert len(X) == 2
+    assert (y == "sit_down").all()
+
+
+def test_build_dataset_from_sessions_tail_window_alignment_avoids_duplicate():
+    """Verifies that tail window alignment avoids extracting duplicate window when already ending on boundary."""
+    base_us = 1_700_000_000_000_000
+    # Exactly 3.5s duration at 50 Hz = 176 points (from 0 to 3.5s)
+    readings = []
+    for i in range(176):
+        readings.append(
+            {
+                "timestamp": base_us + i * 20_000,
+                "ax": 0.1,
+                "ay": 9.8,
+                "az": 0.05,
+                "gx": 0.01,
+                "gy": 0.01,
+                "gz": 0.01,
+            }
+        )
+    sessions = [
+        {
+            "session_id": "sess-tail-02",
+            "label": "walk",
+            "duration_sec": 3.5,
+            "readings": readings,
+        }
+    ]
+
+    # window=2.0s, step=0.5s over 3.5s:
+    # Regular loop ends at 1.5s (1.5-3.5s) which matches max_t exactly.
+    # Tail window (3.5 - 2.0 = 1.5s) is identical, so no duplicate is created.
+    X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
+    assert len(X) == 4
+
+
+def test_build_dataset_from_sessions_tail_window_alignment_index_based():
+    """Verifies tail window alignment in index-based fallback mode."""
+    # 76 samples without timestamps, 3.8s hint (20 Hz)
+    # window_samples = 40 (2.0s), step_samples = 10 (0.5s)
+    # Regular loop: start = 0, 10, 20, 30 -> 4 windows
+    # Tail window adds: start = 36 (36..76) -> 5th window
+    readings = [
+        {"ax": 0.1, "ay": 9.8, "az": 0.1, "gx": 0.0, "gy": 0.0, "gz": 0.0}
+        for _ in range(76)
+    ]
+    sessions = [
+        {
+            "session_id": "sess-tail-03",
+            "label": "run",
+            "duration_sec": 3.8,
+            "readings": readings,
+        }
+    ]
+
+    X, y = build_dataset_from_sessions(sessions, window_size_sec=2.0, step_sec=0.5)
+    assert len(X) == 5
+
+
 def test_build_dataset_from_sessions_fallback_no_timestamps():
     """Verifies fallback slicing when timestamps are missing."""
     readings = [

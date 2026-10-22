@@ -280,6 +280,7 @@ def build_dataset_from_sessions(
             max_t = t_sec[-1]
             curr_t = 0.0
             t_peak = float(t_sec[peak_idx]) if peak_idx is not None else None
+            last_extracted_start = -1.0
 
             while curr_t + window_size_sec <= max_t + 1e-5:
                 # Event-centric windowing: reject windows that don't cover the dynamic event
@@ -296,12 +297,26 @@ def build_dataset_from_sessions(
                     X_rows.append(feat)
                     y_labels.append(label)
                     windows_extracted += 1
+                    last_extracted_start = curr_t
                 curr_t += step_sec
+
+            # Tail-window alignment: capture final window ending at max_t if not covered
+            tail_start_t = max_t - window_size_sec
+            if tail_start_t > 0 and (last_extracted_start < 0 or (tail_start_t - last_extracted_start) >= 0.1):
+                if t_peak is None or (tail_start_t <= t_peak <= max_t):
+                    tail_mask = (t_sec >= tail_start_t) & (t_sec <= max_t)
+                    tail_df = df.loc[tail_mask]
+                    if len(tail_df) >= 5:
+                        feat = compute_window_features(tail_df)
+                        X_rows.append(feat)
+                        y_labels.append(label)
+                        windows_extracted += 1
         else:
             duration_hint = float(session.get("duration_sec", 5.0) or 5.0)
             samples_per_sec = max(total_samples / max(duration_hint, 0.5), 10.0)
             window_samples = max(int(window_size_sec * samples_per_sec), 5)
             step_samples = max(int(step_sec * samples_per_sec), 1)
+            last_extracted_start_idx = -1
 
             for start in range(0, total_samples - window_samples + 1, step_samples):
                 if peak_idx is not None:
@@ -314,6 +329,19 @@ def build_dataset_from_sessions(
                 X_rows.append(feat)
                 y_labels.append(label)
                 windows_extracted += 1
+                last_extracted_start_idx = start
+
+            # Tail-window alignment (index-based)
+            if total_samples >= window_samples:
+                tail_start_idx = total_samples - window_samples
+                min_diff_samples = max(int(0.1 * samples_per_sec), 1)
+                if tail_start_idx > 0 and (last_extracted_start_idx < 0 or (tail_start_idx - last_extracted_start_idx) >= min_diff_samples):
+                    if peak_idx is None or (tail_start_idx <= peak_idx <= total_samples):
+                        window_df = df.iloc[tail_start_idx : total_samples]
+                        feat = compute_window_features(window_df)
+                        X_rows.append(feat)
+                        y_labels.append(label)
+                        windows_extracted += 1
 
         if windows_extracted == 0 and total_samples >= 5:
             feat = compute_window_features(df)
