@@ -63,10 +63,25 @@ def create_studio_sessions_router(
         is_validated: bool | None = Query(default=None, description="Filtrer par statut de validation de la session"),
         start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
         end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
+        sample_count_min: int | None = Query(default=None, ge=0, description="Minimum number of IMU samples"),
+        sample_count_max: int | None = Query(default=None, ge=0, description="Maximum number of IMU samples"),
+        duration_sec_min: float | None = Query(default=None, ge=0, description="Minimum session duration in seconds"),
+        duration_sec_max: float | None = Query(default=None, ge=0, description="Maximum session duration in seconds"),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
     ) -> PaginatedSessionsResponse:
         """List studio sessions with RBAC, cursor keyset pagination, and multi-value filters."""
+        if sample_count_min is not None and sample_count_max is not None and sample_count_min > sample_count_max:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sample_count_min must be less than or equal to sample_count_max",
+            )
+        if duration_sec_min is not None and duration_sec_max is not None and duration_sec_min > duration_sec_max:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="duration_sec_min must be less than or equal to duration_sec_max",
+            )
+
         raw_end = request.query_params.get("end_date") if request is not None else None
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
@@ -101,6 +116,15 @@ def create_studio_sessions_router(
 
         if norm_end is not None:
             query = query.filter(StudioSession.created_at <= norm_end)
+
+        if sample_count_min is not None:
+            query = query.filter(StudioSession.sample_count >= sample_count_min)
+        if sample_count_max is not None:
+            query = query.filter(StudioSession.sample_count <= sample_count_max)
+        if duration_sec_min is not None:
+            query = query.filter(StudioSession.duration_sec >= duration_sec_min)
+        if duration_sec_max is not None:
+            query = query.filter(StudioSession.duration_sec <= duration_sec_max)
 
         total = query.count()
         next_cursor: str | None = None

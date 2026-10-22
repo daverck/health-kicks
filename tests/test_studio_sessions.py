@@ -236,6 +236,71 @@ def test_list_sessions_filter_by_date_range(client, user_a, db_session) -> None:
     assert res_range.json()["total"] == 2
 
 
+def test_list_sessions_filter_by_sample_count_and_duration(client, user_a, db_session) -> None:
+    short = StudioSession(
+        id=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        sample_count=100,
+        duration_sec=2.0,
+    )
+    matching = StudioSession(
+        id=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="run",
+        sample_count=200,
+        duration_sec=4.0,
+    )
+    long = StudioSession(
+        id=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="stairs",
+        sample_count=300,
+        duration_sec=6.0,
+    )
+    db_session.add_all([short, matching, long])
+    db_session.commit()
+
+    response = client.get(
+        "/api/v1/studio/sessions"
+        "?sample_count_min=150&sample_count_max=250&duration_sec_min=3&duration_sec_max=5",
+        headers=_auth_headers(user_a),
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert [item["id"] for item in data["items"]] == [str(matching.id)]
+
+
+@pytest.mark.parametrize(
+    ("query_params", "expected_detail"),
+    [
+        (
+            "sample_count_min=20&sample_count_max=10",
+            "sample_count_min must be less than or equal to sample_count_max",
+        ),
+        (
+            "duration_sec_min=2.5&duration_sec_max=2",
+            "duration_sec_min must be less than or equal to duration_sec_max",
+        ),
+    ],
+)
+def test_list_sessions_rejects_invalid_measurement_ranges(
+    client, user_a, query_params, expected_detail
+) -> None:
+    response = client.get(
+        f"/api/v1/studio/sessions?{query_params}",
+        headers=_auth_headers(user_a),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == expected_detail
+
+
 def test_list_sessions_invalid_date_range_400(client, user_a) -> None:
     res = client.get(
         "/api/v1/studio/sessions?start_date=2026-05-10&end_date=2026-05-01",

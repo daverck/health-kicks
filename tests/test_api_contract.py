@@ -26,6 +26,14 @@ def test_openapi_exposes_cloud_and_ingestion_endpoints() -> None:
     assert "/api/v1/studio/sessions/{session_id}/readings" in paths
     assert "/api/v1/studio/sessions/{session_id}/trim" in paths
     assert "/api/v1/studio/sessions/{session_id}" in paths
+    session_list_params = {
+        parameter["name"]: parameter["schema"]
+        for parameter in paths["/api/v1/studio/sessions"]["get"]["parameters"]
+    }
+    assert session_list_params["sample_count_min"]["anyOf"][0]["minimum"] == 0
+    assert session_list_params["sample_count_max"]["anyOf"][0]["minimum"] == 0
+    assert session_list_params["duration_sec_min"]["anyOf"][0]["minimum"] == 0
+    assert session_list_params["duration_sec_max"]["anyOf"][0]["minimum"] == 0
     trim_schema = app.openapi()["components"]["schemas"]["StudioSessionTrimPayload"]
     assert trim_schema["properties"]["start_offset_sec"]["minimum"] == 0.0
     end_offset_schema = trim_schema["properties"]["end_offset_sec"]["anyOf"][0]

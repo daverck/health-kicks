@@ -2295,6 +2295,82 @@
               "title": "End Date"
             },
             "description": "Date/heure de fin (inclusive, ISO 8601)"
+          },
+          {
+            "name": "sample_count_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Minimum number of IMU samples",
+              "title": "Sample Count Min"
+            },
+            "description": "Minimum number of IMU samples"
+          },
+          {
+            "name": "sample_count_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum number of IMU samples",
+              "title": "Sample Count Max"
+            },
+            "description": "Maximum number of IMU samples"
+          },
+          {
+            "name": "duration_sec_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Minimum session duration in seconds",
+              "title": "Duration Sec Min"
+            },
+            "description": "Minimum session duration in seconds"
+          },
+          {
+            "name": "duration_sec_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum session duration in seconds",
+              "title": "Duration Sec Max"
+            },
+            "description": "Maximum session duration in seconds"
           }
         ],
         "responses": {
