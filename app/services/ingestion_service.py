@@ -123,6 +123,21 @@ def ingest_raw_telemetry(
     if sample_count <= 0:
         return None
 
+    duration_sec = payload.get("duration_sec")
+    if duration_sec is not None:
+        try:
+            duration_sec = float(duration_sec)
+        except (TypeError, ValueError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="duration_sec must be a number of at least 2 seconds",
+            ) from error
+        if duration_sec < 2.0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="duration_sec must be at least 2 seconds",
+            )
+
     studio_session = session.query(StudioSession).filter_by(id=sess_uuid).first()
     if studio_session is not None:
         session_user = session.query(User).filter_by(id=studio_session.user_id).first()
@@ -144,6 +159,8 @@ def ingest_raw_telemetry(
         studio_session.sample_count = sample_count
         if payload.get("label"):
             studio_session.label = payload["label"]
+        if duration_sec is not None:
+            studio_session.duration_sec = duration_sec
         session.commit()
         session.refresh(studio_session)
         return studio_session
@@ -164,7 +181,7 @@ def ingest_raw_telemetry(
         device_id=device_id or "unknown",
         label=str(payload.get("label", "unlabeled")),
         sample_count=sample_count,
-        duration_sec=float(payload.get("duration_sec", 5.0)),
+        duration_sec=5.0 if duration_sec is None else duration_sec,
         is_validated=False,
         created_at=datetime.now(UTC),
     )

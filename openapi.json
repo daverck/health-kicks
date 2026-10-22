@@ -4319,7 +4319,7 @@
             "anyOf": [
               {
                 "type": "number",
-                "minimum": 0.0
+                "minimum": 2.0
               },
               {
                 "type": "null"
@@ -4777,7 +4777,7 @@
           "duration_sec": {
             "type": "number",
             "maximum": 30.0,
-            "minimum": 1.0,
+            "minimum": 2.0,
             "title": "Duration Sec",
             "default": 5.0
           },

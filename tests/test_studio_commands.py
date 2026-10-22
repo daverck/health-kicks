@@ -150,6 +150,16 @@ def test_start_studio_session_success_custom_parameters(test_client, mock_iot_cl
     assert payload["pulse_intensity"] == 220
 
 
+def test_start_studio_session_accepts_two_second_minimum(test_client) -> None:
+    response = test_client.post(
+        "/api/v1/devices/shoe-test-001/commands/studio/start",
+        json={"label": "walk", "duration_sec": 2.0},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["duration_sec"] == 2.0
+
+
 def test_start_studio_session_unauthenticated() -> None:
     with TestClient(main_app) as client:
         response = client.post(
@@ -164,7 +174,7 @@ def test_start_studio_session_unauthenticated() -> None:
     [
         {"label": ""},  # empty label
         {"label": "a" * 65},  # label > 64 chars
-        {"label": "walk", "duration_sec": 0.5},  # duration < 1.0
+        {"label": "walk", "duration_sec": 1.9},  # duration < 2.0
         {"label": "walk", "duration_sec": 35.0},  # duration > 30.0
         {"label": "walk", "pulse_count": 0},  # count < 1
         {"label": "walk", "pulse_count": 6},  # count > 5

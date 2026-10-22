@@ -40,6 +40,12 @@ def test_openapi_exposes_cloud_and_ingestion_endpoints() -> None:
     assert end_offset_schema["exclusiveMinimum"] == 0.5
     assert end_offset_schema["maximum"] == 30.0
     assert trim_schema["properties"]["new_duration_sec"]["deprecated"] is True
+    start_schema = app.openapi()["components"]["schemas"]["StudioStartRequest"]
+    assert start_schema["properties"]["duration_sec"]["minimum"] == 2.0
+    ingestion_schema = app.openapi()["components"]["schemas"][
+        "RawTelemetryIngestionRequest"
+    ]["properties"]["duration_sec"]["anyOf"][0]
+    assert ingestion_schema["minimum"] == 2.0
     assert "/api/telemetry/latest" not in paths
 
 

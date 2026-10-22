@@ -480,14 +480,37 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
     db_session.commit()
 
     raw_batch_payload = {
-        "device_id": "HK-TEST",
-        "session_id": str(sess_id),
-        "label": "walk",
-        "sample_count": 94,
-        "readings": [{"timestamp": 1726224000.0 + (i * 0.053), "ax": 0.1, "ay": 0.9, "az": -0.1} for i in range(94)],
+        "header": {"device_id": "HK-TEST", "session_id": str(sess_id)},
+        "payload": {
+            "device_id": "HK-TEST",
+            "session_id": str(sess_id),
+            "label": "walk",
+            "sample_count": 94,
+            "duration_sec": 2.1,
+            "readings": [
+                {
+                    "timestamp": 1726224000.0 + (i * 0.053),
+                    "ax": 0.1,
+                    "ay": 0.9,
+                    "az": -0.1,
+                }
+                for i in range(94)
+            ],
+        },
     }
 
     headers = {"X-HealthKicks-Ingest-Token": "secret-test-token"}
+    invalid_duration_payload = {
+        **raw_batch_payload,
+        "payload": {**raw_batch_payload["payload"], "duration_sec": 1.9},
+    }
+    invalid_response = client.post(
+        "/api/v1/ingest/telemetry/raw",
+        json=invalid_duration_payload,
+        headers=headers,
+    )
+    assert invalid_response.status_code == 422
+
     res = client.post("/api/v1/ingest/telemetry/raw", json=raw_batch_payload, headers=headers)
     assert res.status_code == 200
     data = res.json()
@@ -497,6 +520,7 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
 
     db_session.refresh(session_rec)
     assert session_rec.sample_count == 94
+    assert session_rec.duration_sec == 2.1
 
 
 def test_ingest_raw_telemetry_device_mismatch_forbidden(client, db_session, monkeypatch):
@@ -657,7 +681,4 @@ def test_ingest_raw_telemetry_zero_samples_ignored(client, db_session, monkeypat
 
     # Ensure no session was inserted into Aurora
     assert db_session.query(StudioSession).filter_by(id=sess_id).first() is None
-
-
-
 

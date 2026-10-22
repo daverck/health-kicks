@@ -65,5 +65,5 @@ class RawTelemetryIngestionRequest(StrictModel):
     session_id: str = Field(min_length=1, max_length=255)
     label: str | None = Field(default="unlabeled", max_length=64)
     sample_count: int | None = Field(default=0, ge=0)
-    duration_sec: float | None = Field(default=5.0, ge=0)
+    duration_sec: float | None = Field(default=5.0, ge=2.0)
     readings: list[dict[str, Any]] | None = Field(default_factory=list)
