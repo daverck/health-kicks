@@ -52,6 +52,34 @@ class AWSIoTPublishService:
             return False
         return True
 
+    def publish_fall_alert_status(self, user_id: int | str, payload: dict[str, Any]) -> bool:
+        """Publish a fall alert status downlink message to the user's mobile client.
+
+        Topic: healthkicks/v1/users/{user_id}/fall-alert/status (QoS 1).
+        Never raises exceptions so DB transactions are unaffected if AWS IoT is unavailable.
+        """
+        if self._client is None and not self._config.aws_iot_endpoint:
+            logger.debug(
+                "Skipping AWS IoT fall-alert status publish for user %s (no IoT endpoint configured)",
+                user_id,
+            )
+            return False
+
+        topic = f"healthkicks/v1/users/{user_id}/fall-alert/status"
+        try:
+            self._client_for_publish().publish(
+                topic=topic,
+                qos=1,
+                payload=json.dumps(payload),
+            )
+        except (BotoCoreError, ClientError) as error:
+            logger.warning("AWS IoT fall-alert status publish failed for user %s: %s", user_id, error)
+            return False
+        except Exception:
+            logger.exception("Unexpected AWS IoT fall-alert status publish failure for user %s", user_id)
+            return False
+        return True
+
     def send_studio_start(self, device_id: str, command: StudioStartRequest, session_id: str) -> str:
         """Publish a studio recording start order to AWS IoT Core.
 

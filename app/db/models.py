@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     SmallInteger,
     String,
+    Text,
     UniqueConstraint,
     Uuid,
 )
@@ -217,3 +218,165 @@ class HourlyActivityStep(Base):
 
     user: Mapped["User"] = relationship("User", lazy="joined")
 
+
+# --- Fall Alerting & Emergency Contacts (Step 5) ---
+
+
+class FallAlertState(str, Enum):
+    """Lifecycle states for a fall alert."""
+
+    PENDING = "PENDING"
+    ESCALATING = "ESCALATING"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    CANCELLED = "CANCELLED"
+    EXHAUSTED = "EXHAUSTED"
+    SUPPRESSED = "SUPPRESSED"
+
+
+class FallAlertAction(str, Enum):
+    """Uplink MQTT actions for fall alert ingestion."""
+
+    DETECTED = "DETECTED"
+    CONFIRM = "CONFIRM"
+    CANCEL = "CANCEL"
+
+
+class FallAlertDelivery(str, Enum):
+    """Delivery mode indicating live active monitoring vs offline replay."""
+
+    live = "live"
+    replayed = "replayed"
+
+
+class FallAlertCancelReason(str, Enum):
+    """Reasons why a fall alert was cancelled."""
+
+    user_cancel = "user_cancel"
+    fall_recovery = "fall_recovery"
+
+
+class FallAlertNotificationStatus(str, Enum):
+    """Delivery status for an individual emergency contact email."""
+
+    SENT = "SENT"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    FAILED = "FAILED"
+
+
+class AlertContact(Base):
+    """Emergency contact (proche) associated with a user account."""
+
+    __tablename__ = "alert_contacts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "email", name="uq_alert_contacts_user_email"),
+        Index("ix_alert_contacts_user_priority", "user_id", "priority"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_test_email_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+
+class FallAlert(Base):
+    """Fall alert lifecycle record with sequential email escalation state."""
+
+    __tablename__ = "fall_alerts"
+    __table_args__ = (
+        Index("ix_fall_alerts_state_next_action", "state", "next_action_at_utc"),
+        Index("ix_fall_alerts_user_detected", "user_id", "detected_at_utc"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    device_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
+    delivery: Mapped[str] = mapped_column(String(16), nullable=False, default="live")
+    state: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    cancel_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_captured_at_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    current_contact_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    contacts_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    acknowledged_by_first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    acknowledged_by_last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    acknowledged_by_contact_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detected_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=False
+    )
+    escalation_started_at_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    next_action_at_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=True
+    )
+    closed_at_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship("User", lazy="joined")
+    notifications: Mapped[list["FallAlertNotification"]] = relationship(
+        "FallAlertNotification",
+        back_populates="alert",
+        cascade="all, delete-orphan",
+        order_by="FallAlertNotification.rank.asc(), FallAlertNotification.id.asc()",
+    )
+
+
+class FallAlertNotification(Base):
+    """Audit trail of each email dispatched during fall alert escalation."""
+
+    __tablename__ = "fall_alert_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    alert_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("fall_alerts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    contact_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    contact_first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    contact_last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    contact_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    sent_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    acknowledged_at_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    alert: Mapped["FallAlert"] = relationship("FallAlert", back_populates="notifications")

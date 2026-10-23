@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from alembic import command
 from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router
+from app.api.v1.fall_alerts import create_fall_alerts_router
 from app.api.v1.firmware import create_firmware_router
 from app.api.v1.ingestion import create_ingestion_router
 from app.api.v1.internal import create_internal_router
@@ -36,8 +37,9 @@ from app.core.correlation import (
 )
 from app.core.logging import setup_logging
 from app.core.metrics import metrics_collector
-from app.db.database import create_tables, engine
+from app.db.database import SessionLocal, create_tables, engine
 from app.services.aws_iot_service import AWSIoTPublishService
+from app.services.fall_alert_service import process_due_fall_alerts
 
 setup_logging()
 
@@ -56,9 +58,28 @@ def run_migrations() -> None:
         command.upgrade(alembic_cfg, "head")
 
 
+def _run_fall_alert_worker_tick() -> None:
+    """Execute one synchronous escalation worker cycle in a dedicated DB session."""
+    with SessionLocal() as session:
+        process_due_fall_alerts(db=session, iot_publisher=publisher)
+
+
+async def _fall_alert_escalation_worker() -> None:
+    """Background loop checking due PENDING/ESCALATING fall alerts every N seconds."""
+    interval = max(1, int(getattr(settings, "fall_alert_worker_interval_sec", 5)))
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(_run_fall_alert_worker_tick)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("[fall-alert-worker] Tick skipped or failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Lifecycle manager handling startup migrations and schema initialization."""
+    """Lifecycle manager handling startup migrations, schema initialization, and fall alert escalation worker."""
     migrate_env = os.getenv("MIGRATE_ON_START")
     should_migrate = (
         migrate_env.lower() in ("1", "true", "yes")
@@ -85,7 +106,14 @@ async def lifespan(_: FastAPI):
             create_tables()
         except Exception:
             logger.exception("[lifespan] Database unavailable during startup")
-    yield
+
+    worker_task = asyncio.create_task(_fall_alert_escalation_worker())
+    try:
+        yield
+    finally:
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await worker_task
 
 
 app = FastAPI(
@@ -170,7 +198,7 @@ cors_origins = list(settings.public_origins) if settings.public_origins else [
     "http://127.0.0.1:8000",
     "capacitor://localhost",
 ]
-cors_origin_regex = None if is_prod else r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$"
+cors_origin_regex = None if is_prod else r"^https?://(localhost|127\.0\.0\.1)(:[00-9]+)?$"
 
 app.add_middleware(
     CORSMiddleware,
@@ -185,7 +213,8 @@ app.include_router(create_auth_router())
 app.include_router(create_devices_router())
 app.include_router(create_users_router())
 app.include_router(create_ingestion_router())
-app.include_router(create_internal_router())
+app.include_router(create_internal_router(publisher=publisher))
+app.include_router(create_fall_alerts_router(publisher=publisher))
 app.include_router(create_telemetry_router(iot_service=publisher))
 app.include_router(create_studio_sessions_router())
 app.include_router(create_steps_router())

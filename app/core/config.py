@@ -69,6 +69,20 @@ class Settings:
     s3_presigned_url_expire_seconds: int = 900
     # GDPR Pseudonymization
     pseudonymization_pepper: str = "dev-pseudonymization-pepper-secret-32b"
+    # Fall Alerting & SMTP Escalation
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_name: str = "HealthKicks Alertes"
+    public_base_url: str = "https://healthkicks.duckdns.org:8443"
+    fall_alert_ack_secret: str = "dev-fall-alert-ack-secret-32bytes"
+    fall_alert_cancel_window_sec: int = 60
+    fall_alert_escalation_step_sec: int = 180
+    fall_alert_ack_token_ttl_sec: int = 7200
+    fall_alert_replay_threshold_sec: int = 120
+    fall_alert_max_contacts: int = 5
+    fall_alert_worker_interval_sec: int = 5
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -213,6 +227,73 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
                 ),
             )
         ),
+        # Fall Alerting & SMTP Escalation
+        "smtp_host": yaml_values.get(
+            "smtp_host",
+            _nested_value(yaml_values, "smtp", "host", defaults.smtp_host),
+        ),
+        "smtp_port": int(
+            yaml_values.get(
+                "smtp_port",
+                _nested_value(yaml_values, "smtp", "port", defaults.smtp_port),
+            )
+        ),
+        "smtp_user": yaml_values.get(
+            "smtp_user",
+            _nested_value(yaml_values, "smtp", "user", defaults.smtp_user),
+        ),
+        "smtp_password": yaml_values.get(
+            "smtp_password",
+            _nested_value(yaml_values, "smtp", "password", defaults.smtp_password),
+        ),
+        "smtp_from_name": yaml_values.get(
+            "smtp_from_name",
+            _nested_value(yaml_values, "smtp", "from_name", defaults.smtp_from_name),
+        ),
+        "public_base_url": yaml_values.get(
+            "public_base_url",
+            _nested_value(yaml_values, "fall_alert", "public_base_url", defaults.public_base_url),
+        ),
+        "fall_alert_ack_secret": yaml_values.get(
+            "fall_alert_ack_secret",
+            _nested_value(yaml_values, "fall_alert", "ack_secret", defaults.fall_alert_ack_secret),
+        ),
+        "fall_alert_cancel_window_sec": int(
+            yaml_values.get(
+                "fall_alert_cancel_window_sec",
+                _nested_value(yaml_values, "fall_alert", "cancel_window_sec", defaults.fall_alert_cancel_window_sec),
+            )
+        ),
+        "fall_alert_escalation_step_sec": int(
+            yaml_values.get(
+                "fall_alert_escalation_step_sec",
+                _nested_value(yaml_values, "fall_alert", "escalation_step_sec", defaults.fall_alert_escalation_step_sec),
+            )
+        ),
+        "fall_alert_ack_token_ttl_sec": int(
+            yaml_values.get(
+                "fall_alert_ack_token_ttl_sec",
+                _nested_value(yaml_values, "fall_alert", "ack_token_ttl_sec", defaults.fall_alert_ack_token_ttl_sec),
+            )
+        ),
+        "fall_alert_replay_threshold_sec": int(
+            yaml_values.get(
+                "fall_alert_replay_threshold_sec",
+                _nested_value(yaml_values, "fall_alert", "replay_threshold_sec", defaults.fall_alert_replay_threshold_sec),
+            )
+        ),
+        "fall_alert_max_contacts": int(
+            yaml_values.get(
+                "fall_alert_max_contacts",
+                _nested_value(yaml_values, "fall_alert", "max_contacts", defaults.fall_alert_max_contacts),
+            )
+        ),
+        "fall_alert_worker_interval_sec": int(
+            yaml_values.get(
+                "fall_alert_worker_interval_sec",
+                _nested_value(yaml_values, "fall_alert", "worker_interval_sec", defaults.fall_alert_worker_interval_sec),
+            )
+        ),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -310,12 +391,49 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             ("HEALTHKICKS_PSEUDONYMIZATION_PEPPER", "PSEUDONYMIZATION_PEPPER"),
             str,
         ),
+        # Fall Alerting & SMTP Escalation
+        "smtp_host": (("HEALTHKICKS_SMTP_HOST", "SMTP_HOST"), str),
+        "smtp_port": (("HEALTHKICKS_SMTP_PORT", "SMTP_PORT"), int),
+        "smtp_user": (("HEALTHKICKS_SMTP_USER", "SMTP_USER"), str),
+        "smtp_password": (("HEALTHKICKS_SMTP_PASSWORD", "SMTP_PASSWORD"), str),
+        "smtp_from_name": (("HEALTHKICKS_SMTP_FROM_NAME", "SMTP_FROM_NAME"), str),
+        "public_base_url": (("HEALTHKICKS_PUBLIC_BASE_URL", "PUBLIC_BASE_URL"), str),
+        "fall_alert_ack_secret": (("HEALTHKICKS_FALL_ALERT_ACK_SECRET", "FALL_ALERT_ACK_SECRET"), str),
+        "fall_alert_cancel_window_sec": (
+            ("HEALTHKICKS_FALL_ALERT_CANCEL_WINDOW_SEC", "FALL_ALERT_CANCEL_WINDOW_SEC"),
+            int,
+        ),
+        "fall_alert_escalation_step_sec": (
+            ("HEALTHKICKS_FALL_ALERT_ESCALATION_STEP_SEC", "FALL_ALERT_ESCALATION_STEP_SEC"),
+            int,
+        ),
+        "fall_alert_ack_token_ttl_sec": (
+            ("HEALTHKICKS_FALL_ALERT_ACK_TOKEN_TTL_SEC", "FALL_ALERT_ACK_TOKEN_TTL_SEC"),
+            int,
+        ),
+        "fall_alert_replay_threshold_sec": (
+            ("HEALTHKICKS_FALL_ALERT_REPLAY_THRESHOLD_SEC", "FALL_ALERT_REPLAY_THRESHOLD_SEC"),
+            int,
+        ),
+        "fall_alert_max_contacts": (
+            ("HEALTHKICKS_FALL_ALERT_MAX_CONTACTS", "FALL_ALERT_MAX_CONTACTS"),
+            int,
+        ),
+        "fall_alert_worker_interval_sec": (
+            ("HEALTHKICKS_FALL_ALERT_WORKER_INTERVAL_SEC", "FALL_ALERT_WORKER_INTERVAL_SEC"),
+            int,
+        ),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
         for environment_name in environment_names:
             if environment_value := os.getenv(environment_name):
                 values[field_name] = converter(environment_value)
                 break
+
+    if values.get("fall_alert_ack_secret") == defaults.fall_alert_ack_secret:
+        jwt_sec_val = str(values.get("jwt_secret", ""))
+        if jwt_sec_val and jwt_sec_val != defaults.jwt_secret:
+            values["fall_alert_ack_secret"] = jwt_sec_val
 
     if str(values.get("environment", "")).lower() in ("prod", "production"):
         jwt_sec = str(values.get("jwt_secret", ""))
