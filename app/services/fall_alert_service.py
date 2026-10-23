@@ -1111,6 +1111,15 @@ def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSumm
         }
     )
 
+    loc: FallAlertLocationResponse | None = None
+    if alert.lat is not None and alert.lon is not None:
+        loc = FallAlertLocationResponse(
+            lat=alert.lat,
+            lon=alert.lon,
+            accuracy_m=alert.accuracy_m,
+            captured_at=alert.location_captured_at_utc,
+        )
+
     return FallAlertSummary(
         id=alert.id,
         event_id=alert.event_id,
@@ -1125,6 +1134,7 @@ def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSumm
         cancel_reason=alert.cancel_reason,
         delivery=alert.delivery,
         has_location=(alert.lat is not None and alert.lon is not None),
+        location=loc,
         detected_at=alert.detected_at_utc,
         escalation_started_at=alert.escalation_started_at_utc,
         closed_at=alert.closed_at_utc,
@@ -1177,6 +1187,5 @@ def to_fall_alert_detail(alert: FallAlert, current_user: User) -> FallAlertDetai
 
     return FallAlertDetail(
         **summary.model_dump(),
-        location=location,
         notifications=notif_items,
     )

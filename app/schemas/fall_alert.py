@@ -293,6 +293,7 @@ class FallAlertSummary(BaseModel):
     cancel_reason: str | None = None
     delivery: str
     has_location: bool
+    location: FallAlertLocationResponse | None = None
     detected_at: datetime
     escalation_started_at: datetime | None = None
     closed_at: datetime | None = None
@@ -305,7 +306,6 @@ class FallAlertDetail(FallAlertSummary):
 
     model_config = ConfigDict(extra="forbid")
 
-    location: FallAlertLocationResponse | None = None
     notifications: list[FallAlertNotificationResponse] = Field(default_factory=list)
 
 
