@@ -150,11 +150,11 @@ def build_ack_url(
     notification_id: int,
     config: Settings | None = None,
 ) -> str:
-    """Build the full public URL for the emergency contact acknowledgment page."""
+    """Build the full public URL for the emergency contact acknowledgment page on the frontend."""
     cfg = config or get_settings()
     token = generate_ack_token(alert_id, notification_id, config=cfg)
-    base = cfg.public_base_url.rstrip("/")
-    return f"{base}/api/v1/fall-alerts/ack?token={token}"
+    base = cfg.frontend_url.rstrip("/")
+    return f"{base}/fall-alerts/ack?token={token}"
 
 
 def build_downlink_status_payload(

@@ -326,3 +326,37 @@ class FallAlertAckPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     token: str = Field(min_length=1)
+
+
+class FallAlertAckInfoResponse(BaseModel):
+    """Safe read-only metadata returned to the frontend acknowledgment page."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    alert_id: int
+    patient_name: str
+    contact_name: str
+    detected_at: datetime
+    detected_at_paris: str
+    event_type: str
+    event_type_label: str
+    confidence_pct: int
+    state: str
+    lat: float | None = None
+    lon: float | None = None
+    accuracy_m: float | None = None
+    maps_url: str | None = None
+    already_acknowledged_by: str | None = None
+    cancel_reason: str | None = None
+
+
+class FallAlertAckResultResponse(BaseModel):
+    """Result returned on successful acknowledgment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: str = "ok"
+    state: str
+    alert_id: int
+    acknowledged_by: str
+    message: str

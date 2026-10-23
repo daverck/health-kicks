@@ -778,7 +778,8 @@ def test_sms_escalation_dual_channel_sms_status_and_sms_ack(
     assert sms_cmd["recipient_phone"] == "+32470123456"
     assert sms_cmd["is_test"] is False
     assert "[HealthKicks URGENCE]" in sms_cmd["message"]
-    assert "/api/v1/fall-alerts/ack?token=" in sms_cmd["message"]
+    assert "/fall-alerts/ack?token=" in sms_cmd["message"]
+    assert "https://healthkicks.duckdns.org/fall-alerts/ack?token=" in sms_cmd["message"]
 
     # Check notified_contacts_count == 1 (distinct rank count, not 2!)
     res_list = client.get("/api/v1/fall-alerts", headers=headers)
@@ -1101,24 +1102,31 @@ def test_public_ack_get_is_side_effect_free_and_post_acknowledges(
     notif = db_session.query(FallAlertNotification).filter_by(alert_id=alert.id, rank=1).one()
     token = generate_ack_token(alert.id, notif.id, config=test_settings)
 
-    # 1. GET /api/v1/fall-alerts/ack?token=... does NOT mutate state (safe for email scanners)
-    res_get = client.get(f"/api/v1/fall-alerts/ack?token={token}")
-    assert res_get.status_code == 200
-    assert "text/html" in res_get.headers["content-type"]
-    assert "Jean Martin" in res_get.text
-    assert "Je confirme prendre en charge cette alerte" in res_get.text
+    # 1. GET /api/v1/fall-alerts/ack/info?token=... safe read-only JSON info for the frontend (no side effects)
+    res_info = client.get(f"/api/v1/fall-alerts/ack/info?token={token}")
+    assert res_info.status_code == 200
+    info_data = res_info.json()
+    assert info_data["patient_name"] == "Jean Martin"
+    assert info_data["contact_name"] == "Marie Dupont"
+    assert info_data["state"] == "ESCALATING"
+    assert info_data["confidence_pct"] == 91
+    assert info_data["lat"] == 48.8566
+    assert info_data["lon"] == 2.3522
+    assert "google.com/maps" in info_data["maps_url"]
 
     db_session.refresh(alert)
     assert alert.state == FallAlertState.ESCALATING.value
 
-    # 2. POST /api/v1/fall-alerts/ack (form-urlencoded) transitions to ACKNOWLEDGED
+    # 2. POST /api/v1/fall-alerts/ack (JSON) transitions to ACKNOWLEDGED
     res_post = client.post(
         "/api/v1/fall-alerts/ack",
-        content=f"token={token}",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        json={"token": token},
     )
     assert res_post.status_code == 200
-    assert "Prise en charge confirmée" in res_post.text
+    post_data = res_post.json()
+    assert post_data["status"] == "ok"
+    assert post_data["state"] == "ACKNOWLEDGED"
+    assert post_data["acknowledged_by"] == "Marie Dupont" 
 
     db_session.refresh(alert)
     db_session.refresh(notif)
@@ -1143,10 +1151,10 @@ def test_public_ack_get_is_side_effect_free_and_post_acknowledges(
     )
     assert len(fake_smtp.sent_messages) == 1
 
-    # 4. Expired or tampered token returns 400 HTML
-    res_bad = client.get("/api/v1/fall-alerts/ack?token=invalid-token")
+    # 4. Expired or tampered token returns 400 JSON
+    res_bad = client.get("/api/v1/fall-alerts/ack/info?token=invalid-token")
     assert res_bad.status_code == 400
-    assert "Lien invalide" in res_bad.text
+    assert "invalide" in res_bad.json()["detail"].lower()
 
     serializer = URLSafeTimedSerializer(
         secret_key=test_settings.fall_alert_ack_secret,
