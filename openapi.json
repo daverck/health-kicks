@@ -105,6 +105,18 @@
           "last_name": {
             "title": "Last Name",
             "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           }
         },
         "required": [
@@ -152,6 +164,17 @@
             ],
             "title": "Last Test Email At"
           },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
           "priority": {
             "title": "Priority",
             "type": "integer"
@@ -176,7 +199,7 @@
       },
       "AlertContactTestEmailResponse": {
         "additionalProperties": false,
-        "description": "Response after sending a test email to an emergency contact.",
+        "description": "Response after sending a test email (and optional test SMS) to an emergency contact.",
         "properties": {
           "contact_id": {
             "title": "Contact Id",
@@ -186,6 +209,11 @@
             "format": "date-time",
             "title": "Sent At",
             "type": "string"
+          },
+          "sms_dispatched": {
+            "default": false,
+            "title": "Sms Dispatched",
+            "type": "boolean"
           },
           "status": {
             "default": "sent",
@@ -236,6 +264,18 @@
               }
             ],
             "title": "Last Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           }
         },
         "title": "AlertContactUpdate",
@@ -680,7 +720,8 @@
         "enum": [
           "DETECTED",
           "CONFIRM",
-          "CANCEL"
+          "CANCEL",
+          "SMS_STATUS"
         ],
         "title": "FallAlertAction",
         "type": "string"
@@ -910,6 +951,18 @@
             ],
             "title": "Device Id"
           },
+          "error_message": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
           "event_id": {
             "maxLength": 64,
             "minLength": 1,
@@ -939,6 +992,17 @@
               }
             ]
           },
+          "notification_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notification Id"
+          },
           "sent_at": {
             "anyOf": [
               {
@@ -949,6 +1013,21 @@
               }
             ],
             "title": "Sent At"
+          },
+          "sms_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "SENT",
+                  "FAILED"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sms Status"
           },
           "user_id": {
             "anyOf": [
@@ -1104,7 +1183,7 @@
       },
       "FallAlertNotificationResponse": {
         "additionalProperties": false,
-        "description": "Serialized email notification entry in fall alert detail.",
+        "description": "Serialized notification entry (email or SMS) in fall alert detail.",
         "properties": {
           "acknowledged_at": {
             "anyOf": [
@@ -1118,6 +1197,15 @@
             ],
             "title": "Acknowledged At"
           },
+          "channel": {
+            "default": "email",
+            "enum": [
+              "email",
+              "sms"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
           "contact_email": {
             "title": "Contact Email",
             "type": "string"
@@ -1129,6 +1217,17 @@
           "contact_last_name": {
             "title": "Contact Last Name",
             "type": "string"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
           },
           "error_message": {
             "anyOf": [
@@ -1155,8 +1254,21 @@
             "type": "string"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "SENT",
+                  "PENDING_SMS",
+                  "ACKNOWLEDGED",
+                  "FAILED"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Status"
           }
         },
         "required": [
@@ -6254,7 +6366,7 @@
         ]
       },
       "patch": {
-        "description": "Update first_name, last_name, or email of an emergency contact.",
+        "description": "Update first_name, last_name, email, or phone of an emergency contact.",
         "operationId": "patch_my_alert_contact_api_v1_users_me_alert_contacts__contact_id__patch",
         "parameters": [
           {
@@ -6312,7 +6424,7 @@
     },
     "/api/v1/users/me/alert-contacts/{contact_id}/test-email": {
       "post": {
-        "description": "Send a verification email to an emergency contact (rate-limited to 3/hour per user).",
+        "description": "Send a verification email (and optional test SMS) to an emergency contact (rate-limited to 3/hour per user).",
         "operationId": "send_my_alert_contact_test_email_api_v1_users_me_alert_contacts__contact_id__test_email_post",
         "parameters": [
           {
