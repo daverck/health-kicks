@@ -1,4 +1,4 @@
-"""Comprehensive unit and integration tests for Fall Alerting lifecycle, contacts CRUD, SMTP escalation, and ACK pages."""
+"""Comprehensive unit and integration tests for Fall Alerting lifecycle, contacts CRUD, SMTP escalation, SMS relay, and ACK pages."""
 
 from __future__ import annotations
 
@@ -80,8 +80,11 @@ class FakeIoTClient:
 
     def __init__(self) -> None:
         self.published: list[dict] = []
+        self.fail_publish: bool = False
 
     def publish(self, **kwargs) -> None:
+        if self.fail_publish:
+            raise RuntimeError("Simulated IoT publish failure")
         self.published.append(
             {
                 "topic": kwargs["topic"],
@@ -219,7 +222,7 @@ def _auth_headers(user: User) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# 1. Emergency Contacts CRUD, Reordering, Compaction, and Test Email
+# 1. Emergency Contacts CRUD, Phone Validation, Reordering, Compaction, and Test Email/SMS
 # ---------------------------------------------------------------------------
 
 
@@ -248,6 +251,7 @@ def test_alert_contacts_crud_max_limit_and_compaction(client, patient_user) -> N
         assert body["first_name"] == f"Proche{i}"
         assert body["last_name"] == f"Famille{i}"
         assert body["email"] == f"proche{i}@example.com"
+        assert body["phone"] is None
         assert body["priority"] == i
         created_ids.append(body["id"])
 
@@ -324,7 +328,71 @@ def test_alert_contacts_crud_max_limit_and_compaction(client, patient_user) -> N
     assert res_patch.json()["email"] == "mc.new@example.com"
 
 
-def test_alert_contact_test_email_and_rate_limit(client, patient_user, fake_smtp) -> None:
+def test_alert_contact_phone_normalization_validation_and_clearing(client, patient_user) -> None:
+    headers = _auth_headers(patient_user)
+
+    # Create contact with formatted phone number -> normalized to +32470123456
+    res_create = client.post(
+        "/api/v1/users/me/alert-contacts",
+        headers=headers,
+        json={
+            "first_name": "Marie",
+            "last_name": "Dupont",
+            "email": "marie.phone@example.com",
+            "phone": " +32 (470) 12-34.56 ",
+        },
+    )
+    assert res_create.status_code == 201
+    contact_id = res_create.json()["id"]
+    assert res_create.json()["phone"] == "+32470123456"
+
+    # Invalid phone rejected with 422
+    res_invalid = client.post(
+        "/api/v1/users/me/alert-contacts",
+        headers=headers,
+        json={
+            "first_name": "Bad",
+            "last_name": "Phone",
+            "email": "bad.phone@example.com",
+            "phone": "abc-123",
+        },
+    )
+    assert res_invalid.status_code == 422
+
+    # Update phone only
+    res_update = client.patch(
+        f"/api/v1/users/me/alert-contacts/{contact_id}",
+        headers=headers,
+        json={"phone": "0471 99 88 77"},
+    )
+    assert res_update.status_code == 200
+    assert res_update.json()["phone"] == "0471998877"
+
+    # Clear phone by passing {"phone": null}
+    res_clear = client.patch(
+        f"/api/v1/users/me/alert-contacts/{contact_id}",
+        headers=headers,
+        json={"phone": None},
+    )
+    assert res_clear.status_code == 200
+    assert res_clear.json()["phone"] is None
+
+    # Set phone again then clear with empty string {"phone": "   "}
+    client.patch(
+        f"/api/v1/users/me/alert-contacts/{contact_id}",
+        headers=headers,
+        json={"phone": "+33612345678"},
+    )
+    res_clear_str = client.patch(
+        f"/api/v1/users/me/alert-contacts/{contact_id}",
+        headers=headers,
+        json={"phone": "   "},
+    )
+    assert res_clear_str.status_code == 200
+    assert res_clear_str.json()["phone"] is None
+
+
+def test_alert_contact_test_email_and_rate_limit(client, patient_user, fake_smtp, fake_iot) -> None:
     headers = _auth_headers(patient_user)
     res_create = client.post(
         "/api/v1/users/me/alert-contacts",
@@ -333,12 +401,13 @@ def test_alert_contact_test_email_and_rate_limit(client, patient_user, fake_smtp
             "first_name": "Sophie",
             "last_name": "Martin",
             "email": "sophie.martin@example.com",
+            "phone": "+32470998877",
         },
     )
     assert res_create.status_code == 201
     contact_id = res_create.json()["id"]
 
-    # Send 3 test emails (allowed within 3/hour limit)
+    # Send 3 test emails (allowed within 3/hour limit) -> also dispatches TEST_SMS on MQTT
     for _ in range(3):
         res_test = client.post(
             f"/api/v1/users/me/alert-contacts/{contact_id}/test-email",
@@ -347,9 +416,15 @@ def test_alert_contact_test_email_and_rate_limit(client, patient_user, fake_smtp
         assert res_test.status_code == 202
         assert res_test.json()["status"] == "sent"
         assert res_test.json()["contact_id"] == contact_id
+        assert res_test.json()["sms_dispatched"] is True
 
     assert len(fake_smtp.sent_messages) == 3
     assert "Email de test" in str(fake_smtp.sent_messages[0]["Subject"])
+    assert len(fake_iot.published) == 3
+    assert fake_iot.published[-1]["payload"]["state"] == "TEST_SMS"
+    assert fake_iot.published[-1]["payload"]["sms_command"]["is_test"] is True
+    assert fake_iot.published[-1]["payload"]["sms_command"]["recipient_phone"] == "+32470998877"
+    assert "Test SMS" in fake_iot.published[-1]["payload"]["sms_command"]["message"]
 
     # Verify last_test_email_at was updated
     contacts = client.get("/api/v1/users/me/alert-contacts", headers=headers).json()
@@ -385,7 +460,7 @@ def test_alert_contact_test_email_smtp_failure_returns_502(client, patient_user,
 
 
 # ---------------------------------------------------------------------------
-# 2. Fall Alert Lifecycle: DETECTED, SUPPRESSED, CANCEL, CONFIRM, Escalation
+# 2. Fall Alert Lifecycle: DETECTED, SUPPRESSED, CANCEL, CONFIRM, Escalation & SMS
 # ---------------------------------------------------------------------------
 
 
@@ -625,6 +700,204 @@ def test_fall_alert_sequential_escalation_and_exhaustion(
     assert alert.next_action_at_utc is None
     assert alert.closed_at_utc is not None
     assert fake_iot.published[-1]["payload"]["state"] == "EXHAUSTED"
+
+
+def test_sms_escalation_dual_channel_sms_status_and_sms_ack(
+    client, db_session, patient_user, fake_smtp, fake_iot
+) -> None:
+    headers = _auth_headers(patient_user)
+    ingest_headers = {"X-Ingest-Token": "test-ingest-secret"}
+
+    # Contact #1 has both email and phone
+    client.post(
+        "/api/v1/users/me/alert-contacts",
+        headers=headers,
+        json={
+            "first_name": "Marie",
+            "last_name": "Dupont",
+            "email": "marie@example.com",
+            "phone": "+32470123456",
+        },
+    )
+
+    now = datetime.now(UTC)
+    now_ms = int(now.timestamp() * 1000)
+
+    # DETECTED + CONFIRM -> immediate escalation to Contact #1 (Email + SMS)
+    client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-sms-dual-01",
+            "action": "DETECTED",
+            "device_id": "HK-1",
+            "event_type": "fall_forward",
+            "confidence": 0.94,
+            "detected_at": now_ms,
+            "delivery": "live",
+            "location": {"lat": 50.85, "lon": 4.35, "accuracy_m": 10.0, "captured_at": now_ms},
+            "sent_at": now_ms,
+        },
+    )
+    res_confirm = client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-sms-dual-01",
+            "action": "CONFIRM",
+            "sent_at": now_ms + 1000,
+        },
+    )
+    assert res_confirm.status_code == 200
+    assert res_confirm.json()["state"] == "ESCALATING"
+    alert_id = res_confirm.json()["alert_id"]
+
+    # Check 2 notifications created for rank 1: email (SENT) and sms (PENDING_SMS)
+    notifs = (
+        db_session.query(FallAlertNotification)
+        .filter_by(alert_id=alert_id)
+        .order_by(FallAlertNotification.id.asc())
+        .all()
+    )
+    assert len(notifs) == 2
+    email_notif, sms_notif = notifs[0], notifs[1]
+    assert email_notif.channel == "email"
+    assert email_notif.status == FallAlertNotificationStatus.SENT.value
+    assert sms_notif.channel == "sms"
+    assert sms_notif.contact_phone == "+32470123456"
+    assert sms_notif.status == FallAlertNotificationStatus.PENDING_SMS.value
+
+    # Check MQTT downlink contains sms_command with sms_notif.id
+    downlink_payload = fake_iot.published[-1]["payload"]
+    assert downlink_payload["state"] == "ESCALATING"
+    assert "sms_command" in downlink_payload
+    sms_cmd = downlink_payload["sms_command"]
+    assert sms_cmd["notification_id"] == sms_notif.id
+    assert sms_cmd["recipient_phone"] == "+32470123456"
+    assert sms_cmd["is_test"] is False
+    assert "[HealthKicks URGENCE]" in sms_cmd["message"]
+    assert "/api/v1/fall-alerts/ack?token=" in sms_cmd["message"]
+
+    # Check notified_contacts_count == 1 (distinct rank count, not 2!)
+    res_list = client.get("/api/v1/fall-alerts", headers=headers)
+    assert res_list.status_code == 200
+    assert res_list.json()["items"][0]["notified_contacts_count"] == 1
+
+    # Mobile sends SMS_STATUS = SENT
+    res_sms_sent = client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-sms-dual-01",
+            "action": "SMS_STATUS",
+            "notification_id": sms_notif.id,
+            "sms_status": "SENT",
+            "sent_at": now_ms + 3000,
+        },
+    )
+    assert res_sms_sent.status_code == 200
+    db_session.refresh(sms_notif)
+    assert sms_notif.status == FallAlertNotificationStatus.SENT.value
+
+    # Contact clicks the ACK link from the SMS -> transitions alert & SMS notification to ACKNOWLEDGED
+    sms_token = sms_cmd["message"].split("token=")[-1].strip()
+    res_ack = client.post(
+        "/api/v1/fall-alerts/ack",
+        json={"token": sms_token},
+    )
+    assert res_ack.status_code == 200
+    db_session.refresh(sms_notif)
+    assert sms_notif.status == FallAlertNotificationStatus.ACKNOWLEDGED.value
+    assert sms_notif.acknowledged_at_utc is not None
+
+    # Late SMS_STATUS after ACKNOWLEDGED does not overwrite ACKNOWLEDGED status
+    client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-sms-dual-01",
+            "action": "SMS_STATUS",
+            "notification_id": sms_notif.id,
+            "sms_status": "FAILED",
+            "error_message": "Late failure ignored",
+            "sent_at": now_ms + 5000,
+        },
+    )
+    db_session.refresh(sms_notif)
+    assert sms_notif.status == FallAlertNotificationStatus.ACKNOWLEDGED.value
+
+
+def test_sms_status_failed_records_error_message(
+    client, db_session, patient_user
+) -> None:
+    headers = _auth_headers(patient_user)
+    ingest_headers = {"X-Ingest-Token": "test-ingest-secret"}
+
+    client.post(
+        "/api/v1/users/me/alert-contacts",
+        headers=headers,
+        json={
+            "first_name": "Paul",
+            "last_name": "Martin",
+            "email": "paul@example.com",
+            "phone": "+32471223344",
+        },
+    )
+
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-sms-fail-status",
+            "action": "DETECTED",
+            "device_id": "HK-1",
+            "event_type": "fall_lateral",
+            "confidence": 0.90,
+            "detected_at": now_ms,
+            "delivery": "live",
+            "sent_at": now_ms,
+        },
+    )
+    client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-sms-fail-status",
+            "action": "CONFIRM",
+            "sent_at": now_ms + 1000,
+        },
+    )
+
+    sms_notif = (
+        db_session.query(FallAlertNotification)
+        .filter_by(channel="sms")
+        .one()
+    )
+
+    res_fail = client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-sms-fail-status",
+            "action": "SMS_STATUS",
+            "notification_id": sms_notif.id,
+            "sms_status": "FAILED",
+            "error_message": "SEND_SMS permission denied on Android device",
+            "sent_at": now_ms + 2000,
+        },
+    )
+    assert res_fail.status_code == 200
+    db_session.refresh(sms_notif)
+    assert sms_notif.status == FallAlertNotificationStatus.FAILED.value
+    assert sms_notif.error_message == "SEND_SMS permission denied on Android device"
 
 
 def test_smtp_failure_immediately_escalates_to_next_contact(
@@ -941,9 +1214,11 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     notif = FallAlertNotification(
         alert_id=alert_patient.id,
         rank=1,
+        channel="sms",
         contact_first_name="Marie",
         contact_last_name="Dupont",
         contact_email="marie.dupont@example.com",
+        contact_phone="+32470123456",
         status=FallAlertNotificationStatus.ACKNOWLEDGED.value,
         sent_at_utc=now - timedelta(minutes=9),
         acknowledged_at_utc=now - timedelta(minutes=7),
@@ -966,7 +1241,9 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
         headers=_auth_headers(patient_user),
     )
     assert det_pat.status_code == 200
+    assert det_pat.json()["notifications"][0]["channel"] == "sms"
     assert det_pat.json()["notifications"][0]["contact_email"] == "marie.dupont@example.com"
+    assert det_pat.json()["notifications"][0]["contact_phone"] == "+32470123456"
     assert det_pat.json()["notifications"][0]["contact_last_name"] == "Dupont"
 
     # 2. Clinician only sees their own alert, and gets 404 on patient's alert
@@ -1001,3 +1278,4 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     assert adm_body["acknowledged_by"] == {"first_name": "Marie", "last_name": "D."}
     assert adm_body["notifications"][0]["contact_last_name"] == "D."
     assert adm_body["notifications"][0]["contact_email"] == "m***@e***.com"
+    assert adm_body["notifications"][0]["contact_phone"] == "+32*******56"

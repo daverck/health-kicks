@@ -92,6 +92,7 @@ class ProcessedMessage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     msg_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
+
 # --- Auth & user management (Step 2) ---
 
 
@@ -109,8 +110,12 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    google_sub: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
-    azure_sub: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    google_sub: Mapped[str | None] = mapped_column(
+        String(255), unique=True, index=True, nullable=True
+    )
+    azure_sub: Mapped[str | None] = mapped_column(
+        String(255), unique=True, index=True, nullable=True
+    )
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
@@ -150,9 +155,7 @@ class StudioSession(Base):
     """Recorded IMU data capture session for ML dataset curation."""
 
     __tablename__ = "studio_sessions"
-    __table_args__ = (
-        Index("ix_studio_sessions_created_at", "created_at"),
-    )
+    __table_args__ = (Index("ix_studio_sessions_created_at", "created_at"),)
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
@@ -179,7 +182,9 @@ class DailyActivityStep(Base):
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     device_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     activity_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -198,13 +203,17 @@ class HourlyActivityStep(Base):
 
     __tablename__ = "hourly_activity_steps"
     __table_args__ = (
-        UniqueConstraint("device_id", "date", "hour", "activity_type", name="uq_device_date_hour_activity"),
+        UniqueConstraint(
+            "device_id", "date", "hour", "activity_type", name="uq_device_date_hour_activity"
+        ),
         Index("ix_hourly_activity_steps_user_date", "user_id", "date"),
         Index("ix_hourly_activity_steps_device_date", "device_id", "date"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     device_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     hour: Mapped[int] = mapped_column(SmallInteger, nullable=False)
@@ -239,6 +248,7 @@ class FallAlertAction(str, Enum):
     DETECTED = "DETECTED"
     CONFIRM = "CONFIRM"
     CANCEL = "CANCEL"
+    SMS_STATUS = "SMS_STATUS"
 
 
 class FallAlertDelivery(str, Enum):
@@ -256,9 +266,10 @@ class FallAlertCancelReason(str, Enum):
 
 
 class FallAlertNotificationStatus(str, Enum):
-    """Delivery status for an individual emergency contact email."""
+    """Delivery status for an individual emergency contact notification (email or SMS)."""
 
     SENT = "SENT"
+    PENDING_SMS = "PENDING_SMS"
     ACKNOWLEDGED = "ACKNOWLEDGED"
     FAILED = "FAILED"
 
@@ -279,6 +290,7 @@ class AlertContact(Base):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False)
     last_test_email_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -295,7 +307,7 @@ class AlertContact(Base):
 
 
 class FallAlert(Base):
-    """Fall alert lifecycle record with sequential email escalation state."""
+    """Fall alert lifecycle record with sequential email and SMS escalation state."""
 
     __tablename__ = "fall_alerts"
     __table_args__ = (
@@ -357,7 +369,7 @@ class FallAlert(Base):
 
 
 class FallAlertNotification(Base):
-    """Audit trail of each email dispatched during fall alert escalation."""
+    """Audit trail of each notification (email or SMS) dispatched during fall alert escalation."""
 
     __tablename__ = "fall_alert_notifications"
 
@@ -366,10 +378,14 @@ class FallAlertNotification(Base):
         Integer, ForeignKey("fall_alerts.id", ondelete="CASCADE"), index=True, nullable=False
     )
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    channel: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="email", server_default="email"
+    )
     contact_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     contact_first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     contact_last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     contact_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     sent_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

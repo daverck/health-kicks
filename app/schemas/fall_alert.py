@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -12,6 +13,7 @@ from app.db.models import (
 )
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PHONE_REGEX = re.compile(r"^\+?[0-9]{6,20}$")
 VALID_FALL_EVENT_TYPES = {"fall_forward", "fall_backward", "fall_lateral", "fall_generic"}
 
 
@@ -26,6 +28,18 @@ def _validate_and_clean_email(value: str) -> str:
     cleaned = value.strip().lower()
     if not (3 <= len(cleaned) <= 320) or not EMAIL_REGEX.match(cleaned):
         raise ValueError("Invalid email address format")
+    return cleaned
+
+
+def _validate_and_clean_phone(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    cleaned = re.sub(r"[\s\-\.\(\)]+", "", stripped)
+    if len(cleaned) > 32 or not PHONE_REGEX.match(cleaned):
+        raise ValueError("Invalid phone number format")
     return cleaned
 
 
@@ -55,6 +69,9 @@ class FallAlertIngestPayload(BaseModel):
     delivery: FallAlertDelivery | None = None
     location: FallAlertLocationPayload | None = None
     cancel_reason: FallAlertCancelReason | None = None
+    notification_id: int | None = None
+    sms_status: Literal["SENT", "FAILED"] | None = None
+    error_message: str | None = Field(default=None, max_length=512)
     sent_at: int | None = None
 
     @model_validator(mode="after")
@@ -79,6 +96,16 @@ class FallAlertIngestPayload(BaseModel):
                 raise ValueError(
                     f"Invalid event_type '{self.event_type}'. Must be one of {sorted(VALID_FALL_EVENT_TYPES)}"
                 )
+        elif self.action == FallAlertAction.SMS_STATUS:
+            missing = []
+            if self.notification_id is None:
+                missing.append("notification_id")
+            if self.sms_status is None:
+                missing.append("sms_status")
+            if missing:
+                raise ValueError(
+                    f"Missing required fields for SMS_STATUS action: {', '.join(missing)}"
+                )
         return self
 
 
@@ -102,6 +129,7 @@ class AlertContactCreate(BaseModel):
     first_name: str
     last_name: str
     email: str
+    phone: str | None = Field(default=None, max_length=32)
 
     @field_validator("first_name")
     @classmethod
@@ -118,6 +146,11 @@ class AlertContactCreate(BaseModel):
     def clean_email(cls, v: str) -> str:
         return _validate_and_clean_email(v)
 
+    @field_validator("phone", mode="before")
+    @classmethod
+    def clean_phone(cls, v: str | None) -> str | None:
+        return _validate_and_clean_phone(v)
+
 
 class AlertContactUpdate(BaseModel):
     """Request body for updating an emergency contact."""
@@ -127,6 +160,7 @@ class AlertContactUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     email: str | None = None
+    phone: str | None = Field(default=None, max_length=32)
 
     @field_validator("first_name")
     @classmethod
@@ -149,10 +183,22 @@ class AlertContactUpdate(BaseModel):
             return None
         return _validate_and_clean_email(v)
 
+    @field_validator("phone", mode="before")
+    @classmethod
+    def clean_phone(cls, v: str | None) -> str | None:
+        return _validate_and_clean_phone(v)
+
     @model_validator(mode="after")
     def check_at_least_one_field(self) -> "AlertContactUpdate":
-        if self.first_name is None and self.last_name is None and self.email is None:
-            raise ValueError("At least one field (first_name, last_name, email) must be provided")
+        if (
+            self.first_name is None
+            and self.last_name is None
+            and self.email is None
+            and "phone" not in self.model_fields_set
+        ):
+            raise ValueError(
+                "At least one field (first_name, last_name, email, phone) must be provided"
+            )
         return self
 
 
@@ -173,6 +219,7 @@ class AlertContactResponse(BaseModel):
     first_name: str
     last_name: str
     email: str
+    phone: str | None = None
     priority: int
     last_test_email_at: datetime | None = None
     created_at: datetime
@@ -180,13 +227,14 @@ class AlertContactResponse(BaseModel):
 
 
 class AlertContactTestEmailResponse(BaseModel):
-    """Response after sending a test email to an emergency contact."""
+    """Response after sending a test email (and optional test SMS) to an emergency contact."""
 
     model_config = ConfigDict(extra="forbid")
 
     status: str = "sent"
     contact_id: int
     sent_at: datetime
+    sms_dispatched: bool = False
 
 
 class FallAlertAcknowledgedBy(BaseModel):
@@ -210,16 +258,18 @@ class FallAlertLocationResponse(BaseModel):
 
 
 class FallAlertNotificationResponse(BaseModel):
-    """Serialized email notification entry in fall alert detail."""
+    """Serialized notification entry (email or SMS) in fall alert detail."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: int
     rank: int
+    channel: Literal["email", "sms"] = "email"
     contact_first_name: str
     contact_last_name: str
     contact_email: str
-    status: str
+    contact_phone: str | None = None
+    status: Literal["SENT", "PENDING_SMS", "ACKNOWLEDGED", "FAILED"] | str
     sent_at: datetime
     acknowledged_at: datetime | None = None
     error_message: str | None = None

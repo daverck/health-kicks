@@ -1,4 +1,4 @@
-"""Business logic and state machine for fall alerting, emergency contacts, and SMTP escalation."""
+"""Business logic and state machine for fall alerting, emergency contacts, SMTP email, and mobile SMS escalation."""
 
 from __future__ import annotations
 
@@ -40,7 +40,12 @@ from app.schemas.fall_alert import (
     FallAlertSummary,
 )
 from app.services.aws_iot_service import AWSIoTPublishService
-from app.services.email_service import SmtpEmailChannel
+from app.services.email_service import (
+    SmtpEmailChannel,
+    build_fall_alert_sms_body,
+    build_test_sms_body,
+    format_paris_datetime,
+)
 
 logger = logging.getLogger("healthkicks.fall_alert")
 
@@ -77,6 +82,20 @@ def _mask_last_name(last_name: str | None) -> str:
         return ""
     cleaned = last_name.strip()
     return f"{cleaned[0].upper()}." if cleaned else ""
+
+
+def _mask_phone(phone: str | None) -> str | None:
+    if not phone:
+        return None
+    cleaned = phone.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) <= 4:
+        return "*" * len(cleaned)
+    prefix_len = 3 if cleaned.startswith("+") else 2
+    if len(cleaned) <= prefix_len + 2:
+        return cleaned[:1] + "*" * (len(cleaned) - 2) + cleaned[-1:]
+    return f"{cleaned[:prefix_len]}{'*' * (len(cleaned) - prefix_len - 2)}{cleaned[-2:]}"
 
 
 def generate_ack_token(
@@ -138,7 +157,12 @@ def build_ack_url(
     return f"{base}/api/v1/fall-alerts/ack?token={token}"
 
 
-def build_downlink_status_payload(db: Session, alert: FallAlert) -> dict[str, Any]:
+def build_downlink_status_payload(
+    db: Session,
+    alert: FallAlert,
+    *,
+    sms_command: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build the MQTT downlink payload for healthkicks/v1/users/{user_id}/fall-alert/status."""
     contacts_total = 0
     if alert.contacts_snapshot_json:
@@ -161,7 +185,7 @@ def build_downlink_status_payload(db: Session, alert: FallAlert) -> dict[str, An
             "last_name": alert.acknowledged_by_last_name or "",
         }
 
-    return {
+    payload: dict[str, Any] = {
         "event_id": alert.event_id,
         "alert_id": alert.id,
         "state": alert.state,
@@ -172,20 +196,26 @@ def build_downlink_status_payload(db: Session, alert: FallAlert) -> dict[str, An
         "next_action_at": _iso_utc(alert.next_action_at_utc),
         "updated_at": _iso_utc(alert.updated_at_utc or datetime.now(UTC)),
     }
+    if sms_command is not None:
+        payload["sms_command"] = sms_command
+    return payload
 
 
 def _publish_status_safe(
     db: Session,
     alert: FallAlert,
     iot_publisher: AWSIoTPublishService | None,
-) -> None:
+    *,
+    sms_command: dict[str, Any] | None = None,
+) -> bool:
     if iot_publisher is None:
-        return
+        return False
     try:
-        payload = build_downlink_status_payload(db, alert)
-        iot_publisher.publish_fall_alert_status(alert.user_id, payload)
+        payload = build_downlink_status_payload(db, alert, sms_command=sms_command)
+        return bool(iot_publisher.publish_fall_alert_status(alert.user_id, payload))
     except Exception:
         logger.exception("Failed to publish downlink fall alert status for alert %s", alert.id)
+        return False
 
 
 def resolve_user_for_ingest(db: Session, raw_user_id: int | str) -> User:
@@ -251,6 +281,7 @@ def _start_or_advance_escalation(
                 "first_name": c.first_name,
                 "last_name": c.last_name,
                 "email": c.email,
+                "phone": c.phone,
                 "rank": idx,
             }
             for idx, c in enumerate(contacts, start=1)
@@ -292,20 +323,26 @@ def _start_or_advance_escalation(
 
     while next_rank <= total_contacts:
         contact_entry = snapshot_list[next_rank - 1]
-        notif = FallAlertNotification(
+        contact_phone: str | None = contact_entry.get("phone")
+
+        # 1. Email notification channel
+        email_notif = FallAlertNotification(
             alert_id=alert.id,
             rank=next_rank,
+            channel="email",
             contact_id=contact_entry.get("contact_id"),
             contact_first_name=contact_entry["first_name"],
             contact_last_name=contact_entry["last_name"],
             contact_email=contact_entry["email"],
+            contact_phone=contact_phone,
             status=FallAlertNotificationStatus.SENT.value,
             sent_at_utc=now_utc,
         )
-        db.add(notif)
+        db.add(email_notif)
         db.flush()
 
-        ack_url = build_ack_url(alert.id, notif.id, config=cfg)
+        email_ack_url = build_ack_url(alert.id, email_notif.id, config=cfg)
+        email_sent = False
         try:
             email_channel.send_fall_alert_email(
                 recipient_email=contact_entry["email"],
@@ -318,20 +355,14 @@ def _start_or_advance_escalation(
                 detected_at_utc=_ensure_utc(alert.detected_at_utc) or now_utc,
                 rank=next_rank,
                 total_contacts=total_contacts,
-                ack_url=ack_url,
+                ack_url=email_ack_url,
                 lat=alert.lat,
                 lon=alert.lon,
                 accuracy_m=alert.accuracy_m,
             )
-            notif.status = FallAlertNotificationStatus.SENT.value
-            notif.sent_at_utc = now_utc
-            alert.current_contact_rank = next_rank
-            alert.next_action_at_utc = now_utc + timedelta(seconds=cfg.fall_alert_escalation_step_sec)
-            alert.updated_at_utc = now_utc
-            db.commit()
-            db.refresh(alert)
-            _publish_status_safe(db, alert, iot_publisher)
-            return
+            email_notif.status = FallAlertNotificationStatus.SENT.value
+            email_notif.sent_at_utc = now_utc
+            email_sent = True
         except Exception as exc:
             logger.error(
                 "SMTP escalation failed for alert %s rank %d (%s): %s",
@@ -340,15 +371,86 @@ def _start_or_advance_escalation(
                 contact_entry["email"],
                 exc,
             )
-            notif.status = FallAlertNotificationStatus.FAILED.value
-            notif.sent_at_utc = now_utc
-            notif.error_message = str(exc)[:512]
-            alert.current_contact_rank = next_rank
-            alert.updated_at_utc = now_utc
+            email_notif.status = FallAlertNotificationStatus.FAILED.value
+            email_notif.sent_at_utc = now_utc
+            email_notif.error_message = str(exc)[:512]
             db.flush()
-            next_rank += 1
 
-    # All contacts have been notified and the last step expired (or all failed SMTP)
+        # 2. SMS notification channel (when phone is configured on this contact)
+        sms_notif: FallAlertNotification | None = None
+        sms_command: dict[str, Any] | None = None
+        if contact_phone:
+            sms_notif = FallAlertNotification(
+                alert_id=alert.id,
+                rank=next_rank,
+                channel="sms",
+                contact_id=contact_entry.get("contact_id"),
+                contact_first_name=contact_entry["first_name"],
+                contact_last_name=contact_entry["last_name"],
+                contact_email=contact_entry["email"],
+                contact_phone=contact_phone,
+                status=FallAlertNotificationStatus.PENDING_SMS.value,
+                sent_at_utc=now_utc,
+            )
+            db.add(sms_notif)
+            db.flush()
+
+            sms_ack_url = build_ack_url(alert.id, sms_notif.id, config=cfg)
+            maps_url = (
+                f"https://www.google.com/maps?q={alert.lat:.6f},{alert.lon:.6f}"
+                if (alert.lat is not None and alert.lon is not None)
+                else None
+            )
+            detected_at_str = format_paris_datetime(_ensure_utc(alert.detected_at_utc) or now_utc)
+            sms_body = build_fall_alert_sms_body(
+                patient_name=patient_name,
+                detected_at_str=detected_at_str,
+                ack_url=sms_ack_url,
+                maps_url=maps_url,
+            )
+            sms_command = {
+                "notification_id": sms_notif.id,
+                "contact_id": contact_entry.get("contact_id"),
+                "contact_first_name": contact_entry["first_name"],
+                "recipient_phone": contact_phone,
+                "message": sms_body,
+                "is_test": False,
+            }
+
+        # 3. Evaluate whether this contact rank was reached via at least one channel
+        if email_sent or sms_command is not None:
+            alert.current_contact_rank = next_rank
+            alert.next_action_at_utc = now_utc + timedelta(
+                seconds=cfg.fall_alert_escalation_step_sec
+            )
+            alert.updated_at_utc = now_utc
+            db.commit()
+            db.refresh(alert)
+
+            mqtt_ok = _publish_status_safe(
+                db,
+                alert,
+                iot_publisher,
+                sms_command=sms_command,
+            )
+            if sms_notif is not None and not mqtt_ok:
+                sms_notif.status = FallAlertNotificationStatus.FAILED.value
+                sms_notif.error_message = "MQTT downlink publish failed"
+                db.commit()
+                db.refresh(alert)
+                if not email_sent:
+                    # Neither email nor SMS succeeded for this contact -> try next contact immediately
+                    next_rank += 1
+                    continue
+            return
+
+        # Both email failed and no phone configured -> immediately try next contact
+        alert.current_contact_rank = next_rank
+        alert.updated_at_utc = now_utc
+        db.flush()
+        next_rank += 1
+
+    # All contacts have been notified and the last step expired (or all failed)
     alert.state = FallAlertState.EXHAUSTED.value
     alert.closed_at_utc = now_utc
     alert.next_action_at_utc = None
@@ -367,7 +469,7 @@ def ingest_fall_alert_event(
     config: Settings | None = None,
     now_utc: datetime | None = None,
 ) -> FallAlertIngestResponse:
-    """Process an incoming DETECTED, CONFIRM, or CANCEL fall alert event."""
+    """Process an incoming DETECTED, CONFIRM, CANCEL, or SMS_STATUS fall alert event."""
     cfg = config or get_settings()
     now = _ensure_utc(now_utc) or datetime.now(UTC)
     channel = email_channel or SmtpEmailChannel(config=cfg)
@@ -515,6 +617,38 @@ def ingest_fall_alert_event(
             event_id=alert.event_id,
             state=alert.state,
             duplicate=True,
+        )
+
+    if payload.action == FallAlertAction.SMS_STATUS:
+        assert payload.notification_id is not None
+        assert payload.sms_status is not None
+        notif = (
+            db.query(FallAlertNotification)
+            .join(FallAlert, FallAlertNotification.alert_id == FallAlert.id)
+            .filter(
+                FallAlertNotification.id == payload.notification_id,
+                FallAlert.user_id == user.id,
+            )
+            .one_or_none()
+        )
+        if notif is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Fall alert notification '{payload.notification_id}' not found",
+            )
+        alert = notif.alert
+        if notif.status != FallAlertNotificationStatus.ACKNOWLEDGED.value:
+            notif.status = payload.sms_status
+            notif.error_message = payload.error_message
+            alert.updated_at_utc = now
+            db.commit()
+            db.refresh(alert)
+        return FallAlertIngestResponse(
+            status="ok",
+            alert_id=alert.id,
+            event_id=alert.event_id,
+            state=alert.state,
+            duplicate=False,
         )
 
     # Action == CANCEL
@@ -720,6 +854,7 @@ def create_alert_contact(
         first_name=payload.first_name,
         last_name=payload.last_name,
         email=payload.email,
+        phone=payload.phone,
         priority=len(existing) + 1,
         created_at=now,
         updated_at=now,
@@ -743,7 +878,9 @@ def reorder_alert_contacts(
         .all()
     )
     existing_by_id = {c.id: c for c in existing}
-    if len(payload.contact_ids) != len(existing_by_id) or set(payload.contact_ids) != set(existing_by_id.keys()):
+    if len(payload.contact_ids) != len(existing_by_id) or set(payload.contact_ids) != set(
+        existing_by_id.keys()
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="contact_ids must contain the exact set of existing contact IDs for this user",
@@ -765,7 +902,7 @@ def update_alert_contact(
     contact_id: int,
     payload: AlertContactUpdate,
 ) -> AlertContactResponse:
-    """Update first_name, last_name, and/or email of an existing emergency contact."""
+    """Update first_name, last_name, email, and/or phone of an existing emergency contact."""
     contact = (
         db.query(AlertContact)
         .filter(AlertContact.id == contact_id, AlertContact.user_id == user_id)
@@ -798,6 +935,8 @@ def update_alert_contact(
         contact.first_name = payload.first_name
     if payload.last_name is not None:
         contact.last_name = payload.last_name
+    if "phone" in payload.model_fields_set:
+        contact.phone = payload.phone
 
     contact.updated_at = datetime.now(UTC)
     db.commit()
@@ -842,9 +981,10 @@ def send_test_email_to_contact(
     contact_id: int,
     *,
     email_channel: SmtpEmailChannel | None = None,
+    iot_publisher: AWSIoTPublishService | None = None,
     config: Settings | None = None,
 ) -> AlertContactTestEmailResponse:
-    """Send a test email to a specific emergency contact and record last_test_email_at."""
+    """Send a test email (and optional test SMS command via MQTT) to a specific emergency contact."""
     contact = (
         db.query(AlertContact)
         .filter(AlertContact.id == contact_id, AlertContact.user_id == user.id)
@@ -869,7 +1009,9 @@ def send_test_email_to_contact(
             priority=contact.priority,
         )
     except Exception as exc:
-        logger.error("Failed to send test email to contact %s (%s): %s", contact.id, contact.email, exc)
+        logger.error(
+            "Failed to send test email to contact %s (%s): %s", contact.id, contact.email, exc
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to send test email via SMTP server",
@@ -880,10 +1022,47 @@ def send_test_email_to_contact(
     contact.updated_at = now
     db.commit()
     db.refresh(contact)
+
+    sms_dispatched = False
+    if contact.phone and iot_publisher is not None:
+        sms_body = build_test_sms_body(
+            patient_name=patient_name,
+            priority=contact.priority,
+        )
+        test_payload: dict[str, Any] = {
+            "event_id": f"test-sms-{contact.id}-{int(now.timestamp())}",
+            "alert_id": 0,
+            "state": "TEST_SMS",
+            "current_contact_rank": contact.priority,
+            "contacts_total": 1,
+            "acknowledged_by": None,
+            "cancel_reason": None,
+            "next_action_at": None,
+            "updated_at": _iso_utc(now),
+            "sms_command": {
+                "notification_id": None,
+                "contact_id": contact.id,
+                "contact_first_name": contact.first_name,
+                "recipient_phone": contact.phone,
+                "message": sms_body,
+                "is_test": True,
+            },
+        }
+        try:
+            sms_dispatched = bool(iot_publisher.publish_fall_alert_status(user.id, test_payload))
+        except Exception:
+            logger.exception(
+                "Failed to publish test SMS command for contact %s (user %s)",
+                contact.id,
+                user.id,
+            )
+            sms_dispatched = False
+
     return AlertContactTestEmailResponse(
         status="sent",
         contact_id=contact.id,
         sent_at=now,
+        sms_dispatched=sms_dispatched,
     )
 
 
@@ -918,7 +1097,19 @@ def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSumm
             last_name=ack_last,
         )
 
-    notified_count = len(alert.notifications) if alert.notifications is not None else 0
+    notifications = alert.notifications or []
+    notified_count = len(
+        {
+            n.rank
+            for n in notifications
+            if n.status
+            in (
+                FallAlertNotificationStatus.SENT.value,
+                FallAlertNotificationStatus.PENDING_SMS.value,
+                FallAlertNotificationStatus.ACKNOWLEDGED.value,
+            )
+        }
+    )
 
     return FallAlertSummary(
         id=alert.id,
@@ -961,17 +1152,22 @@ def to_fall_alert_detail(alert: FallAlert, current_user: User) -> FallAlertDetai
         if is_own:
             c_last = n.contact_last_name
             c_email = n.contact_email
+            c_phone = n.contact_phone
         else:
             c_last = _mask_last_name(n.contact_last_name)
             c_email = mask_email(n.contact_email) or "***"
+            c_phone = _mask_phone(n.contact_phone)
 
+        channel_val = "sms" if getattr(n, "channel", "email") == "sms" else "email"
         notif_items.append(
             FallAlertNotificationResponse(
                 id=n.id,
                 rank=n.rank,
+                channel=channel_val,  # type: ignore[arg-type]
                 contact_first_name=n.contact_first_name,
                 contact_last_name=c_last,
                 contact_email=c_email,
+                contact_phone=c_phone,
                 status=n.status,
                 sent_at=n.sent_at_utc,
                 acknowledged_at=n.acknowledged_at_utc,

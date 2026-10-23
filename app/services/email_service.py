@@ -1,4 +1,4 @@
-"""SMTP email delivery service for fall alerting and emergency contact verification."""
+"""SMTP email delivery service and SMS message builders for fall alerting."""
 
 from __future__ import annotations
 
@@ -43,6 +43,29 @@ def format_paris_datetime(dt: datetime) -> str:
         offset_hours = 2 if dst_start <= utc_dt < dst_end else 1
         local_dt = utc_dt.astimezone(timezone(timedelta(hours=offset_hours)))
     return local_dt.strftime("%d/%m/%Y à %H:%M:%S")
+
+
+def build_fall_alert_sms_body(
+    *,
+    patient_name: str,
+    detected_at_str: str,
+    ack_url: str,
+    maps_url: str | None = None,
+) -> str:
+    """Build a concise plain-text SMS body for emergency fall alerting."""
+    location_part = f" Position : {maps_url}" if maps_url else ""
+    return (
+        f"[HealthKicks URGENCE] Chute détectée pour {patient_name} ({detected_at_str})."
+        f"{location_part} Confirmez la prise en charge : {ack_url}"
+    )
+
+
+def build_test_sms_body(*, patient_name: str, priority: int) -> str:
+    """Build a plain-text test SMS body for emergency contact verification."""
+    return (
+        f"[HealthKicks] Test SMS : vous êtes configuré(e) comme proche d'urgence "
+        f"(priorité n°{priority}) pour {patient_name}."
+    )
 
 
 class SmtpEmailChannel:

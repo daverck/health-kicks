@@ -217,7 +217,7 @@ def create_fall_alerts_router(
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> AlertContactResponse:
-        """Update first_name, last_name, or email of an emergency contact."""
+        """Update first_name, last_name, email, or phone of an emergency contact."""
         return update_alert_contact(
             db=db,
             user_id=user.id,
@@ -248,7 +248,7 @@ def create_fall_alerts_router(
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> AlertContactTestEmailResponse:
-        """Send a verification email to an emergency contact (rate-limited to 3/hour per user)."""
+        """Send a verification email (and optional test SMS) to an emergency contact (rate-limited to 3/hour per user)."""
         rl_key = f"alert_contact_test_email:user:{user.id}"
         allowed, retry_after = rate_limiter.is_allowed(
             rl_key, max_requests=3, window_seconds=3600.0
@@ -264,6 +264,7 @@ def create_fall_alerts_router(
             user=user,
             contact_id=contact_id,
             email_channel=email_channel,
+            iot_publisher=publisher,
         )
 
     # ------------------------------------------------------------------
@@ -340,7 +341,7 @@ def create_fall_alerts_router(
             token_value = request.query_params.get("token", "")
 
         try:
-            alert, notif, transitioned = acknowledge_fall_alert(
+            alert, notif, _transitioned = acknowledge_fall_alert(
                 db=db,
                 token=token_value,
                 iot_publisher=publisher,
