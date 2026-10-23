@@ -32,12 +32,12 @@ def _resolve_target_device_ids(device_id: str, user: CurrentUser, db: Session) -
     """Resolve and authorize target device IDs from comma-separated string or 'all'."""
     raw_devs = [d.strip() for d in device_id.split(",") if d.strip()]
     if not raw_devs or any(d.lower() == "all" for d in raw_devs):
-        if user.role in (UserRole.admin, UserRole.clinician):
+        if user.role == UserRole.admin:
             return [d.device_id for d in db.query(Device.device_id).all()]
         return [o.device_id for o in db.query(DeviceOwnership.device_id).filter_by(user_id=user.id).all()]
 
     for dev_id in raw_devs:
-        verify_device_ownership(db=db, user=user, device_id=dev_id, allow_clinician=True)
+        verify_device_ownership(db=db, user=user, device_id=dev_id, allow_clinician=False)
     return raw_devs
 
 
@@ -95,8 +95,8 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
 
         query = db.query(ActivityEvent).filter(ActivityEvent.device_id.in_(target_device_ids))
 
-        # Temporal isolation for regular users: cannot view historical data from before device binding
-        if user.role == UserRole.user:
+        # Temporal isolation for non-admin users (user and clinician): cannot view historical data from before device binding
+        if user.role != UserRole.admin:
             ownerships = (
                 db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
                 .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))
@@ -166,7 +166,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
             response.headers["X-Next-Cursor"] = next_cursor
 
         user_owned_devs: set[str] = set()
-        if user.role in (UserRole.admin, UserRole.clinician):
+        if user.role == UserRole.admin:
             user_owned_devs = {
                 o.device_id
                 for o in db.query(DeviceOwnership.device_id).filter_by(user_id=user.id).all()
@@ -179,7 +179,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
                 event_type=event.event_type,
                 timestamp_utc=event.timestamp_utc,
                 confidence_score=event.confidence_score,
-                is_pseudonymized=(user.role in (UserRole.admin, UserRole.clinician) and event.device_id not in user_owned_devs),
+                is_pseudonymized=(user.role == UserRole.admin and event.device_id not in user_owned_devs),
             )
             for event in events
         ]
@@ -216,8 +216,8 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
 
         query = db.query(HapticLog).filter(HapticLog.device_id.in_(target_device_ids))
 
-        # Temporal isolation for regular users: cannot view historical haptics from before device binding
-        if user.role == UserRole.user:
+        # Temporal isolation for non-admin users (user and clinician): cannot view historical haptics from before device binding
+        if user.role != UserRole.admin:
             ownerships = (
                 db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
                 .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))

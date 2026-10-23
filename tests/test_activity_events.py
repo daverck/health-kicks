@@ -54,10 +54,16 @@ def test_user(db_session) -> User:
     db_session.commit()
     db_session.refresh(user)
 
+    early_bound = datetime(2020, 1, 1, tzinfo=UTC)
     db_session.add_all([
-        DeviceOwnership(user_id=user.id, device_id="HK-1"),
-        DeviceOwnership(user_id=user.id, device_id="HK-2"),
-        DeviceOwnership(user_id=user.id, device_id="HK-99"),
+        DeviceOwnership(user_id=user.id, device_id="HK-1", bound_at_utc=early_bound),
+        DeviceOwnership(user_id=user.id, device_id="HK-2", bound_at_utc=early_bound),
+        DeviceOwnership(user_id=user.id, device_id="HK-99", bound_at_utc=early_bound),
+        DeviceOwnership(user_id=user.id, device_id="HK-FILTER", bound_at_utc=early_bound),
+        DeviceOwnership(user_id=user.id, device_id="HK-FALLS", bound_at_utc=early_bound),
+        DeviceOwnership(user_id=user.id, device_id="HK-ALL", bound_at_utc=early_bound),
+        DeviceOwnership(user_id=user.id, device_id="HK-DATES", bound_at_utc=early_bound),
+        DeviceOwnership(user_id=user.id, device_id="HK-COMBO", bound_at_utc=early_bound),
     ])
     db_session.commit()
     return user
@@ -624,7 +630,7 @@ def test_ingest_raw_telemetry_admin_allowed_any_device(client, db_session, monke
 
 
 def test_list_activities_unowned_device_forbidden(client, db_session) -> None:
-    """Querying activities of an unowned device returns 403 Forbidden for regular users."""
+    """Querying activities of an unowned device returns 403 Forbidden for regular users and clinicians."""
     reg = User(
         google_sub="sub-regular-act",
         email="reg_act@example.com",
@@ -632,12 +638,21 @@ def test_list_activities_unowned_device_forbidden(client, db_session) -> None:
         role=UserRole.user,
         is_active=True,
     )
-    db_session.add(reg)
+    clinician = User(
+        google_sub="sub-clinician-act",
+        email="clin_act@example.com",
+        name="Clinician Act",
+        role=UserRole.clinician,
+        is_active=True,
+    )
+    db_session.add_all([reg, clinician])
     db_session.commit()
-    token = token_service.issue_access_token(reg)
-    headers = {"Authorization": f"Bearer {token}"}
-    res = client.get("/api/v1/devices/HK-UNOWNED/events/activities", headers=headers)
-    assert res.status_code == 403
+
+    for u in (reg, clinician):
+        token = token_service.issue_access_token(u)
+        headers = {"Authorization": f"Bearer {token}"}
+        res = client.get("/api/v1/devices/HK-UNOWNED/events/activities", headers=headers)
+        assert res.status_code == 403
 
 
 def test_ingest_raw_telemetry_zero_samples_ignored(client, db_session, monkeypatch):
@@ -681,4 +696,3 @@ def test_ingest_raw_telemetry_zero_samples_ignored(client, db_session, monkeypat
 
     # Ensure no session was inserted into Aurora
     assert db_session.query(StudioSession).filter_by(id=sess_id).first() is None
-

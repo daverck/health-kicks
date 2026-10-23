@@ -61,7 +61,7 @@ def create_steps_router() -> APIRouter:
         db: Session = Depends(get_db),
     ) -> DailyStepsHistoryResponse:
         """Fetch step counts history grouped by day and activity type."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
 
         today = datetime.now(UTC).date()
 
@@ -102,7 +102,7 @@ def create_steps_router() -> APIRouter:
         db: Session = Depends(get_db),
     ) -> HourlyStepsResponse:
         """Fetch hourly step counts breakdown distributed across the 24 hours of a target date."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
         return get_hourly_steps(
             db=db,
             device_id=device_id,

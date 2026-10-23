@@ -92,10 +92,10 @@ def get_steps_history(
     user_role: UserRole,
     from_date: date,
     to_date: date,
-) -> DailyStepsHistoryResponse:
+ ) -> DailyStepsHistoryResponse:
     """Retrieve historical daily step counts aggregated by activity type across a date range.
 
-    Enforces authorization: regular users can only query devices they own or have uploaded data for.
+    Enforces authorization: non-admin users (user and clinician) can only query their own data.
     """
     stmt = (
         select(DailyActivityStep)
@@ -107,7 +107,7 @@ def get_steps_history(
         .order_by(DailyActivityStep.date.asc(), DailyActivityStep.activity_type.asc())
     )
 
-    if user_role not in (UserRole.admin, UserRole.clinician):
+    if user_role != UserRole.admin:
         stmt = stmt.where(DailyActivityStep.user_id == user_id)
 
     rows = db.execute(stmt).scalars().all()
@@ -154,7 +154,7 @@ def get_hourly_steps(
         HourlyActivityStep.device_id == device_id,
         HourlyActivityStep.date == target_date,
     )
-    if user_role not in (UserRole.admin, UserRole.clinician):
+    if user_role != UserRole.admin:
         stmt_hourly = stmt_hourly.where(HourlyActivityStep.user_id == user_id)
 
     hourly_records = db.execute(stmt_hourly).scalars().all()
@@ -181,4 +181,3 @@ def get_hourly_steps(
         date=target_date,
         hourly_data=items,
     )
-

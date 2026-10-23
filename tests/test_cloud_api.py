@@ -325,11 +325,20 @@ def test_list_activities_and_haptic_ownership_check() -> None:
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     regular = User(id=2, email="reg@test.com", name="Regular", role=UserRole.user)
+    clinician = User(id=3, email="clin@test.com", name="Clinician", role=UserRole.clinician)
+    t = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
     session.add_all([
         regular,
+        clinician,
         Device(device_id="HK-1"),
+        Device(device_id="HK-2"),
         Device(device_id="HK-unowned"),
-        DeviceOwnership(user_id=2, device_id="HK-1"),
+        DeviceOwnership(user_id=2, device_id="HK-1", bound_at_utc=t - timedelta(days=1)),
+        DeviceOwnership(user_id=3, device_id="HK-2", bound_at_utc=t - timedelta(days=1)),
+        ActivityEvent(device_id="HK-1", event_type="walk", confidence_score=0.9, timestamp_utc=t),
+        ActivityEvent(device_id="HK-2", event_type="run", confidence_score=0.95, timestamp_utc=t),
+        HapticLog(device_id="HK-1", intensity=100, duration_ms=200, triggered_at_utc=t, triggered_by_user=True),
+        HapticLog(device_id="HK-2", intensity=150, duration_ms=300, triggered_at_utc=t, triggered_by_user=True),
     ])
     session.commit()
 
@@ -350,15 +359,34 @@ def test_list_activities_and_haptic_ownership_check() -> None:
         haptic_history_endpoint("HK-1,HK-unowned", user=regular, page=1, page_size=10, db=session)
     assert exc_haptic.value.status_code == 403
 
-    # device_id="all" for regular user only resolves their owned devices without error
-    res_all = activities_endpoint("all", user=regular, page=1, page_size=10, db=session)
-    assert res_all.total == 0
+    # Clinician querying another user's device (HK-1) raises 403 Forbidden
+    with pytest.raises(HTTPException) as exc_clin_act:
+        activities_endpoint("HK-1", user=clinician, page=1, page_size=10, db=session)
+    assert exc_clin_act.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc_clin_hap:
+        haptic_history_endpoint("HK-1", user=clinician, page=1, page_size=10, db=session)
+    assert exc_clin_hap.value.status_code == 403
+
+    # device_id="all" for regular user and clinician only resolves their own devices
+    res_reg_all = activities_endpoint("all", user=regular, page=1, page_size=10, db=session)
+    assert res_reg_all.total == 1
+    assert res_reg_all.items[0].device_id == "HK-1"
+
+    res_clin_all = activities_endpoint("all", user=clinician, page=1, page_size=10, db=session)
+    assert res_clin_all.total == 1
+    assert res_clin_all.items[0].device_id == "HK-2"
+    assert res_clin_all.items[0].is_pseudonymized is False
+
+    hap_clin_all = haptic_history_endpoint("all", user=clinician, page=1, page_size=10, db=session)
+    assert hap_clin_all.total == 1
+    assert hap_clin_all.items[0].device_id == "HK-2"
 
     session.close()
 
 
 def test_temporal_isolation_for_rebound_device() -> None:
-    """Ensure regular users cannot view events prior to device binding, but clinicians/admins can."""
+    """Ensure non-admin users (user and clinician) cannot view events prior to device binding, while admins can."""
     class DummyPublisher:
         def publish_haptic(self, device_id, command):
             return True
@@ -374,13 +402,16 @@ def test_temporal_isolation_for_rebound_device() -> None:
     old_user = User(id=10, email="old@test.com", name="Old Owner", role=UserRole.user)
     new_user = User(id=11, email="new@test.com", name="New Owner", role=UserRole.user)
     clinician = User(id=12, email="doc@test.com", name="Clinician", role=UserRole.clinician)
+    admin = User(id=13, email="admin@test.com", name="Admin", role=UserRole.admin)
 
     session.add_all([
         old_user,
         new_user,
         clinician,
+        admin,
         Device(device_id="HK-X"),
         DeviceOwnership(user_id=new_user.id, device_id="HK-X", bound_at_utc=t1_bound),
+        DeviceOwnership(user_id=clinician.id, device_id="HK-X", bound_at_utc=t1_bound),
         # Activity events: one before binding, one after binding
         ActivityEvent(device_id="HK-X", event_type="walk", confidence_score=0.9, timestamp_utc=t0),
         ActivityEvent(device_id="HK-X", event_type="run", confidence_score=0.95, timestamp_utc=t2),
@@ -398,23 +429,24 @@ def test_temporal_isolation_for_rebound_device() -> None:
         route.endpoint for route in router.routes if route.path.endswith("haptic/history")
     )
 
-    # 1. New user (regular) only sees events/logs strictly on or after t1_bound
-    act_new = activities_endpoint("HK-X", user=new_user, page=1, page_size=10, db=session)
-    assert act_new.total == 1
-    assert act_new.items[0].event_type == "run"
+    # 1. New user (regular) and clinician only see events/logs strictly on or after t1_bound
+    for u in (new_user, clinician):
+        act_u = activities_endpoint("HK-X", user=u, page=1, page_size=10, db=session)
+        assert act_u.total == 1
+        assert act_u.items[0].event_type == "run"
 
-    hap_new = haptic_history_endpoint("HK-X", user=new_user, page=1, page_size=10, db=session)
-    assert hap_new.total == 1
-    assert hap_new.items[0].intensity == 150
+        hap_u = haptic_history_endpoint("HK-X", user=u, page=1, page_size=10, db=session)
+        assert hap_u.total == 1
+        assert hap_u.items[0].intensity == 150
 
-    # 2. Clinician sees all events and logs (both before and after t1_bound)
-    act_doc = activities_endpoint("HK-X", user=clinician, page=1, page_size=10, db=session)
-    assert act_doc.total == 2
-    assert {item.event_type for item in act_doc.items} == {"walk", "run"}
+    # 2. Admin sees all events and logs (both before and after t1_bound)
+    act_adm = activities_endpoint("HK-X", user=admin, page=1, page_size=10, db=session)
+    assert act_adm.total == 2
+    assert {item.event_type for item in act_adm.items} == {"walk", "run"}
 
-    hap_doc = haptic_history_endpoint("HK-X", user=clinician, page=1, page_size=10, db=session)
-    assert hap_doc.total == 2
-    assert {item.intensity for item in hap_doc.items} == {100, 150}
+    hap_adm = haptic_history_endpoint("HK-X", user=admin, page=1, page_size=10, db=session)
+    assert hap_adm.total == 2
+    assert {item.intensity for item in hap_adm.items} == {100, 150}
 
     session.close()
 
@@ -473,4 +505,3 @@ def test_list_haptic_history_cursor_pagination() -> None:
     assert page2.next_cursor is not None
 
     session.close()
-
