@@ -1,20 +1,50 @@
 # HealthKicks Backend
 
-FastAPI Cloud API for the **HealthKicks** connected smart shoe: remote haptic stimulation commands, activity event tracking, AWS IoT ingestion webhook, and Studio telemetry curation.
+FastAPI Cloud API for the **HealthKicks** connected smart shoe ecosystem: remote haptic stimulation commands, activity event tracking, fall detection alerting & sequential emergency escalation, AWS IoT ingestion webhooks, and Studio telemetry curation.
 
 ---
 
 ## Architecture
 
-- `app/main.py`: Assembles the stateless FastAPI Cloud API, lifecycle hooks, and database migrations.
-- `app/api/v1/`: Exposes REST endpoints (authentication, devices, haptics, activities, studio sessions, and the `/api/v1/ingest/event` webhook).
-- `app/db/database.py`: Provides synchronous SQLAlchemy engine sessions, connection pool resilience, and automatic AWS RDS IAM DB authentication when enabled.
-- `app/db/models.py`: Declares database persistence models (`Device`, `DeviceOwnership`, `ActivityEvent`, `HapticLog`, `User`, `StudioSession`, and the idempotent message ledger).
-- `app/schemas/`: Contains strict Pydantic validation contracts and DTO schemas.
+- `app/main.py`: Assembles the stateless FastAPI Cloud API, lifecycle hooks, background workers, and database migrations.
+- `app/api/v1/`: Exposes REST endpoints (authentication, devices, haptics, activities, fall alerts & emergency contacts, steps sync, studio sessions, and the `/api/v1/ingest/event` & `/api/v1/internal/fall-alerts` webhooks).
+- `app/db/database.py`: Synchronous SQLAlchemy engine sessions, connection pool resilience, and automatic AWS RDS IAM DB authentication.
+- `app/db/models.py`: Declares database persistence models (`Device`, `DeviceOwnership`, `ActivityEvent`, `FallAlert`, `FallAlertNotification`, `AlertContact`, `DailyStepsSync`, `HapticLog`, `User`, `StudioSession`, and the idempotent message ledger).
+- `app/schemas/`: Strict Pydantic v2 validation contracts and DTO schemas.
 - `app/services/aws_iot_service.py`: Dispatches AWS IoT MQTT commands via boto3 `iot-data` without a persistent MQTT client.
+- `app/services/email_service.py`: Formats and delivers emergency alert emails via SMTP (STARTTLS) and Paris-localized timestamps.
+- `app/services/fall_alert_service.py`: Orchestrates the sequential emergency escalation worker, HMAC token generation/verification, SMS downlink command formatting, and transition states.
 - `app/services/telemetry_service.py`: Interfaces with Amazon DynamoDB for high-frequency IMU telemetry storage, time-range queries, and dataset aggregation.
 - `app/services/ingestion_service.py`: Validates and persists incoming edge sensor events.
 - `app/core/config.py`: Loads `config.yaml` and handles environment variable overrides.
+
+---
+
+## Fall Alerting & Emergency Escalation
+
+The backend includes a stateful, robust escalation engine for fall incidents:
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING : DETECTED (live)
+    [*] --> SUPPRESSED : DETECTED (replay / delay > 120s)
+    PENDING --> CANCELLED : CANCEL (user_cancel / fall_recovery)
+    PENDING --> ESCALATING : 60s window elapsed OR user CONFIRM
+    PENDING --> EXHAUSTED : 60s elapsed with 0 contacts configured
+    ESCALATING --> ESCALATING : 180s without ACK -> notify next contact
+    ESCALATING --> CANCELLED : CANCEL (patient got up or cancelled)
+    ESCALATING --> ACKNOWLEDGED : POST /api/v1/fall-alerts/ack (valid token <= 2h)
+    ESCALATING --> EXHAUSTED : Last contact elapsed + 180s without ACK
+    EXHAUSTED --> ACKNOWLEDGED : Late ACK received (token valid <= 2h)
+    CANCELLED --> [*]
+    ACKNOWLEDGED --> [*]
+    SUPPRESSED --> [*]
+```
+
+- **Dual-Channel Notification**: Alerts contacts sequentially by priority. For each contact, dispatches an **Email (SMTP)** and, if a phone number is registered, publishes an **SMS Command** via MQTT Downlink (`healthkicks/v1/users/{user_id}/fall-alert/status`) for local GSM transmission by the patient's phone.
+- **Direct Frontend Link Generation**: Builds SMS & Email links pointing straight to the Angular frontend: `${frontend_url}/fall-alerts/ack?token=${token}`.
+- **Safe Read-Only Inspection**: `GET /api/v1/fall-alerts/ack/info?token=...` enables the frontend to fetch alert details without triggering state changes (immune to link preview bots).
+- **Explicit Acknowledgment**: `POST /api/v1/fall-alerts/ack` receives a JSON payload `{"token": "..."}`, validates the HMAC signature and expiration (2 hours), updates state to `ACKNOWLEDGED`, halts further escalation, and publishes confirmation to the patient's phone.
 
 ---
 
@@ -35,17 +65,44 @@ The health endpoint `GET /api/v1/health` verifies database connectivity and retu
 
 ## REST Endpoints Overview
 
+### Authentication & Users
 - `POST /api/v1/auth/google/callback`: Exchange Google OAuth2 authorization code for JWT tokens.
 - `POST /api/v1/auth/azure/callback`: Exchange Microsoft Entra ID code for JWT tokens.
 - `POST /api/v1/auth/refresh`: Refresh expired access token with token rotation.
+- `GET /api/v1/users/me`: Current user profile information and role.
+
+### Devices & Haptics
 - `GET /api/v1/devices`: List registered devices (or user-bound devices).
 - `POST /api/v1/devices/{device_id}/haptic/trigger`: Trigger remote haptic vibration command.
-- `GET /api/v1/devices/{device_id}/events/activities`: Paginated list of detected activity events.
+- `GET /api/v1/devices/{device_id}/haptic/history`: Paginated log of haptic commands.
+
+### Activity Events & Steps
+- `GET /api/v1/devices/{device_id}/events/activities`: Paginated list of detected activity and fall events.
+- `POST /api/v1/steps/sync`: Synchronize daily step count aggregates from mobile odometry.
+- `GET /api/v1/steps/history`: Query daily step history with activity breakdowns.
+
+### Fall Alerting & Emergency Contacts
+- `GET /api/v1/users/me/alert-contacts`: List emergency contacts ordered by priority (1..5).
+- `POST /api/v1/users/me/alert-contacts`: Register a new emergency contact (email required, phone optional).
+- `PUT /api/v1/users/me/alert-contacts/order`: Reorder priority list.
+- `PATCH /api/v1/users/me/alert-contacts/{contact_id}`: Update contact names, email, or phone.
+- `DELETE /api/v1/users/me/alert-contacts/{contact_id}`: Remove contact and re-compact priorities.
+- `POST /api/v1/users/me/alert-contacts/{contact_id}/test-email`: Dispatch a test verification email and optional SMS command.
+- `GET /api/v1/fall-alerts`: Paginated fall alerts history with state/date filters and RBAC isolation.
+- `GET /api/v1/fall-alerts/{alert_id}`: Full detail and audit timeline of a specific fall alert.
+- `GET /api/v1/fall-alerts/ack/info`: Public, safe read-only endpoint returning alert metadata for a signed token.
+- `POST /api/v1/fall-alerts/ack`: Public confirmation endpoint acknowledging an alert and halting escalation.
+
+### Studio Mode & Telemetry
 - `GET /api/v1/studio/sessions`: Paginated historical studio capture sessions with RBAC and label filters.
-- `GET /api/v1/studio/sessions/{id}/readings`: Fetch raw IMU sensor frames from DynamoDB for Chart.js inspection.
+- `GET /api/v1/studio/sessions/{id}/readings`: Fetch raw IMU sensor frames from DynamoDB for inspection.
 - `PATCH /api/v1/studio/sessions/{id}`: Reclassify studio session label in PostgreSQL and DynamoDB.
-- `DELETE /api/v1/studio/sessions/{id}`: Purge studio session and delete all raw telemetry frames in DynamoDB.
-- `POST /api/v1/ingest/event`: Ingestion webhook for AWS IoT rule engine (requires `X-HealthKicks-Ingest-Token`).
+- `PATCH /api/v1/studio/sessions/{id}/trim`: Non-destructive trimming of studio recording bounds.
+- `DELETE /api/v1/studio/sessions/{id}`: Purge studio session and associated raw telemetry frames.
+
+### Ingestion Webhooks
+- `POST /api/v1/ingest/event`: General edge activity and fall detection webhook from AWS IoT rules.
+- `POST /api/v1/internal/fall-alerts`: Stateful fall alerting webhook (`DETECTED`, `CONFIRM`, `CANCEL`, `SMS_STATUS`).
 
 ---
 
@@ -75,11 +132,17 @@ The configuration file path can be customized with `HEALTHKICKS_CONFIG_FILE`.
 Key environment variables:
 - `DATABASE_URL`: PostgreSQL connection string.
 - `USE_RDS_IAM`: Set to `true` when running on AWS with IAM role authentication.
-- `HEALTHKICKS_INGEST_TOKEN`: Shared secret for the event ingestion endpoint.
+- `FRONTEND_URL` / `HEALTHKICKS_FRONTEND_URL`: Public Angular frontend URL (e.g. `https://healthkicks.duckdns.org` or `http://localhost:4200`).
+- `HEALTHKICKS_INGEST_TOKEN`: Shared secret for internal ingestion webhooks.
 - `HEALTHKICKS_JWT_SECRET`: Signing secret for JWT access tokens.
 - `AWS_REGION`: AWS target region (default: `eu-north-1`).
 - `AWS_IOT_ENDPOINT`: AWS IoT Core REST endpoint for publishing commands.
 - `DYNAMODB_TELEMETRY_TABLE`: DynamoDB table name (default: `healthkicks_telemetry`).
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`: SMTP credentials for emergency email alerts.
+- `FALL_ALERT_ACK_SECRET`: Secret key used for signing acknowledgment HMAC tokens.
+- `FALL_ALERT_ACK_TOKEN_TTL_SEC`: Token validity duration (default: `7200` seconds / 2 hours).
+- `FALL_ALERT_CANCEL_WINDOW_SEC`: Time window before escalation begins (default: `60` seconds).
+- `FALL_ALERT_ESCALATION_STEP_SEC`: Time between successive contacts (default: `180` seconds / 3 minutes).
 
 ---
 
@@ -129,5 +192,3 @@ uv run python -m scripts.train_detector --synthetic
 ```
 
 For full architecture and parameters details, refer to the [Machine Learning Training Guide](docs/ML_TRAINING.md).
-
-
