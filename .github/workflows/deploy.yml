@@ -87,6 +87,10 @@ jobs:
             # Connexion à ECR depuis l'EC2
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
+            # Nettoyage préventif des conteneurs arrêtés et des images inutilisées (y compris taguées)
+            docker container prune -f
+            docker image prune -a -f
+
             # Récupération de l'image construite pour ce commit
             attempt=1
             max_attempts=3
@@ -107,9 +111,6 @@ jobs:
             docker stop healthkicks-backend || true
             docker rm healthkicks-backend || true
 
-            # Nettoyage des anciennes images inutilisées pour libérer le disque
-            docker image prune -f
-
             # Relancement du conteneur avec les variables IAM
             docker run -d \
               --name healthkicks-backend \
@@ -117,3 +118,6 @@ jobs:
               -p 8000:8000 \
               --env-file /home/ubuntu/.env \
               "$IMAGE_URI"
+
+            # Nettoyage de l'ancienne image remplacée pour garder le disque propre
+            docker image prune -a -f
