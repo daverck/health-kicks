@@ -109,6 +109,17 @@ class FallAlertIngestPayload(BaseModel):
         return self
 
 
+class FallAlertSmsStatusRequest(BaseModel):
+    """Payload sent by mobile client to report execution status of SMS relay."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    notification_id: int
+    sms_status: Literal["SENT", "FAILED"]
+    error_message: str | None = Field(default=None, max_length=512)
+    sent_at: int | None = None
+
+
 class FallAlertIngestResponse(BaseModel):
     """Response returned by the internal fall alert ingestion endpoint."""
 

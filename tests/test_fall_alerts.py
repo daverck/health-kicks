@@ -19,6 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.rate_limit import rate_limiter
 from app.db.database import get_db
 from app.db.models import (
+    AlertContact,
     Base,
     FallAlert,
     FallAlertNotification,
@@ -1287,3 +1288,92 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     assert adm_body["notifications"][0]["contact_last_name"] == "D."
     assert adm_body["notifications"][0]["contact_email"] == "m***@e***.com"
     assert adm_body["notifications"][0]["contact_phone"] == "+32*******56"
+
+
+def test_mobile_direct_sms_status_endpoint(
+    client: TestClient,
+    db_session: Session,
+    patient_user: User,
+) -> None:
+    """Test that mobile gateway can report SMS status directly via authenticated REST endpoint."""
+    headers = _auth_headers(patient_user)
+    ingest_headers = {"X-Ingest-Token": "test-ingest-secret"}
+    contact = AlertContact(
+        user_id=patient_user.id,
+        first_name="Sophie",
+        last_name="Martin",
+        email="sophie@example.com",
+        phone="+33612345678",
+        priority=1,
+    )
+    db_session.add(contact)
+    db_session.commit()
+
+    now = datetime.now(UTC)
+    now_ms = int(now.timestamp() * 1000)
+
+    # Ingest fall alert
+    payload_detected = {
+        "user_id": str(patient_user.id),
+        "event_id": "evt-direct-sms-01",
+        "action": "DETECTED",
+        "device_id": "HK-2",
+        "event_type": "fall_forward",
+        "confidence": 0.95,
+        "detected_at": now_ms,
+        "delivery": "live",
+        "sent_at": now_ms,
+    }
+    res_det = client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json=payload_detected,
+    )
+    assert res_det.status_code == 200
+    alert_id = res_det.json()["alert_id"]
+
+    # Confirm early -> triggers escalation
+    res_conf = client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.id),
+            "event_id": "evt-direct-sms-01",
+            "action": "CONFIRM",
+            "sent_at": now_ms + 1000,
+        },
+    )
+    assert res_conf.status_code == 200
+
+    # Notification in DB is initially PENDING_SMS
+    sms_notif = (
+        db_session.query(FallAlertNotification)
+        .filter_by(alert_id=alert_id, channel="sms")
+        .one()
+    )
+    assert sms_notif.status == FallAlertNotificationStatus.PENDING_SMS.value
+
+    # Authenticated mobile calls POST /api/v1/fall-alerts/sms-status
+    sent_timestamp_ms = now_ms + 2500
+    res_status = client.post(
+        "/api/v1/fall-alerts/sms-status",
+        headers=headers,
+        json={
+            "notification_id": sms_notif.id,
+            "sms_status": "SENT",
+            "sent_at": sent_timestamp_ms,
+        },
+    )
+    assert res_status.status_code == 200
+    assert res_status.json()["status"] == "ok"
+
+    # Verify status transitioned to SENT in DB
+    db_session.refresh(sms_notif)
+    assert sms_notif.status == FallAlertNotificationStatus.SENT.value
+
+    # Verify detail endpoint returns SENT
+    res_detail = client.get(f"/api/v1/fall-alerts/{alert_id}", headers=headers)
+    assert res_detail.status_code == 200
+    detail = res_detail.json()
+    sms_item = [n for n in detail["notifications"] if n["channel"] == "sms"][0]
+    assert sms_item["status"] == "SENT"

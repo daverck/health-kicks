@@ -23,6 +23,8 @@ from app.schemas.fall_alert import (
     FallAlertAckPayload,
     FallAlertAckResultResponse,
     FallAlertDetail,
+    FallAlertIngestResponse,
+    FallAlertSmsStatusRequest,
     PaginatedFallAlertsResponse,
 )
 from app.services.aws_iot_service import AWSIoTPublishService
@@ -39,6 +41,7 @@ from app.services.fall_alert_service import (
     to_fall_alert_detail,
     to_fall_alert_summary,
     update_alert_contact,
+    update_sms_notification_status,
 )
 
 logger = logging.getLogger("healthkicks.api.fall_alerts")
@@ -243,6 +246,24 @@ def create_fall_alerts_router(
 
     # C. Fall Alert History (/api/v1/fall-alerts)
     # ------------------------------------------------------------------
+
+    @router.post(
+        "/fall-alerts/sms-status",
+        response_model=FallAlertIngestResponse,
+        summary="Report native SMS delivery status from mobile gateway",
+    )
+    def report_sms_status(
+        payload: FallAlertSmsStatusRequest,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> FallAlertIngestResponse:
+        """Report execution status of SMS relay directly from authenticated mobile client."""
+        return update_sms_notification_status(
+            db=db,
+            user_id=user.id,
+            payload=payload,
+            iot_publisher=publisher,
+        )
 
     @router.get(
         "/fall-alerts",

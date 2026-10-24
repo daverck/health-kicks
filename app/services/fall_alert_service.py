@@ -36,6 +36,7 @@ from app.schemas.fall_alert import (
     FallAlertIngestPayload,
     FallAlertIngestResponse,
     FallAlertLocationResponse,
+    FallAlertSmsStatusRequest,
     FallAlertNotificationResponse,
     FallAlertSummary,
 )
@@ -622,15 +623,18 @@ def ingest_fall_alert_event(
     if payload.action == FallAlertAction.SMS_STATUS:
         assert payload.notification_id is not None
         assert payload.sms_status is not None
-        notif = (
+        notif_query = (
             db.query(FallAlertNotification)
             .join(FallAlert, FallAlertNotification.alert_id == FallAlert.id)
-            .filter(
-                FallAlertNotification.id == payload.notification_id,
-                FallAlert.user_id == user.id,
-            )
-            .one_or_none()
+            .filter(FallAlertNotification.id == payload.notification_id)
         )
+        if payload.event_id:
+            notif = notif_query.filter(
+                (FallAlert.user_id == user.id) | (FallAlert.event_id == payload.event_id)
+            ).first()
+        else:
+            notif = notif_query.filter(FallAlert.user_id == user.id).first()
+
         if notif is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -640,9 +644,18 @@ def ingest_fall_alert_event(
         if notif.status != FallAlertNotificationStatus.ACKNOWLEDGED.value:
             notif.status = payload.sms_status
             notif.error_message = payload.error_message
+            if payload.sent_at:
+                try:
+                    notif.sent_at_utc = datetime.fromtimestamp(payload.sent_at / 1000.0, tz=UTC)
+                except Exception:
+                    notif.sent_at_utc = now
+            else:
+                notif.sent_at_utc = now
             alert.updated_at_utc = now
             db.commit()
             db.refresh(alert)
+            if iot_publisher is not None:
+                _publish_status_safe(db, alert, iot_publisher)
         return FallAlertIngestResponse(
             status="ok",
             alert_id=alert.id,
@@ -1067,6 +1080,55 @@ def send_test_email_to_contact(
 
 
 # --- Serialization & GDPR Pseudonymization ---
+
+
+def update_sms_notification_status(
+    db: Session,
+    user_id: int,
+    payload: FallAlertSmsStatusRequest,
+    *,
+    now_utc: datetime | None = None,
+    iot_publisher: AWSIoTPublishService | None = None,
+) -> FallAlertIngestResponse:
+    """Update status of a fall alert notification from authenticated mobile user."""
+    now = _ensure_utc(now_utc) or datetime.now(UTC)
+    notif = (
+        db.query(FallAlertNotification)
+        .join(FallAlert, FallAlertNotification.alert_id == FallAlert.id)
+        .filter(
+            FallAlertNotification.id == payload.notification_id,
+            FallAlert.user_id == user_id,
+        )
+        .one_or_none()
+    )
+    if notif is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Fall alert notification '{payload.notification_id}' not found",
+        )
+    alert = notif.alert
+    if notif.status != FallAlertNotificationStatus.ACKNOWLEDGED.value:
+        notif.status = payload.sms_status
+        notif.error_message = payload.error_message
+        if payload.sent_at:
+            try:
+                notif.sent_at_utc = datetime.fromtimestamp(payload.sent_at / 1000.0, tz=UTC)
+            except Exception:
+                notif.sent_at_utc = now
+        else:
+            notif.sent_at_utc = now
+        alert.updated_at_utc = now
+        db.commit()
+        db.refresh(alert)
+        if iot_publisher is not None:
+            _publish_status_safe(db, alert, iot_publisher)
+    return FallAlertIngestResponse(
+        status="ok",
+        alert_id=alert.id,
+        event_id=alert.event_id,
+        state=alert.state,
+        duplicate=False,
+    )
 
 
 def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSummary:
