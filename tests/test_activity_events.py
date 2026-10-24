@@ -527,6 +527,28 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
     db_session.refresh(session_rec)
     assert session_rec.sample_count == 94
     assert session_rec.duration_sec == 2.1
+    assert session_rec.is_hitl is False
+
+    # Test HITL raw session ingestion
+    hitl_sess_id = uuid.uuid4()
+    hitl_payload = {
+        "header": {"device_id": "HK-TEST", "session_id": str(hitl_sess_id)},
+        "payload": {
+            "device_id": "HK-TEST",
+            "session_id": str(hitl_sess_id),
+            "label": "sit_down",
+            "sample_count": 76,
+            "duration_sec": 4.0,
+            "is_hitl": True,
+            "readings": [{"timestamp": 1726224000.0 + i, "ax": 0.1, "ay": 0.9, "az": -0.1} for i in range(76)],
+        },
+    }
+    res_hitl = client.post("/api/v1/ingest/telemetry/raw", json=hitl_payload, headers=headers)
+    assert res_hitl.status_code == 200
+    hitl_rec = db_session.query(StudioSession).filter_by(id=hitl_sess_id).first()
+    assert hitl_rec is not None
+    assert hitl_rec.is_hitl is True
+    assert hitl_rec.sample_count == 76
 
 
 def test_ingest_raw_telemetry_device_mismatch_forbidden(client, db_session, monkeypatch):

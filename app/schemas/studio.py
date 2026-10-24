@@ -40,6 +40,7 @@ class StudioSessionSummary(StrictModel):
     sample_count: int = 0
     duration_sec: float = 5.0
     is_validated: bool = False
+    is_hitl: bool = False
     created_at: datetime
 
 

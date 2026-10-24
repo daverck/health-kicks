@@ -159,6 +159,8 @@ def ingest_raw_telemetry(
         studio_session.sample_count = sample_count
         if payload.get("label"):
             studio_session.label = payload["label"]
+        if "is_hitl" in payload:
+            studio_session.is_hitl = bool(payload["is_hitl"])
         if duration_sec is not None:
             studio_session.duration_sec = duration_sec
         session.commit()
@@ -175,6 +177,7 @@ def ingest_raw_telemetry(
 
     user_id = ownership.user_id
 
+    is_hitl = bool(payload.get("is_hitl", False))
     studio_session = StudioSession(
         id=sess_uuid,
         user_id=user_id,
@@ -183,6 +186,7 @@ def ingest_raw_telemetry(
         sample_count=sample_count,
         duration_sec=5.0 if duration_sec is None else duration_sec,
         is_validated=False,
+        is_hitl=is_hitl,
         created_at=datetime.now(UTC),
     )
     session.add(studio_session)

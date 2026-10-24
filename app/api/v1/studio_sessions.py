@@ -61,6 +61,7 @@ def create_studio_sessions_router(
         device_id: str | None = Query(default=None, description="Single device ID or comma-separated list of device IDs"),
         user_id: str | None = Query(default=None, description="Single user ID or comma-separated list of user IDs"),
         is_validated: bool | None = Query(default=None, description="Filtrer par statut de validation de la session"),
+        is_hitl: bool | None = Query(default=None, description="Filtrer par session HITL (True) ou standard (False)"),
         start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
         end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
         sample_count_min: int | None = Query(default=None, ge=0, description="Minimum number of IMU samples"),
@@ -110,6 +111,9 @@ def create_studio_sessions_router(
 
         if is_validated is not None and isinstance(is_validated, bool):
             query = query.filter(StudioSession.is_validated == is_validated)
+
+        if is_hitl is not None and isinstance(is_hitl, bool):
+            query = query.filter(StudioSession.is_hitl == is_hitl)
 
         if norm_start is not None:
             query = query.filter(StudioSession.created_at >= norm_start)

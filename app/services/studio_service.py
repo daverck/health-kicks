@@ -97,6 +97,7 @@ def to_session_summary(
         sample_count=session.sample_count or 0,
         duration_sec=session.duration_sec or 5.0,
         is_validated=bool(session.is_validated),
+        is_hitl=bool(getattr(session, "is_hitl", False)),
         created_at=session.created_at,
     )
 

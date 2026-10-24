@@ -164,6 +164,7 @@ class StudioSession(Base):
     sample_count: Mapped[int] = mapped_column(Integer, default=0)
     duration_sec: Mapped[float] = mapped_column(Float, default=5.0)
     is_validated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    is_hitl: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

@@ -1055,3 +1055,46 @@ def test_list_studio_authors_rbac_denied(client, regular_user) -> None:
 
     # 403 regular user
     assert client.get("/api/v1/studio/sessions/authors", headers=_auth_headers(regular_user)).status_code == 403
+
+def test_list_sessions_filter_by_is_hitl(client, user_a, db_session) -> None:
+    """Verify that ?is_hitl filter differentiates HITL and standard sessions."""
+    s_standard = StudioSession(
+        id=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        sample_count=100,
+        is_hitl=False,
+    )
+    s_hitl = StudioSession(
+        id=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="sit_down",
+        sample_count=76,
+        is_hitl=True,
+    )
+    db_session.add_all([s_standard, s_hitl])
+    db_session.commit()
+
+    # Filter is_hitl=true
+    res_hitl = client.get("/api/v1/studio/sessions?is_hitl=true", headers=_auth_headers(user_a))
+    assert res_hitl.status_code == 200
+    items_hitl = res_hitl.json()["items"]
+    assert len(items_hitl) == 1
+    assert items_hitl[0]["id"] == str(s_hitl.id)
+    assert items_hitl[0]["is_hitl"] is True
+
+    # Filter is_hitl=false
+    res_std = client.get("/api/v1/studio/sessions?is_hitl=false", headers=_auth_headers(user_a))
+    assert res_std.status_code == 200
+    items_std = res_std.json()["items"]
+    assert len(items_std) == 1
+    assert items_std[0]["id"] == str(s_standard.id)
+    assert items_std[0]["is_hitl"] is False
+
+    # No is_hitl filter -> returns both
+    res_all = client.get("/api/v1/studio/sessions", headers=_auth_headers(user_a))
+    assert res_all.status_code == 200
+    assert len(res_all.json()["items"]) == 2
+
