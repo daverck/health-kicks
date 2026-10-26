@@ -1,5 +1,6 @@
 """SQLAlchemy persistence models for the Cloud API."""
 
+import uuid as _uuid
 from datetime import UTC, date, datetime
 from enum import Enum
 from uuid import UUID, uuid4
@@ -16,9 +17,23 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    UUID as PgUUID,
     Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from app.core.pseudonymization import get_subject_pseudonym
+
+
+def _default_user_pseudonym(context) -> str:
+    params = context.get_current_parameters()
+    u = params.get("uuid")
+    if u is not None:
+        return get_subject_pseudonym(str(u))
+    uid = params.get("id")
+    if uid is not None:
+        return get_subject_pseudonym(uid)
+    return get_subject_pseudonym(str(_uuid.uuid4()))
 
 
 class Base(DeclarativeBase):
@@ -110,6 +125,12 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), default=uuid4, unique=True, index=True, nullable=False
+    )
+    pseudonym: Mapped[str] = mapped_column(
+        String(32), default=_default_user_pseudonym, unique=True, index=True, nullable=False
+    )
     google_sub: Mapped[str | None] = mapped_column(
         String(255), unique=True, index=True, nullable=True
     )
@@ -285,6 +306,9 @@ class AlertContact(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), default=uuid4, unique=True, index=True, nullable=False
+    )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -317,6 +341,9 @@ class FallAlert(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), default=uuid4, unique=True, index=True, nullable=False
+    )
     event_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False

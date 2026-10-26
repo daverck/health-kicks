@@ -5,12 +5,14 @@ Microsoft Entra ID), and atomic race-condition handling.
 """
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.pseudonymization import get_subject_pseudonym
 from app.db.models import User, UserRole
 
 logger = logging.getLogger(__name__)
@@ -68,7 +70,11 @@ def upsert_sso_user(
 
     user = _find_user()
     if user is None:
+        user_uuid = uuid.uuid4()
+        user_pseudo = get_subject_pseudonym(str(user_uuid))
         user = User(
+            uuid=user_uuid,
+            pseudonym=user_pseudo,
             google_sub=sub if provider == "google" else None,
             azure_sub=sub if provider == "azure" else None,
             email=norm_email,
