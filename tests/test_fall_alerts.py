@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings, get_settings
+from app.core.pseudonymization import get_subject_pseudonym
 from app.core.rate_limit import rate_limiter
 from app.db.database import get_db
 from app.db.models import (
@@ -1242,7 +1243,7 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     assert len(pat_items) == 1
     assert pat_items[0]["id"] == alert_patient.id
     assert pat_items[0]["is_pseudonymized"] is False
-    assert pat_items[0]["user_display_name"] == "Jean Martin"
+    assert pat_items[0]["user_display_name"] == f"Patient {get_subject_pseudonym(patient_user.id)}"
     assert pat_items[0]["acknowledged_by"] == {"first_name": "Marie", "last_name": "Dupont"}
 
     det_pat = client.get(
@@ -1377,3 +1378,69 @@ def test_mobile_direct_sms_status_endpoint(
     detail = res_detail.json()
     sms_item = [n for n in detail["notifications"] if n["channel"] == "sms"][0]
     assert sms_item["status"] == "SENT"
+
+
+def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
+    client: TestClient,
+    db_session: Session,
+    patient_user: User,
+    clinician_user: User,
+    admin_user: User,
+) -> None:
+    """Test filtering fall alerts by numeric ID, pseudonym, or unmatched string (200 OK without 422)."""
+    now = datetime.now(UTC)
+    alert_patient = FallAlert(
+        event_id="evt-filter-pat",
+        user_id=patient_user.id,
+        device_id="HK-1",
+        event_type="fall_forward",
+        confidence_score=0.92,
+        delivery="live",
+        state=FallAlertState.ACKNOWLEDGED.value,
+        detected_at_utc=now - timedelta(minutes=10),
+    )
+    alert_clinician = FallAlert(
+        event_id="evt-filter-clin",
+        user_id=clinician_user.id,
+        device_id="HK-2",
+        event_type="fall_lateral",
+        confidence_score=0.88,
+        delivery="live",
+        state=FallAlertState.CANCELLED.value,
+        cancel_reason="user_cancel",
+        detected_at_utc=now - timedelta(minutes=5),
+    )
+    db_session.add_all([alert_patient, alert_clinician])
+    db_session.commit()
+
+    admin_headers = _auth_headers(admin_user)
+    pat_pseudo = get_subject_pseudonym(patient_user.id)
+
+    # 1. Non-matching string parameter returns 200 OK without 422 (empty list)
+    res_str = client.get("/api/v1/fall-alerts?user_id=nonexistent_subj_xyz", headers=admin_headers)
+    assert res_str.status_code == 200
+    assert res_str.json()["total"] == 0
+    assert res_str.json()["items"] == []
+
+    res_single_letter = client.get("/api/v1/fall-alerts?user_id=d", headers=admin_headers)
+    assert res_single_letter.status_code == 200
+    assert res_single_letter.json()["total"] == 0
+
+    # 2. Numeric filter returns only matching user
+    res_num = client.get(f"/api/v1/fall-alerts?user_id={patient_user.id}", headers=admin_headers)
+    assert res_num.status_code == 200
+    num_items = res_num.json()["items"]
+    assert len(num_items) >= 1
+    assert all(item["user_id"] == patient_user.id for item in num_items)
+
+    # 3. Pseudonym filter returns matching user
+    res_pseudo = client.get(f"/api/v1/fall-alerts?user_id={pat_pseudo}", headers=admin_headers)
+    assert res_pseudo.status_code == 200
+    pseudo_items = res_pseudo.json()["items"]
+    assert len(pseudo_items) >= 1
+    assert all(item["user_id"] == patient_user.id for item in pseudo_items)
+
+    # 4. Check user_display_name systematic pseudonymization
+    for item in pseudo_items:
+        assert item["user_display_name"].startswith("Patient SUBJ-")
+        assert item["subject_pseudonym"] == pat_pseudo

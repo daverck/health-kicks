@@ -12,7 +12,8 @@ from app.api.deps import CurrentUser
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.core.rate_limit import rate_limiter
 from app.db.database import get_db
-from app.db.models import FallAlert, FallAlertNotification, FallAlertState, UserRole
+from app.core.pseudonymization import get_subject_pseudonym
+from app.db.models import FallAlert, FallAlertNotification, FallAlertState, User, UserRole
 from app.schemas.fall_alert import (
     AlertContactCreate,
     AlertContactResponse,
@@ -279,9 +280,9 @@ def create_fall_alerts_router(
         ),
         start_date: datetime | None = Query(default=None),
         end_date: datetime | None = Query(default=None),
-        user_id: int | None = Query(
+        user_id: str | None = Query(
             default=None,
-            description="Filter by user_id (taken into account only for admin role)",
+            description="Filtrer par user_id numérique ou pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
         ),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
@@ -295,7 +296,19 @@ def create_fall_alerts_router(
         if user.role != UserRole.admin:
             query = query.filter(FallAlert.user_id == user.id)
         elif user_id is not None:
-            query = query.filter(FallAlert.user_id == user_id)
+            val = user_id.strip()
+            if val:
+                if val.isdigit():
+                    query = query.filter(FallAlert.user_id == int(val))
+                else:
+                    user_ids = [uid for (uid,) in db.query(User.id).all()]
+                    matching_user_ids = [
+                        uid for uid in user_ids if val.lower() in get_subject_pseudonym(uid).lower()
+                    ]
+                    if matching_user_ids:
+                        query = query.filter(FallAlert.user_id.in_(matching_user_ids))
+                    else:
+                        query = query.filter(FallAlert.user_id == -1)
 
         if state is not None and isinstance(state, str):
             raw_states = [s.strip().upper() for s in state.split(",") if s.strip()]

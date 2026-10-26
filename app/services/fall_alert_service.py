@@ -1135,17 +1135,8 @@ def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSumm
     """Serialize a FallAlert ORM instance to FallAlertSummary with GDPR pseudonymization for third-party records."""
     is_own = alert.user_id == current_user.id
     pseudo = get_subject_pseudonym(alert.user_id)
-
-    if is_own:
-        user_display_name = (
-            (alert.user.name if alert.user and alert.user.name else None)
-            or (alert.user.email if alert.user else None)
-            or f"Utilisateur #{alert.user_id}"
-        )
-        is_pseudo = False
-    else:
-        user_display_name = f"Patient {pseudo}"
-        is_pseudo = True
+    user_display_name = f"Patient {pseudo}"
+    is_pseudo = not is_own
 
     ack_by: FallAlertAcknowledgedBy | None = None
     if alert.acknowledged_by_first_name:
