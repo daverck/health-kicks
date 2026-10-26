@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -909,18 +910,51 @@ def reorder_alert_contacts(
     return list_alert_contacts(db, user_id)
 
 
+def _get_user_contact(
+    db: Session,
+    user_id: int,
+    contact_identifier: int | str | uuid.UUID,
+) -> AlertContact | None:
+    """Resolve an AlertContact for a user by int id or UUID."""
+    if isinstance(contact_identifier, uuid.UUID):
+        return (
+            db.query(AlertContact)
+            .filter(AlertContact.uuid == contact_identifier, AlertContact.user_id == user_id)
+            .one_or_none()
+        )
+    if isinstance(contact_identifier, int):
+        return (
+            db.query(AlertContact)
+            .filter(AlertContact.id == contact_identifier, AlertContact.user_id == user_id)
+            .one_or_none()
+        )
+    raw = str(contact_identifier).strip()
+    try:
+        parsed_uuid = uuid.UUID(raw)
+        return (
+            db.query(AlertContact)
+            .filter(AlertContact.uuid == parsed_uuid, AlertContact.user_id == user_id)
+            .one_or_none()
+        )
+    except ValueError:
+        pass
+    if raw.isdigit():
+        return (
+            db.query(AlertContact)
+            .filter(AlertContact.id == int(raw), AlertContact.user_id == user_id)
+            .one_or_none()
+        )
+    return None
+
+
 def update_alert_contact(
     db: Session,
     user_id: int,
-    contact_id: int,
+    contact_id: int | str | uuid.UUID,
     payload: AlertContactUpdate,
 ) -> AlertContactResponse:
     """Update first_name, last_name, email, and/or phone of an existing emergency contact."""
-    contact = (
-        db.query(AlertContact)
-        .filter(AlertContact.id == contact_id, AlertContact.user_id == user_id)
-        .one_or_none()
-    )
+    contact = _get_user_contact(db, user_id, contact_id)
     if contact is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -932,7 +966,7 @@ def update_alert_contact(
             db.query(AlertContact)
             .filter(
                 AlertContact.user_id == user_id,
-                AlertContact.id != contact_id,
+                AlertContact.id != contact.id,
                 func.lower(AlertContact.email) == payload.email.lower(),
             )
             .first()
@@ -957,13 +991,9 @@ def update_alert_contact(
     return AlertContactResponse.model_validate(contact)
 
 
-def delete_alert_contact(db: Session, user_id: int, contact_id: int) -> None:
+def delete_alert_contact(db: Session, user_id: int, contact_id: int | str | uuid.UUID) -> None:
     """Delete an emergency contact and re-compact remaining priorities (1..N)."""
-    contact = (
-        db.query(AlertContact)
-        .filter(AlertContact.id == contact_id, AlertContact.user_id == user_id)
-        .one_or_none()
-    )
+    contact = _get_user_contact(db, user_id, contact_id)
     if contact is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -991,18 +1021,14 @@ def delete_alert_contact(db: Session, user_id: int, contact_id: int) -> None:
 def send_test_email_to_contact(
     db: Session,
     user: User,
-    contact_id: int,
+    contact_id: int | str | uuid.UUID,
     *,
     email_channel: SmtpEmailChannel | None = None,
     iot_publisher: AWSIoTPublishService | None = None,
     config: Settings | None = None,
 ) -> AlertContactTestEmailResponse:
     """Send a test email (and optional test SMS command via MQTT) to a specific emergency contact."""
-    contact = (
-        db.query(AlertContact)
-        .filter(AlertContact.id == contact_id, AlertContact.user_id == user.id)
-        .one_or_none()
-    )
+    contact = _get_user_contact(db, user.id, contact_id)
     if contact is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1134,9 +1160,15 @@ def update_sms_notification_status(
 def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSummary:
     """Serialize a FallAlert ORM instance to FallAlertSummary with GDPR pseudonymization for third-party records."""
     is_own = alert.user_id == current_user.id
-    pseudo = get_subject_pseudonym(alert.user_id)
+    pseudo = (
+        getattr(alert.user, "pseudonym", None)
+        if alert.user and getattr(alert.user, "pseudonym", None)
+        else get_subject_pseudonym(alert.user_id)
+    )
     user_display_name = f"Patient {pseudo}"
     is_pseudo = not is_own
+    user_uuid = getattr(alert.user, "uuid", None) if alert.user else None
+    alert_uuid = getattr(alert, "uuid", None)
 
     ack_by: FallAlertAcknowledgedBy | None = None
     if alert.acknowledged_by_first_name:
@@ -1175,8 +1207,11 @@ def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSumm
 
     return FallAlertSummary(
         id=alert.id,
+        uuid=alert_uuid,
         event_id=alert.event_id,
         user_id=alert.user_id,
+        user_uuid=user_uuid,
+        user_pseudonym=pseudo,
         user_display_name=user_display_name,
         subject_pseudonym=pseudo,
         is_pseudonymized=is_pseudo,

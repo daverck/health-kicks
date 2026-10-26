@@ -328,6 +328,18 @@ def test_alert_contacts_crud_max_limit_and_compaction(client, patient_user) -> N
     assert res_patch.status_code == 200
     assert res_patch.json()["first_name"] == "Marie-Claire"
     assert res_patch.json()["email"] == "mc.new@example.com"
+    assert "uuid" in res_patch.json()
+
+    # Patch via UUID
+    contact_uuid = res_patch.json()["uuid"]
+    assert contact_uuid is not None
+    res_patch_uuid = client.patch(
+        f"/api/v1/users/me/alert-contacts/{contact_uuid}",
+        headers=headers,
+        json={"first_name": "Marie-Claire-Updated"},
+    )
+    assert res_patch_uuid.status_code == 200
+    assert res_patch_uuid.json()["first_name"] == "Marie-Claire-Updated"
 
 
 def test_alert_contact_phone_normalization_validation_and_clearing(client, patient_user) -> None:
@@ -1243,7 +1255,7 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     assert len(pat_items) == 1
     assert pat_items[0]["id"] == alert_patient.id
     assert pat_items[0]["is_pseudonymized"] is False
-    assert pat_items[0]["user_display_name"] == f"Patient {get_subject_pseudonym(patient_user.id)}"
+    assert pat_items[0]["user_display_name"] == f"Patient {patient_user.pseudonym}"
     assert pat_items[0]["acknowledged_by"] == {"first_name": "Marie", "last_name": "Dupont"}
 
     det_pat = client.get(
@@ -1414,7 +1426,7 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
     db_session.commit()
 
     admin_headers = _auth_headers(admin_user)
-    pat_pseudo = get_subject_pseudonym(patient_user.id)
+    pat_pseudo = patient_user.pseudonym
 
     # 1. Non-matching string parameter returns 200 OK without 422 (empty list)
     res_str = client.get("/api/v1/fall-alerts?user_id=nonexistent_subj_xyz", headers=admin_headers)
@@ -1422,7 +1434,7 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
     assert res_str.json()["total"] == 0
     assert res_str.json()["items"] == []
 
-    res_single_letter = client.get("/api/v1/fall-alerts?user_id=d", headers=admin_headers)
+    res_single_letter = client.get("/api/v1/fall-alerts?user_id=zzzz", headers=admin_headers)
     assert res_single_letter.status_code == 200
     assert res_single_letter.json()["total"] == 0
 
@@ -1434,11 +1446,24 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
     assert all(item["user_id"] == patient_user.id for item in num_items)
 
     # 3. Pseudonym filter returns matching user
-    res_pseudo = client.get(f"/api/v1/fall-alerts?user_id={pat_pseudo}", headers=admin_headers)
+    res_pseudo = client.get(f"/api/v1/fall-alerts?pseudonym={pat_pseudo}", headers=admin_headers)
     assert res_pseudo.status_code == 200
     pseudo_items = res_pseudo.json()["items"]
     assert len(pseudo_items) >= 1
     assert all(item["user_id"] == patient_user.id for item in pseudo_items)
+
+    # Also test legacy user_id filter with pseudonym string
+    res_pseudo_legacy = client.get(f"/api/v1/fall-alerts?user_id={pat_pseudo}", headers=admin_headers)
+    assert res_pseudo_legacy.status_code == 200
+    assert len(res_pseudo_legacy.json()["items"]) >= 1
+
+    # Test retrieval by UUID for alert and alert contacts
+    res_det_uuid = client.get(f"/api/v1/fall-alerts/{alert_patient.uuid}", headers=admin_headers)
+    assert res_det_uuid.status_code == 200
+    assert res_det_uuid.json()["id"] == alert_patient.id
+    assert res_det_uuid.json()["uuid"] == str(alert_patient.uuid)
+    assert res_det_uuid.json()["user_uuid"] == str(patient_user.uuid)
+    assert res_det_uuid.json()["user_pseudonym"] == pat_pseudo
 
     # 4. Check user_display_name systematic pseudonymization
     for item in pseudo_items:

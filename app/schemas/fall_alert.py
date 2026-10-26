@@ -3,6 +3,7 @@
 import re
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -227,6 +228,7 @@ class AlertContactResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
     id: int
+    uuid: UUID | None = None
     first_name: str
     last_name: str
     email: str
@@ -292,8 +294,11 @@ class FallAlertSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: int
+    uuid: UUID | None = None
     event_id: str
     user_id: int
+    user_uuid: UUID | None = None
+    user_pseudonym: str | None = None
     user_display_name: str
     subject_pseudonym: str
     is_pseudonymized: bool

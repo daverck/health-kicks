@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -96,47 +97,47 @@ def create_fall_alerts_router(
         return reorder_alert_contacts(db=db, user_id=user.id, payload=payload)
 
     @router.patch(
-        "/users/me/alert-contacts/{contact_id}",
+        "/users/me/alert-contacts/{contact_identifier}",
         response_model=AlertContactResponse,
     )
     def patch_my_alert_contact(
-        contact_id: int,
+        contact_identifier: str,
         payload: AlertContactUpdate,
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> AlertContactResponse:
-        """Update first_name, last_name, email, or phone of an emergency contact."""
+        """Update first_name, last_name, email, or phone of an emergency contact (by int ID or UUID)."""
         return update_alert_contact(
             db=db,
             user_id=user.id,
-            contact_id=contact_id,
+            contact_id=contact_identifier,
             payload=payload,
         )
 
     @router.delete(
-        "/users/me/alert-contacts/{contact_id}",
+        "/users/me/alert-contacts/{contact_identifier}",
         status_code=status.HTTP_204_NO_CONTENT,
     )
     def remove_my_alert_contact(
-        contact_id: int,
+        contact_identifier: str,
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> Response:
-        """Delete an emergency contact and re-compact remaining priorities."""
-        delete_alert_contact(db=db, user_id=user.id, contact_id=contact_id)
+        """Delete an emergency contact and re-compact remaining priorities (by int ID or UUID)."""
+        delete_alert_contact(db=db, user_id=user.id, contact_id=contact_identifier)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post(
-        "/users/me/alert-contacts/{contact_id}/test-email",
+        "/users/me/alert-contacts/{contact_identifier}/test-email",
         response_model=AlertContactTestEmailResponse,
         status_code=status.HTTP_202_ACCEPTED,
     )
     def send_my_alert_contact_test_email(
-        contact_id: int,
+        contact_identifier: str,
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> AlertContactTestEmailResponse:
-        """Send a verification email (and optional test SMS) to an emergency contact (rate-limited to 3/hour per user)."""
+        """Send a verification email (and optional test SMS) to an emergency contact (by int ID or UUID)."""
         rl_key = f"alert_contact_test_email:user:{user.id}"
         allowed, retry_after = rate_limiter.is_allowed(
             rl_key, max_requests=3, window_seconds=3600.0
@@ -150,7 +151,7 @@ def create_fall_alerts_router(
         return send_test_email_to_contact(
             db=db,
             user=user,
-            contact_id=contact_id,
+            contact_id=contact_identifier,
             email_channel=email_channel,
             iot_publisher=publisher,
         )
@@ -282,7 +283,11 @@ def create_fall_alerts_router(
         end_date: datetime | None = Query(default=None),
         user_id: str | None = Query(
             default=None,
-            description="Filtrer par user_id numérique ou pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
+            description="Filtrer par user_id numérique ou pseudonyme sujet (déprécié au profit de pseudonym)",
+        ),
+        pseudonym: str | None = Query(
+            default=None,
+            description="Filtrer par pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
         ),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
@@ -295,20 +300,18 @@ def create_fall_alerts_router(
 
         if user.role != UserRole.admin:
             query = query.filter(FallAlert.user_id == user.id)
-        elif user_id is not None:
-            val = user_id.strip()
-            if val:
-                if val.isdigit():
+        else:
+            filter_pseudonym = pseudonym or (user_id if user_id and not user_id.strip().isdigit() else None)
+            if filter_pseudonym is not None:
+                val = filter_pseudonym.strip()
+                if val:
+                    query = query.join(User, FallAlert.user_id == User.id).filter(
+                        User.pseudonym.ilike(f"%{val}%")
+                    )
+            elif user_id is not None:
+                val = user_id.strip()
+                if val and val.isdigit():
                     query = query.filter(FallAlert.user_id == int(val))
-                else:
-                    user_ids = [uid for (uid,) in db.query(User.id).all()]
-                    matching_user_ids = [
-                        uid for uid in user_ids if val.lower() in get_subject_pseudonym(uid).lower()
-                    ]
-                    if matching_user_ids:
-                        query = query.filter(FallAlert.user_id.in_(matching_user_ids))
-                    else:
-                        query = query.filter(FallAlert.user_id == -1)
 
         if state is not None and isinstance(state, str):
             raw_states = [s.strip().upper() for s in state.split(",") if s.strip()]
@@ -337,16 +340,26 @@ def create_fall_alerts_router(
         )
 
     @router.get(
-        "/fall-alerts/{alert_id}",
+        "/fall-alerts/{alert_identifier}",
         response_model=FallAlertDetail,
     )
     def get_fall_alert_detail(
-        alert_id: int,
+        alert_identifier: str,
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> FallAlertDetail:
-        """Retrieve full details and notification log for a single fall alert."""
-        alert = db.query(FallAlert).filter(FallAlert.id == alert_id).one_or_none()
+        """Retrieve full details and notification log for a single fall alert (by int ID or UUID)."""
+        alert: FallAlert | None = None
+        raw = alert_identifier.strip()
+        try:
+            parsed_uuid = uuid.UUID(raw)
+            alert = db.query(FallAlert).filter(FallAlert.uuid == parsed_uuid).one_or_none()
+        except ValueError:
+            pass
+
+        if alert is None and raw.isdigit():
+            alert = db.query(FallAlert).filter(FallAlert.id == int(raw)).one_or_none()
+
         if alert is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
