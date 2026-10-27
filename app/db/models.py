@@ -51,6 +51,9 @@ class Device(Base):
     __tablename__ = "devices"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), default=uuid4, unique=True, index=True, nullable=False
+    )
     device_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[DeviceStatus] = mapped_column(default=DeviceStatus.offline)
