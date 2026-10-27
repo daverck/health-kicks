@@ -307,7 +307,7 @@ def create_studio_sessions_router(
         except (BotoCoreError, ClientError) as error:
             logger.error(
                 "Could not trim readings from DynamoDB for session %s: %s",
-                session.id,
+                session.uuid,
                 error,
             )
             raise HTTPException(
@@ -362,7 +362,7 @@ def create_studio_sessions_router(
             except (BotoCoreError, ClientError) as error:
                 logger.warning(
                     "Could not propagate label update to DynamoDB for session %s: %s",
-                    session.id,
+                    session.uuid,
                     error,
                 )
 
@@ -385,7 +385,7 @@ def create_studio_sessions_router(
         except (BotoCoreError, ClientError) as error:
             logger.warning(
                 "Could not purge readings from DynamoDB for session %s: %s",
-                session.id,
+                session.uuid,
                 error,
             )
 

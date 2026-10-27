@@ -119,9 +119,9 @@ def _auth_headers(user: User) -> dict[str, str]:
 
 def test_list_sessions_user_isolation(client, user_a, user_b, db_session) -> None:
     # 2 sessions for User A, 1 session for User B
-    s_a1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", sample_count=500)
-    s_a2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", sample_count=450)
-    s_b1 = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="fall_forward", sample_count=300)
+    s_a1 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", sample_count=500)
+    s_a2 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", sample_count=450)
+    s_b1 = StudioSession(uuid=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="fall_forward", sample_count=300)
     db_session.add_all([s_a1, s_a2, s_b1])
     db_session.commit()
 
@@ -140,14 +140,14 @@ def test_list_sessions_user_isolation(client, user_a, user_b, db_session) -> Non
     assert res_b.status_code == 200
     data_b = res_b.json()
     assert data_b["total"] == 1
-    assert data_b["items"][0]["uuid"] == str(s_b1.id)
+    assert data_b["items"][0]["uuid"] == str(s_b1.uuid)
     assert data_b["items"][0]["user_email"] is None
 
 
 def test_list_sessions_admin_sees_all_with_pseudonymization(client, admin_user, user_a, user_b, db_session) -> None:
-    s_a = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
-    s_b = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="jump")
-    s_admin = StudioSession(id=uuid.uuid4(), user_id=admin_user.id, device_id="HK-3", label="idle")
+    s_a = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s_b = StudioSession(uuid=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="jump")
+    s_admin = StudioSession(uuid=uuid.uuid4(), user_id=admin_user.id, device_id="HK-3", label="idle")
     db_session.add_all([s_a, s_b, s_admin])
     db_session.commit()
 
@@ -157,25 +157,25 @@ def test_list_sessions_admin_sees_all_with_pseudonymization(client, admin_user, 
     assert data["total"] == 3
 
     # Third-party sessions are strictly pseudonymized (no PII leak)
-    item_a = next(i for i in data["items"] if i["uuid"] == str(s_a.id))
+    item_a = next(i for i in data["items"] if i["uuid"] == str(s_a.uuid))
     assert item_a["user_email"] is None
     assert item_a["is_pseudonymized"] is True
     assert item_a["subject_pseudonym"].startswith("SUBJ-")
 
-    item_b = next(i for i in data["items"] if i["uuid"] == str(s_b.id))
+    item_b = next(i for i in data["items"] if i["uuid"] == str(s_b.uuid))
     assert item_b["user_email"] is None
     assert item_b["is_pseudonymized"] is True
     assert item_b["subject_pseudonym"].startswith("SUBJ-")
 
     # Admin's own session preserves their email and is not pseudonymized
-    item_admin = next(i for i in data["items"] if i["uuid"] == str(s_admin.id))
+    item_admin = next(i for i in data["items"] if i["uuid"] == str(s_admin.uuid))
     assert item_admin["user_email"] == admin_user.email
     assert item_admin["is_pseudonymized"] is False
 
 
 def test_list_sessions_admin_filtering_by_pseudonym(client, admin_user, user_a, user_b, db_session) -> None:
-    s_a = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
-    s_b = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="jump")
+    s_a = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s_b = StudioSession(uuid=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="jump")
     db_session.add_all([s_a, s_b])
     db_session.commit()
 
@@ -183,15 +183,15 @@ def test_list_sessions_admin_filtering_by_pseudonym(client, admin_user, user_a, 
     assert res.status_code == 200
     data = res.json()
     assert data["total"] == 1
-    assert data["items"][0]["uuid"] == str(s_a.id)
+    assert data["items"][0]["uuid"] == str(s_a.uuid)
     assert data["items"][0]["author_uuid"] == str(user_a.uuid)
     assert data["items"][0]["author_pseudonym"] == user_a.pseudonym
 
 
 def test_list_sessions_filtering_and_pagination(client, user_a, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 1, 1, tzinfo=UTC))
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 1, 2, tzinfo=UTC))
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 1, 3, tzinfo=UTC))
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 1, 1, tzinfo=UTC))
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 1, 2, tzinfo=UTC))
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 1, 3, tzinfo=UTC))
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -202,20 +202,20 @@ def test_list_sessions_filtering_and_pagination(client, user_a, db_session) -> N
     # Filter by device
     res_dev = client.get("/api/v1/studio/sessions?device_id=HK-2", headers=_auth_headers(user_a))
     assert res_dev.json()["total"] == 1
-    assert res_dev.json()["items"][0]["uuid"] == str(s3.id)
+    assert res_dev.json()["items"][0]["uuid"] == str(s3.uuid)
 
     # Pagination: size=1
     res_p1 = client.get("/api/v1/studio/sessions?page=1&size=1", headers=_auth_headers(user_a))
     assert res_p1.json()["total"] == 3
     assert len(res_p1.json()["items"]) == 1
     # Check default sorting created_at DESC -> s3 is first
-    assert res_p1.json()["items"][0]["uuid"] == str(s3.id)
+    assert res_p1.json()["items"][0]["uuid"] == str(s3.uuid)
 
 
 def test_list_sessions_filter_by_date_range(client, user_a, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 5, 1, 10, 0, tzinfo=UTC))
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 5, 2, 14, 0, tzinfo=UTC))
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 5, 3, 18, 0, tzinfo=UTC))
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 5, 1, 10, 0, tzinfo=UTC))
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 5, 2, 14, 0, tzinfo=UTC))
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="walk", created_at=datetime(2026, 5, 3, 18, 0, tzinfo=UTC))
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -227,7 +227,7 @@ def test_list_sessions_filter_by_date_range(client, user_a, db_session) -> None:
     assert res.status_code == 200
     data = res.json()
     assert data["total"] == 1
-    assert data["items"][0]["uuid"] == str(s2.id)
+    assert data["items"][0]["uuid"] == str(s2.uuid)
 
     # Filter full range May 1 to May 2
     res_range = client.get(
@@ -240,7 +240,7 @@ def test_list_sessions_filter_by_date_range(client, user_a, db_session) -> None:
 
 def test_list_sessions_filter_by_sample_count_and_duration(client, user_a, db_session) -> None:
     short = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -248,7 +248,7 @@ def test_list_sessions_filter_by_sample_count_and_duration(client, user_a, db_se
         duration_sec=2.0,
     )
     matching = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="run",
@@ -256,7 +256,7 @@ def test_list_sessions_filter_by_sample_count_and_duration(client, user_a, db_se
         duration_sec=4.0,
     )
     long = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="stairs",
@@ -275,7 +275,7 @@ def test_list_sessions_filter_by_sample_count_and_duration(client, user_a, db_se
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 1
-    assert [item["uuid"] for item in data["items"]] == [str(matching.id)]
+    assert [item["uuid"] for item in data["items"]] == [str(matching.uuid)]
 
 
 @pytest.mark.parametrize(
@@ -313,9 +313,9 @@ def test_list_sessions_invalid_date_range_400(client, user_a) -> None:
 
 
 def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 6, 1, 10, 0, tzinfo=UTC))
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 6, 2, 10, 0, tzinfo=UTC))
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="stairs", created_at=datetime(2026, 6, 3, 10, 0, tzinfo=UTC))
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", created_at=datetime(2026, 6, 1, 10, 0, tzinfo=UTC))
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", created_at=datetime(2026, 6, 2, 10, 0, tzinfo=UTC))
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="stairs", created_at=datetime(2026, 6, 3, 10, 0, tzinfo=UTC))
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -324,7 +324,7 @@ def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
     assert res1.status_code == 200
     data1 = res1.json()
     assert len(data1["items"]) == 1
-    assert data1["items"][0]["uuid"] == str(s3.id)
+    assert data1["items"][0]["uuid"] == str(s3.uuid)
     assert data1["next_cursor"] is not None
 
     # Page 2 via next_cursor
@@ -333,7 +333,7 @@ def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
     assert res2.status_code == 200
     data2 = res2.json()
     assert len(data2["items"]) == 1
-    assert data2["items"][0]["uuid"] == str(s2.id)
+    assert data2["items"][0]["uuid"] == str(s2.uuid)
     assert data2["next_cursor"] is not None
 
     # Page 3 via next_cursor
@@ -342,7 +342,7 @@ def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
     assert res3.status_code == 200
     data3 = res3.json()
     assert len(data3["items"]) == 1
-    assert data3["items"][0]["uuid"] == str(s1.id)
+    assert data3["items"][0]["uuid"] == str(s1.uuid)
     assert data3["next_cursor"] is None
 
 
@@ -362,7 +362,7 @@ def test_list_sessions_invalid_cursor_400(client, user_a) -> None:
 
 def test_get_session_readings_success(client, user_a, mock_telemetry_service, db_session) -> None:
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
 
@@ -397,7 +397,7 @@ def test_get_session_readings_success(client, user_a, mock_telemetry_service, db
 
 def test_get_session_readings_forbidden_for_other_user(client, user_a, user_b, db_session) -> None:
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
 
@@ -407,7 +407,7 @@ def test_get_session_readings_forbidden_for_other_user(client, user_a, user_b, d
 
 def test_get_session_readings_admin_allowed(client, admin_user, user_a, mock_telemetry_service, db_session) -> None:
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
 
@@ -431,7 +431,7 @@ def test_get_session_readings_not_found(client, user_a) -> None:
 
 def test_patch_session_label_success(client, user_a, mock_telemetry_service, db_session) -> None:
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
 
@@ -457,7 +457,7 @@ def test_patch_session_label_success(client, user_a, mock_telemetry_service, db_
 
 def test_patch_session_forbidden_for_other_user(client, user_a, user_b, db_session) -> None:
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
 
@@ -476,7 +476,7 @@ def test_patch_session_forbidden_for_other_user(client, user_a, user_b, db_sessi
 
 def test_delete_session_success(client, user_a, mock_telemetry_service, db_session) -> None:
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
 
@@ -487,7 +487,7 @@ def test_delete_session_success(client, user_a, mock_telemetry_service, db_sessi
     assert res.status_code == 204
 
     # Verify removed from PostgreSQL
-    assert db_session.query(StudioSession).filter_by(id=sess_id).one_or_none() is None
+    assert db_session.query(StudioSession).filter_by(uuid=sess_id).one_or_none() is None
 
     # Verify DynamoDB purge called
     mock_telemetry_service.delete_session_readings.assert_called_once_with(
@@ -498,7 +498,7 @@ def test_delete_session_success(client, user_a, mock_telemetry_service, db_sessi
 
 def test_delete_session_forbidden_for_other_user(client, user_a, user_b, db_session) -> None:
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
 
@@ -507,7 +507,7 @@ def test_delete_session_forbidden_for_other_user(client, user_a, user_b, db_sess
         headers=_auth_headers(user_b),
     )
     assert res.status_code == 403
-    assert db_session.query(StudioSession).filter_by(id=sess_id).one_or_none() is not None
+    assert db_session.query(StudioSession).filter_by(uuid=sess_id).one_or_none() is not None
 
 
 def test_unauthenticated_rejected(client) -> None:
@@ -521,7 +521,7 @@ def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_ser
     """Vérifie qu'une session avec le label 'idle' est acceptée, filtrée, paginée et modifiable."""
     sess_id = uuid.uuid4()
     s = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user_a.id,
         device_id="HK-1",
         label="idle",
@@ -575,7 +575,7 @@ def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_ser
 def test_confirm_session_success(client, user_a, db_session) -> None:
     """A user can confirm/validate their own recorded session."""
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
     db_session.add(s)
     db_session.commit()
 
@@ -595,7 +595,7 @@ def test_confirm_session_success(client, user_a, db_session) -> None:
 def test_update_session_can_revert_validation(client, user_a, db_session) -> None:
     sess_id = uuid.uuid4()
     session = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -619,7 +619,7 @@ def test_update_session_can_revert_validation(client, user_a, db_session) -> Non
 def test_confirm_session_admin_allowed(client, admin_user, user_a, db_session) -> None:
     """An admin can confirm/validate another user's session."""
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
     db_session.add(s)
     db_session.commit()
 
@@ -637,7 +637,7 @@ def test_confirm_session_admin_allowed(client, admin_user, user_a, db_session) -
 def test_confirm_session_forbidden_for_other_user(client, user_a, user_b, db_session) -> None:
     """A non-admin user cannot confirm another user's session."""
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
     db_session.add(s)
     db_session.commit()
 
@@ -663,8 +663,8 @@ def test_confirm_session_not_found(client, user_a) -> None:
 
 def test_list_sessions_filter_by_is_validated(client, user_a, db_session) -> None:
     """Listing sessions supports filtering by is_validated flag."""
-    s_unvalid = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
-    s_valid = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", is_validated=True)
+    s_unvalid = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    s_valid = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run", is_validated=True)
     db_session.add_all([s_unvalid, s_valid])
     db_session.commit()
 
@@ -673,7 +673,7 @@ def test_list_sessions_filter_by_is_validated(client, user_a, db_session) -> Non
     assert res_true.status_code == 200
     data_true = res_true.json()
     assert data_true["total"] == 1
-    assert data_true["items"][0]["uuid"] == str(s_valid.id)
+    assert data_true["items"][0]["uuid"] == str(s_valid.uuid)
     assert data_true["items"][0]["is_validated"] is True
 
     # Filter unvalidated only
@@ -681,7 +681,7 @@ def test_list_sessions_filter_by_is_validated(client, user_a, db_session) -> Non
     assert res_false.status_code == 200
     data_false = res_false.json()
     assert data_false["total"] == 1
-    assert data_false["items"][0]["uuid"] == str(s_unvalid.id)
+    assert data_false["items"][0]["uuid"] == str(s_unvalid.uuid)
     assert data_false["items"][0]["is_validated"] is False
 
     # No validation filter returns both
@@ -693,7 +693,7 @@ def test_list_sessions_filter_by_is_validated(client, user_a, db_session) -> Non
 def test_patch_session_update_is_validated_via_payload(client, user_a, db_session) -> None:
     """PATCH /api/v1/studio/sessions/{session_id} accepts is_validated in payload."""
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", is_validated=False)
     db_session.add(s)
     db_session.commit()
 
@@ -714,7 +714,7 @@ def test_trim_session_updates_duration_and_sample_count(
 ) -> None:
     sess_id = uuid.uuid4()
     session = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user_a.id,
         device_id="HK-1",
         label="sit_down",
@@ -751,7 +751,7 @@ def test_trim_session_rejects_validated_session(
 ) -> None:
     sess_id = uuid.uuid4()
     session = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -778,7 +778,7 @@ def test_trim_session_requires_shorter_duration(
 ) -> None:
     sess_id = uuid.uuid4()
     session = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -800,7 +800,7 @@ def test_trim_session_requires_shorter_duration(
 
 def test_trim_session_rejects_invalid_duration_payload(client, user_a, db_session) -> None:
     session = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -811,7 +811,7 @@ def test_trim_session_rejects_invalid_duration_payload(client, user_a, db_sessio
     db_session.commit()
 
     response = client.patch(
-        f"/api/v1/studio/sessions/{session.id}/trim",
+        f"/api/v1/studio/sessions/{session.uuid}/trim",
         json={"new_duration_sec": 0.5},
         headers=_auth_headers(user_a),
     )
@@ -821,7 +821,7 @@ def test_trim_session_rejects_invalid_duration_payload(client, user_a, db_sessio
 
 def test_trim_session_rejects_interval_shorter_than_two_seconds(client, user_a, db_session) -> None:
     session = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -832,7 +832,7 @@ def test_trim_session_rejects_interval_shorter_than_two_seconds(client, user_a, 
     db_session.commit()
 
     response = client.patch(
-        f"/api/v1/studio/sessions/{session.id}/trim",
+        f"/api/v1/studio/sessions/{session.uuid}/trim",
         json={"start_offset_sec": 2.0, "end_offset_sec": 3.9},
         headers=_auth_headers(user_a),
     )
@@ -844,7 +844,7 @@ def test_trim_session_forbidden_for_other_user(
     client, user_a, user_b, mock_telemetry_service, db_session
 ) -> None:
     session = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -855,7 +855,7 @@ def test_trim_session_forbidden_for_other_user(
     db_session.commit()
 
     response = client.patch(
-        f"/api/v1/studio/sessions/{session.id}/trim",
+        f"/api/v1/studio/sessions/{session.uuid}/trim",
         json={"new_duration_sec": 2.0},
         headers=_auth_headers(user_b),
     )
@@ -868,7 +868,7 @@ def test_get_session_detail_returns_aurora_sample_count(client, user_a, db_sessi
     """GET /api/v1/studio/sessions/{session_id} directly returns Aurora metadata and sample_count."""
     sess_id = uuid.uuid4()
     s = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -892,7 +892,7 @@ def test_get_session_detail_forbidden_for_other_user(client, user_a, user_b, db_
     """GET /api/v1/studio/sessions/{session_id} returns 403 for unauthorized users."""
     sess_id = uuid.uuid4()
     s = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -908,7 +908,7 @@ def test_get_session_detail_forbidden_for_other_user(client, user_a, user_b, db_
 def test_regular_user_forbidden_on_all_studio_endpoints(client, regular_user, user_a, db_session) -> None:
     """Regular users without clinician/admin role receive 403 Forbidden across studio session endpoints."""
     sess_id = uuid.uuid4()
-    s = StudioSession(id=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", sample_count=50)
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk", sample_count=50)
     db_session.add(s)
     db_session.commit()
 
@@ -923,9 +923,9 @@ def test_regular_user_forbidden_on_all_studio_endpoints(client, regular_user, us
 
 
 def test_list_sessions_multi_device_filtering(client, user_a, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="run")
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-3", label="stairs")
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-2", label="run")
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-3", label="stairs")
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -944,9 +944,9 @@ def test_list_sessions_multi_device_filtering(client, user_a, db_session) -> Non
 
 
 def test_list_sessions_multi_label_filtering(client, user_a, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run")
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="stairs")
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run")
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="stairs")
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -975,9 +975,9 @@ def test_list_sessions_multi_author_filtering(client, admin_user, user_a, user_b
     db_session.add(user_c)
     db_session.commit()
 
-    s_a = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
-    s_b = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="run")
-    s_c = StudioSession(id=uuid.uuid4(), user_id=user_c.id, device_id="HK-3", label="stairs")
+    s_a = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s_b = StudioSession(uuid=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="run")
+    s_c = StudioSession(uuid=uuid.uuid4(), user_id=user_c.id, device_id="HK-3", label="stairs")
     db_session.add_all([s_a, s_b, s_c])
     db_session.commit()
 
@@ -1007,9 +1007,9 @@ def test_list_sessions_multi_author_filtering(client, admin_user, user_a, user_b
 
 
 def test_list_studio_authors_admin(client, admin_user, user_a, user_b, db_session) -> None:
-    s1 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
-    s2 = StudioSession(id=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run")
-    s3 = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="stairs")
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="walk")
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=user_a.id, device_id="HK-1", label="run")
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="stairs")
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -1038,7 +1038,7 @@ def test_list_studio_authors_admin(client, admin_user, user_a, user_b, db_sessio
 
 
 def test_list_studio_authors_clinician(client, user_a, user_b, db_session) -> None:
-    s = StudioSession(id=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="stairs")
+    s = StudioSession(uuid=uuid.uuid4(), user_id=user_b.id, device_id="HK-2", label="stairs")
     db_session.add(s)
     db_session.commit()
 
@@ -1066,7 +1066,7 @@ def test_list_studio_authors_rbac_denied(client, regular_user) -> None:
 def test_list_sessions_filter_by_is_hitl(client, user_a, db_session) -> None:
     """Verify that ?is_hitl filter differentiates HITL and standard sessions."""
     s_standard = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="walk",
@@ -1074,7 +1074,7 @@ def test_list_sessions_filter_by_is_hitl(client, user_a, db_session) -> None:
         is_hitl=False,
     )
     s_hitl = StudioSession(
-        id=uuid.uuid4(),
+        uuid=uuid.uuid4(),
         user_id=user_a.id,
         device_id="HK-1",
         label="sit_down",
@@ -1089,7 +1089,7 @@ def test_list_sessions_filter_by_is_hitl(client, user_a, db_session) -> None:
     assert res_hitl.status_code == 200
     items_hitl = res_hitl.json()["items"]
     assert len(items_hitl) == 1
-    assert items_hitl[0]["uuid"] == str(s_hitl.id)
+    assert items_hitl[0]["uuid"] == str(s_hitl.uuid)
     assert items_hitl[0]["is_hitl"] is True
 
     # Filter is_hitl=false
@@ -1097,7 +1097,7 @@ def test_list_sessions_filter_by_is_hitl(client, user_a, db_session) -> None:
     assert res_std.status_code == 200
     items_std = res_std.json()["items"]
     assert len(items_std) == 1
-    assert items_std[0]["uuid"] == str(s_standard.id)
+    assert items_std[0]["uuid"] == str(s_standard.uuid)
     assert items_std[0]["is_hitl"] is False
 
     # No is_hitl filter -> returns both

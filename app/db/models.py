@@ -20,7 +20,7 @@ from sqlalchemy import (
     UUID as PgUUID,
     Uuid,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, synonym
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.pseudonymization import get_subject_pseudonym
 
@@ -194,8 +194,6 @@ class StudioSession(Base):
     )
 
     user: Mapped["User"] = relationship("User", lazy="joined")
-
-    id = synonym("uuid")
 
 
 class DailyActivityStep(Base):

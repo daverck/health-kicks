@@ -97,7 +97,7 @@ def test_start_studio_session_success_defaults(test_client, mock_iot_client, aut
     assert parsed_uuid.version == 4
 
     # Validate StudioSession is NOT persisted in PostgreSQL until IMU telemetry arrives
-    saved_session = db_session.query(StudioSession).filter(StudioSession.id == parsed_uuid).first()
+    saved_session = db_session.query(StudioSession).filter(StudioSession.uuid == parsed_uuid).first()
     assert saved_session is None
 
     # Validate mock publish call

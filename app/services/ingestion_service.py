@@ -138,7 +138,7 @@ def ingest_raw_telemetry(
                 detail="duration_sec must be at least 2 seconds",
             )
 
-    studio_session = session.query(StudioSession).filter_by(id=sess_uuid).first()
+    studio_session = session.query(StudioSession).filter_by(uuid=sess_uuid).first()
     if studio_session is not None:
         session_user = session.query(User).filter_by(id=studio_session.user_id).first()
         is_admin = session_user is not None and session_user.role == UserRole.admin
@@ -179,7 +179,7 @@ def ingest_raw_telemetry(
 
     is_hitl = bool(payload.get("is_hitl", False))
     studio_session = StudioSession(
-        id=sess_uuid,
+        uuid=sess_uuid,
         user_id=user_id,
         device_id=device_id or "unknown",
         label=str(payload.get("label", "unlabeled")),

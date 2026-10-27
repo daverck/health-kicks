@@ -475,7 +475,7 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
 
     sess_id = uuid.uuid4()
     session_rec = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user.id,
         device_id="HK-TEST",
         label="walk",
@@ -545,7 +545,7 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
     }
     res_hitl = client.post("/api/v1/ingest/telemetry/raw", json=hitl_payload, headers=headers)
     assert res_hitl.status_code == 200
-    hitl_rec = db_session.query(StudioSession).filter_by(id=hitl_sess_id).first()
+    hitl_rec = db_session.query(StudioSession).filter_by(uuid=hitl_sess_id).first()
     assert hitl_rec is not None
     assert hitl_rec.is_hitl is True
     assert hitl_rec.sample_count == 76
@@ -578,7 +578,7 @@ def test_ingest_raw_telemetry_device_mismatch_forbidden(client, db_session, monk
 
     sess_id = uuid.uuid4()
     session_rec = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=user.id,
         device_id="HK-OWNED",
         label="walk",
@@ -624,7 +624,7 @@ def test_ingest_raw_telemetry_admin_allowed_any_device(client, db_session, monke
 
     sess_id = uuid.uuid4()
     session_rec = StudioSession(
-        id=sess_id,
+        uuid=sess_id,
         user_id=admin.id,
         device_id="HK-ADMIN-SHOES",
         label="walk",
@@ -717,4 +717,4 @@ def test_ingest_raw_telemetry_zero_samples_ignored(client, db_session, monkeypat
     assert data["sample_count"] == 0
 
     # Ensure no session was inserted into Aurora
-    assert db_session.query(StudioSession).filter_by(id=sess_id).first() is None
+    assert db_session.query(StudioSession).filter_by(uuid=sess_id).first() is None

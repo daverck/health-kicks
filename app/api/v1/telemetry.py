@@ -67,7 +67,7 @@ def create_telemetry_router(
             if user.role == UserRole.user and bound_at_utc is not None:
                 try:
                     session_uuid = uuid.UUID(session_id)
-                    sess = db.query(StudioSession).filter_by(id=session_uuid, device_id=device_id).first()
+                    sess = db.query(StudioSession).filter_by(uuid=session_uuid, device_id=device_id).first()
                     if sess is not None:
                         sess_created = sess.created_at
                         b_cmp = bound_at_utc

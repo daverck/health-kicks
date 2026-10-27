@@ -42,7 +42,7 @@ def create_ingestion_router() -> APIRouter:
         session = ingest_raw_telemetry(db, payload)
         return {
             "status": "ingested" if session is not None else "ignored",
-            "session_id": str(session.id) if session else None,
+            "session_id": str(session.uuid) if session else None,
             "sample_count": session.sample_count if session else 0,
         }
 

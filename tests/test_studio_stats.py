@@ -205,9 +205,9 @@ def test_get_dataset_stats_raises_on_dynamo_error(telemetry_service, mock_table)
 
 def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
-    s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="walk", duration_sec=5.0, sample_count=50)
-    s2 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="stumble", duration_sec=10.0, sample_count=100)
-    s3 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-999", label="walk", duration_sec=7.0, sample_count=70)
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="walk", duration_sec=5.0, sample_count=50)
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="stumble", duration_sec=10.0, sample_count=100)
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-999", label="walk", duration_sec=7.0, sample_count=70)
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -223,9 +223,9 @@ def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) ->
 
 def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
-    s1 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-1", label="walk", duration_sec=5.0, sample_count=50)
-    s2 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-2", label="walk", duration_sec=5.0, sample_count=50)
-    s3 = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-3", label="run", duration_sec=10.0, sample_count=100)
+    s1 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-1", label="walk", duration_sec=5.0, sample_count=50)
+    s2 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-2", label="walk", duration_sec=5.0, sample_count=50)
+    s3 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-3", label="run", duration_sec=10.0, sample_count=100)
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -245,8 +245,8 @@ def test_studio_stats_rbac_strict_isolation(db_session, auth_user, admin_user) -
     db_session.query(StudioSession).delete()
     db_session.commit()
 
-    s_clinician = StudioSession(id=uuid.uuid4(), user_id=auth_user.id, device_id="dev-1", label="walk", duration_sec=5.0, sample_count=50)
-    s_other = StudioSession(id=uuid.uuid4(), user_id=admin_user.id, device_id="dev-2", label="idle", duration_sec=10.0, sample_count=100)
+    s_clinician = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="dev-1", label="walk", duration_sec=5.0, sample_count=50)
+    s_other = StudioSession(uuid=uuid.uuid4(), user_id=admin_user.id, device_id="dev-2", label="idle", duration_sec=10.0, sample_count=100)
     db_session.add_all([s_clinician, s_other])
     db_session.commit()
 
