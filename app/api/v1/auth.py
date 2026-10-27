@@ -306,8 +306,8 @@ def create_auth_router() -> APIRouter:
         dependencies=[Depends(rate_limit("token_refresh", max_requests=30, window_seconds=60.0))],
     )
     def refresh(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> TokenResponse:
-        user_id = token_service.verify_refresh_token(payload.refresh_token)
-        user = db.query(User).filter_by(id=user_id).one_or_none()
+        sub = token_service.verify_refresh_token(payload.refresh_token)
+        user = token_service.resolve_user_from_sub(db, sub)
         if user is None or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -316,7 +316,7 @@ def create_auth_router() -> APIRouter:
 
         new_access_token = token_service.issue_access_token(user)
         new_refresh_token = token_service.issue_refresh_token(user)
-        logger.info("Session refreshed for user id=%s", user.id)
+        logger.info("Session refreshed for user id=%s (uuid=%s)", user.id, user.uuid)
         return TokenResponse.build(user, new_access_token, new_refresh_token)
 
     @router.get("/me", response_model=UserResponse)
@@ -369,7 +369,7 @@ def create_auth_router() -> APIRouter:
                 target_device_ids = owned_device_ids
 
         credentials_data = sts_service.generate_iot_credentials(
-            user_id=user.id,
+            user_id=str(user.uuid),
             device_ids=target_device_ids,
         )
         return IoTCredentialsResponse(**credentials_data)

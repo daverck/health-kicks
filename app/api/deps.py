@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.db.database import get_db
 from app.db.models import User, UserRole
-from app.services.token_service import verify_access_token
+from app.services.token_service import resolve_user_from_sub, verify_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -33,7 +33,8 @@ def get_current_user(
     except jwt.PyJWTError as error:
         raise HTTPException(status_code=401, detail="Invalid token") from error
 
-    user = db.query(User).filter_by(id=int(claims["sub"])).one_or_none()
+    sub = claims.get("sub")
+    user = resolve_user_from_sub(db, sub)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Unknown or inactive user")
     return user

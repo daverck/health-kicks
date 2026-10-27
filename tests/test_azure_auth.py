@@ -355,7 +355,7 @@ def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
 
         # Verify access token
         claims = token_service.verify_access_token(data["access_token"])
-        assert claims["sub"] == str(data["user"]["id"])
+        assert claims["sub"] == str(data["user"]["uuid"])
         assert claims["azure_sub"] == "az-sub-777"
         assert claims["email"] == "doctor@healthkicks.org"
 
@@ -363,7 +363,7 @@ def test_endpoint_azure_callback_post_success(auth_client, monkeypatch) -> None:
         assert "refresh_token" in data
         assert data["refresh_token"] is not None
         refreshed_user_id = token_service.verify_refresh_token(data["refresh_token"])
-        assert refreshed_user_id == data["user"]["id"]
+        assert refreshed_user_id == str(data["user"]["uuid"])
 
 
 def test_endpoint_azure_callback_post_token_exchange_error(auth_client) -> None:

@@ -1469,3 +1469,39 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
     for item in pseudo_items:
         assert item["user_display_name"].startswith("Patient SUBJ-")
         assert item["subject_pseudonym"] == pat_pseudo
+
+
+def test_fall_alert_ingest_uuid_and_downlink_topic(
+    client, db_session, patient_user, fake_iot
+):
+    """Verify that fall alert ingest accepts user_id as UUID string and publishes to healthkicks/v1/users/{uuid}/fall-alert/status."""
+    ingest_headers = {"X-Ingest-Token": "test-ingest-secret"}
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    fake_iot.published.clear()
+
+    res = client.post(
+        "/api/v1/internal/fall-alerts",
+        headers=ingest_headers,
+        json={
+            "user_id": str(patient_user.uuid),
+            "event_id": "evt-uuid-test-01",
+            "action": "DETECTED",
+            "device_id": "HK-UUID-1",
+            "event_type": "fall_forward",
+            "confidence": 0.95,
+            "detected_at": now_ms,
+            "delivery": "live",
+            "sent_at": now_ms,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["state"] == "PENDING"
+    assert data["event_id"] == "evt-uuid-test-01"
+
+    # Verify downlink publish was sent to the user's UUID status topic
+    assert len(fake_iot.published) >= 1
+    last_pub = fake_iot.published[-1]
+    expected_topic = f"healthkicks/v1/users/{patient_user.uuid}/fall-alert/status"
+    assert last_pub["topic"] == expected_topic
+    assert last_pub["payload"]["state"] == "PENDING"

@@ -214,22 +214,36 @@ def _publish_status_safe(
         return False
     try:
         payload = build_downlink_status_payload(db, alert, sms_command=sms_command)
-        return bool(iot_publisher.publish_fall_alert_status(alert.user_id, payload))
+        user = alert.user or db.query(User).filter(User.id == alert.user_id).first()
+        target_sub = str(user.uuid) if (user and getattr(user, "uuid", None)) else str(alert.user_id)
+        return bool(iot_publisher.publish_fall_alert_status(target_sub, payload))
     except Exception:
         logger.exception("Failed to publish downlink fall alert status for alert %s", alert.id)
         return False
 
 
-def resolve_user_for_ingest(db: Session, raw_user_id: int | str) -> User:
-    """Resolve user from integer ID, numeric string, SSO subject, or email."""
+def resolve_user_for_ingest(db: Session, raw_user_id: int | str | uuid.UUID) -> User:
+    """Resolve user from UUID, integer ID, numeric string, SSO subject, or email."""
     user: User | None = None
-    if isinstance(raw_user_id, int):
+    if isinstance(raw_user_id, uuid.UUID):
+        user = db.query(User).filter(User.uuid == raw_user_id).first()
+    elif isinstance(raw_user_id, int):
         user = db.query(User).filter(User.id == raw_user_id).first()
     elif isinstance(raw_user_id, str):
         cleaned = raw_user_id.strip()
-        if cleaned.isdigit():
-            user = db.query(User).filter(User.id == int(cleaned)).first()
-        else:
+        try:
+            val_uuid = uuid.UUID(cleaned)
+            user = db.query(User).filter(User.uuid == val_uuid).first()
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+        if user is None and cleaned.isdigit():
+            try:
+                user = db.query(User).filter(User.id == int(cleaned)).first()
+            except (ValueError, TypeError):
+                pass
+
+        if user is None:
             user = (
                 db.query(User)
                 .filter(
@@ -1088,7 +1102,8 @@ def send_test_email_to_contact(
             },
         }
         try:
-            sms_dispatched = bool(iot_publisher.publish_fall_alert_status(user.id, test_payload))
+            target_sub = str(user.uuid) if getattr(user, "uuid", None) else str(user.id)
+            sms_dispatched = bool(iot_publisher.publish_fall_alert_status(target_sub, test_payload))
         except Exception:
             logger.exception(
                 "Failed to publish test SMS command for contact %s (user %s)",

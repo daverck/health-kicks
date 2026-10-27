@@ -281,7 +281,7 @@ class TestIoTCredentialsEndpoint:
 
         connect_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Connect"])
         assert "arn:aws:iot:eu-north-1:123456789012:client/*" not in connect_stmt["Resource"]
-        assert f"arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-{admin_user.id}-*" in connect_stmt["Resource"]
+        assert f"arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-{admin_user.uuid}-*" in connect_stmt["Resource"]
 
     def test_query_parameter_fallback(self, client, standard_user, user_device, mock_sts_client):
         token = token_service.issue_access_token(standard_user)
@@ -292,3 +292,22 @@ class TestIoTCredentialsEndpoint:
         assert response.status_code == 200
         assert response.json()["access_key_id"] == "ASIA_MOCK_ACCESS_KEY"
 
+    def test_iot_credentials_exposes_user_uuid_and_scoped_topic(
+        self, client, standard_user, user_device, mock_sts_client
+    ):
+        token = token_service.issue_access_token(standard_user)
+        response = client.post(
+            "/api/v1/auth/iot-credentials",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"device_id": "HK-1"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user_id"] == str(standard_user.uuid)
+        assert data["user_uuid"] == str(standard_user.uuid)
+
+        call_kwargs = mock_sts_client.assume_role.call_args[1]
+        policy = json.loads(call_kwargs["Policy"])
+        pub_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Publish", "iot:Receive"])
+        expected_user_topic = f"arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/users/{standard_user.uuid}/*"
+        assert expected_user_topic in pub_stmt["Resource"]

@@ -2,9 +2,11 @@
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.pseudonymization import get_subject_pseudonym
 from app.db.models import User
 from app.schemas.cloud import StrictModel
 
@@ -13,16 +15,39 @@ class UserResponse(StrictModel):
     """User profile response."""
 
     id: int
+    uuid: UUID = Field(default_factory=uuid4)
+    pseudonym: str = Field(default="")
     email: str
     name: str | None = None
     avatar_url: str | None = None
     role: str
     is_active: bool
 
+    @field_validator("uuid", mode="before")
+    @classmethod
+    def parse_uuid(cls, value: Any) -> UUID:
+        if isinstance(value, str):
+            return UUID(value)
+        return value
+
+    @model_validator(mode="after")
+    def populate_pseudonym(self) -> "UserResponse":
+        if not self.pseudonym:
+            self.pseudonym = get_subject_pseudonym(str(self.uuid))
+        return self
+
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
+        u_uuid = getattr(user, "uuid", None)
+        if u_uuid is None:
+            u_uuid = uuid4()
+        u_pseudo = getattr(user, "pseudonym", None)
+        if not u_pseudo:
+            u_pseudo = get_subject_pseudonym(str(u_uuid))
         return cls(
             id=user.id,
+            uuid=u_uuid,
+            pseudonym=u_pseudo,
             email=user.email,
             name=user.name,
             avatar_url=user.avatar_url,
@@ -100,6 +125,7 @@ class IoTCredentialsResponse(BaseModel):
     expiration: datetime
     iot_endpoint: str
     region: str
-    user_id: str | None = None
+    user_id: str
+    user_uuid: str
 
     model_config = ConfigDict(extra="forbid")

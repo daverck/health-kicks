@@ -50,7 +50,7 @@ def test_issue_and_verify_access_token_roundtrip(db_session) -> None:
 
     token = token_service.issue_access_token(user)
     claims = token_service.verify_access_token(token)
-    assert claims["sub"] == str(user.id)
+    assert claims["sub"] == str(user.uuid)
     assert claims["role"] == "clinician"
     assert claims["email"] == "a@example.com"
     assert claims["exp"] > claims["iat"]
@@ -260,7 +260,7 @@ def test_endpoint_google_callback_post_success(db_session, monkeypatch) -> None:
         assert "refresh_token" in data
         assert data["refresh_token"] is not None
         refreshed_user_id = token_service.verify_refresh_token(data["refresh_token"])
-        assert refreshed_user_id == data["user"]["id"]
+        assert refreshed_user_id == str(data["user"]["uuid"])
 
 
 def test_endpoint_google_callback_post_token_exchange_error() -> None:
@@ -408,7 +408,7 @@ def test_issue_and_verify_refresh_token_roundtrip(db_session) -> None:
 
     token = token_service.issue_refresh_token(user)
     user_id = token_service.verify_refresh_token(token)
-    assert user_id == user.id
+    assert user_id == str(user.uuid)
 
 
 def test_verify_refresh_token_expired(db_session) -> None:
@@ -746,3 +746,81 @@ def test_google_pkce_s256_and_ticket_exchange_flow(db_session, mock_google_setti
         assert ok_post.status_code == 200
 
 
+
+
+def test_user_response_and_jwt_uuid_alignment(db_session) -> None:
+    """Verify that UserResponse exposes uuid & pseudonym and JWT uses user.uuid."""
+    from app.db.database import get_db
+    from app.main import app
+
+    user = User(
+        email="uuid.align@example.com",
+        name="UUID Align",
+        role=UserRole.user,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    token = token_service.create_access_token(user)
+    claims = token_service.decode_token(token)
+    assert claims["sub"] == str(user.uuid)
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        client = TestClient(app)
+        res = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["uuid"] == str(user.uuid)
+        assert data["pseudonym"] == user.pseudonym
+        assert data["id"] == user.id
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_legacy_integer_sub_fallback(db_session) -> None:
+    """Verify backward-compatible resolution when a token contains integer ID as sub."""
+    import time
+    import jwt
+    from app.core.config import settings
+    from app.db.database import get_db
+    from app.main import app
+
+    user = User(
+        email="legacy.sub@example.com",
+        name="Legacy Sub",
+        role=UserRole.user,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    # Issue token with integer sub
+    legacy_payload = {
+        "sub": str(user.id),
+        "type": "access",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 3600,
+    }
+    legacy_token = jwt.encode(legacy_payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        client = TestClient(app)
+        res = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {legacy_token}"})
+        assert res.status_code == 200
+        assert res.json()["email"] == user.email
+        assert res.json()["uuid"] == str(user.uuid)
+
+        legacy_refresh = jwt.encode(
+            {"sub": str(user.id), "type": "refresh", "exp": int(time.time()) + 3600},
+            settings.jwt_secret,
+            algorithm=settings.jwt_algorithm,
+        )
+        ref_res = client.post("/api/v1/auth/refresh", json={"refresh_token": legacy_refresh})
+        assert ref_res.status_code == 200
+        new_claims = token_service.decode_token(ref_res.json()["access_token"])
+        assert new_claims["sub"] == str(user.uuid)
+    finally:
+        app.dependency_overrides.pop(get_db, None)

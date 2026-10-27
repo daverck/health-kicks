@@ -79,16 +79,24 @@ def create_internal_router(
         if isinstance(payload.user_id, int):
             user_db_id = payload.user_id
         elif isinstance(payload.user_id, str):
-            if payload.user_id.isdigit():
-                user_db_id = int(payload.user_id)
-            else:
+            cleaned = payload.user_id.strip()
+            user = None
+            try:
+                import uuid as _uuid
+                val_u = _uuid.UUID(cleaned)
+                user = db.query(User).filter(User.uuid == val_u).first()
+            except (ValueError, TypeError, AttributeError):
+                pass
+            if user is None and cleaned.isdigit():
+                user = db.query(User).filter(User.id == int(cleaned)).first()
+            if user is None:
                 user = db.query(User).filter(
-                    (User.google_sub == payload.user_id)
-                    | (User.azure_sub == payload.user_id)
-                    | (User.email == payload.user_id)
+                    (User.google_sub == cleaned)
+                    | (User.azure_sub == cleaned)
+                    | (User.email == cleaned)
                 ).first()
-                if user:
-                    user_db_id = user.id
+            if user:
+                user_db_id = user.id
 
         if user_db_id is not None:
             ownerships = db.query(DeviceOwnership).filter_by(user_id=user_db_id).all()
