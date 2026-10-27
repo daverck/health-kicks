@@ -157,6 +157,5 @@ class AWSSTSService:
             "expiration": creds["Expiration"],
             "iot_endpoint": self._config.aws_iot_endpoint,
             "region": self._config.aws_region,
-            "user_id": str(user_id),
             "user_uuid": str(user_id),
         }

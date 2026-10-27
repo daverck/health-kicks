@@ -160,7 +160,8 @@ class TestAWSSTSServiceUnit:
         assert creds["session_token"] == "mock_session_token_xyz"
         assert creds["iot_endpoint"] == "a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com"
         assert creds["region"] == "eu-north-1"
-        assert creds["user_id"] == "10"
+        assert "user_id" not in creds
+        assert creds["user_uuid"] == "10"
 
         mock_sts_client.assume_role.assert_called_once()
         call_kwargs = mock_sts_client.assume_role.call_args[1]
@@ -303,7 +304,7 @@ class TestIoTCredentialsEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["user_id"] == str(standard_user.uuid)
+        assert "user_id" not in data
         assert data["user_uuid"] == str(standard_user.uuid)
 
         call_kwargs = mock_sts_client.assume_role.call_args[1]

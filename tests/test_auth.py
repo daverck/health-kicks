@@ -383,16 +383,16 @@ def test_endpoint_google_callback_post_unexpected_exception(caplog) -> None:
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
 
     with patch(
-        "app.services.google_auth_service.exchange_code_for_id_token",
-        side_effect=RuntimeError("Surprise crash in exchange"),
-    ):
-        client = TestClient(app)
-        res = client.post(
-            "/api/v1/auth/google/callback",
-            json={"code": "any-code", "state": valid_state},
-        )
-        assert res.status_code == 500
-        assert "unexpected error during code exchange" in caplog.text
+            "app.services.google_auth_service.exchange_code_for_id_token",
+            side_effect=RuntimeError("Surprise crash in exchange"),
+        ):
+            client = TestClient(app)
+            res = client.post(
+                "/api/v1/auth/google/callback",
+                json={"code": "any-code", "state": valid_state},
+            )
+            assert res.status_code == 500
+            assert "unexpected error during code exchange" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +523,8 @@ def test_endpoint_refresh_nominal(db_session) -> None:
     assert data["token_type"] == "bearer"
     assert "access_token" in data
     assert "refresh_token" in data
-    assert data["user"]["id"] == user.id
+    assert "id" not in data["user"]
+    assert data["user"]["uuid"] == str(user.uuid)
     assert data["user"]["email"] == "refresh.user@example.com"
 
     # Verify that the new access token can query /me
@@ -537,7 +538,8 @@ def test_endpoint_refresh_nominal(db_session) -> None:
     # Verify rotation: the newly issued refresh_token is also valid and can be refreshed again
     rotated_res = client.post("/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]})
     assert rotated_res.status_code == 200
-    assert rotated_res.json()["user"]["id"] == user.id
+    assert "id" not in rotated_res.json()["user"]
+    assert rotated_res.json()["user"]["uuid"] == str(user.uuid)
 
 
 def test_endpoint_refresh_expired_token(db_session) -> None:
@@ -774,7 +776,8 @@ def test_user_response_and_jwt_uuid_alignment(db_session) -> None:
         data = res.json()
         assert data["uuid"] == str(user.uuid)
         assert data["pseudonym"] == user.pseudonym
-        assert data["id"] == user.id
+        assert "id" not in data
+        assert data["uuid"] == str(user.uuid)
     finally:
         app.dependency_overrides.pop(get_db, None)
 

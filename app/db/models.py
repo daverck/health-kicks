@@ -20,7 +20,7 @@ from sqlalchemy import (
     UUID as PgUUID,
     Uuid,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, synonym
 
 from app.core.pseudonymization import get_subject_pseudonym
 
@@ -181,7 +181,7 @@ class StudioSession(Base):
     __tablename__ = "studio_sessions"
     __table_args__ = (Index("ix_studio_sessions_created_at", "created_at"),)
 
-    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    uuid: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     device_id: Mapped[str] = mapped_column(String(128), index=True)
     label: Mapped[str] = mapped_column(String(64), index=True)
@@ -194,6 +194,8 @@ class StudioSession(Base):
     )
 
     user: Mapped["User"] = relationship("User", lazy="joined")
+
+    id = synonym("uuid")
 
 
 class DailyActivityStep(Base):

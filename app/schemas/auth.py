@@ -14,7 +14,6 @@ from app.schemas.cloud import StrictModel
 class UserResponse(StrictModel):
     """User profile response."""
 
-    id: int
     uuid: UUID = Field(default_factory=uuid4)
     pseudonym: str = Field(default="")
     email: str
@@ -45,7 +44,6 @@ class UserResponse(StrictModel):
         if not u_pseudo:
             u_pseudo = get_subject_pseudonym(str(u_uuid))
         return cls(
-            id=user.id,
             uuid=u_uuid,
             pseudonym=u_pseudo,
             email=user.email,
@@ -125,7 +123,6 @@ class IoTCredentialsResponse(BaseModel):
     expiration: datetime
     iot_endpoint: str
     region: str
-    user_id: str
     user_uuid: str
 
     model_config = ConfigDict(extra="forbid")

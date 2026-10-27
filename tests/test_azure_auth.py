@@ -420,7 +420,8 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
         )
         assert res.status_code == 200
         data = res.json()
-        assert data["user"]["id"] == user_id
+        assert "id" not in data["user"]
+        assert data["user"]["uuid"] == str(google_user.uuid)
         assert data["user"]["email"] == "linked.doc@healthkicks.org"
         assert data["user"]["role"] == "clinician"
 
@@ -435,7 +436,8 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
             headers={"Authorization": f"Bearer {data['access_token']}"},
         )
         assert me_res.status_code == 200
-        assert me_res.json()["id"] == user_id
+        assert "id" not in me_res.json()
+        assert me_res.json()["uuid"] == str(google_user.uuid)
         assert me_res.json()["email"] == "linked.doc@healthkicks.org"
         assert me_res.json()["role"] == "clinician"
 
