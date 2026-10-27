@@ -1,277 +1,284 @@
-from uuid import UUID
-"""Service layer for device management and user-device association."""
-
-import logging
-from datetime import UTC, datetime, timedelta
-
-from fastapi import HTTPException, status
-from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
-
-from app.api.v1.utils import decode_cursor
-from app.core.config import settings
-from app.db.models import Device, DeviceOwnership, DeviceStatus, User, UserRole
-from app.schemas.device import DeviceCreate, DeviceResponse
-
-logger = logging.getLogger(__name__)
-
-
-def verify_device_ownership(
-    db: Session,
-    user: User,
-    device_id: str,
-    allow_clinician: bool = False,
-) -> None:
-    """Verify that a user is authorized to access/operate on a device.
-
-    Admins are always authorized. Clinicians are authorized if allow_clinician is True.
-    Regular users must have an active DeviceOwnership record for the device.
-    """
-    if user.role == UserRole.admin:
-        return
-    if allow_clinician and user.role == UserRole.clinician:
-        return
-
-    ownership = (
-        db.query(DeviceOwnership)
-        .filter_by(user_id=user.id, device_id=device_id)
-        .first()
-    )
-    if ownership is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: device not bound to user",
-        )
-
-
-def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceResponse:
-    """Bind a factory-registered device to a user account."""
-    device = db.query(Device).filter_by(device_id=payload.device_id).one_or_none()
-    if device is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Device not found",
-        )
-
-    existing_ownerships = (
-        db.query(DeviceOwnership)
-        .filter_by(device_id=payload.device_id)
-        .all()
-    )
-
-    # Check if already bound to the requesting user
-    if any(o.user_id == user_id for o in existing_ownerships):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Device already bound to this user",
-        )
-
-    # Check if currently bound to another user
-    if existing_ownerships:
-        previous_user_ids = [o.user_id for o in existing_ownerships]
-        timestamps = [device.last_seen_utc] + [o.bound_at_utc for o in existing_ownerships if o.bound_at_utc]
-        valid_timestamps = [t for t in timestamps if t is not None]
-
-        now = datetime.now(UTC)
-        if valid_timestamps:
-            last_activity = max(
-                t if t.tzinfo is not None else t.replace(tzinfo=UTC)
-                for t in valid_timestamps
-            )
-        else:
-            last_activity = None
-
-        inactivity_threshold = timedelta(days=settings.device_inactivity_days)
-        is_inactive = (last_activity is None) or ((now - last_activity) > inactivity_threshold)
-
-        if is_inactive:
-            logger.info(
-                "Device %s auto-unbound from user(s) %s due to inactivity (> %s days, last activity: %s) and re-bound to user %s",
-                payload.device_id,
-                previous_user_ids,
-                settings.device_inactivity_days,
-                last_activity,
-                user_id,
-            )
-            for o in existing_ownerships:
-                db.delete(o)
-            db.flush()
-        else:
-            logger.warning(
-                "Device binding rejected: device %s is currently bound to user(s) %s with recent activity at %s (threshold: %s days)",
-                payload.device_id,
-                previous_user_ids,
-                last_activity,
-                settings.device_inactivity_days,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Device is already owned by another user",
-            )
-
-    # Update nickname if provided
-    if payload.name is not None:
-        device.name = payload.name
-
-    new_ownership = DeviceOwnership(user_id=user_id, device_id=payload.device_id)
-    db.add(new_ownership)
-    db.commit()
-    db.refresh(device)
-    db.refresh(new_ownership)
-
-    return DeviceResponse(
-        uuid=device.uuid,
-        device_id=device.device_id,
-        name=device.name,
-        status=device.status,
-        is_online=(device.status == DeviceStatus.online),
-        last_seen=device.last_seen_utc,
-        last_seen_utc=device.last_seen_utc,
-        firmware_version=device.firmware_version or "v1.2.0-esp32s3",
-        last_calibration_time=device.last_calibration_time,
-        created_at=device.created_at,
-        bound_at_utc=new_ownership.bound_at_utc,
-    )
-
-
-def list_user_devices(
-    db: Session,
-    user_id: int,
-    skip: int = 0,
-    limit: int = 100,
-    cursor: str | None = None,
-) -> list[DeviceResponse]:
-    """Retrieve all devices bound to a user, joined with ownership for bound_at_utc."""
-    query = (
-        db.query(Device, DeviceOwnership.bound_at_utc)
-        .join(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
-        .filter(DeviceOwnership.user_id == user_id)
-    )
-
-    decoded = decode_cursor(cursor)
-    if decoded is not None:
-        cur_ts, cur_dev_id = decoded
-        query = query.filter(
-            or_(
-                DeviceOwnership.bound_at_utc < cur_ts,
-                and_(
-                    DeviceOwnership.bound_at_utc == cur_ts,
-                    Device.device_id < cur_dev_id,
-                ),
-            )
-        )
-
-    query = query.order_by(DeviceOwnership.bound_at_utc.desc(), Device.device_id.desc())
-
-    if decoded is None and skip > 0:
-        query = query.offset(skip)
-
-    rows = query.limit(limit).all()
-    return [
-        DeviceResponse(
-            uuid=device.uuid,
-            device_id=device.device_id,
-            name=device.name,
-            status=device.status,
-            is_online=(device.status == DeviceStatus.online),
-            last_seen=device.last_seen_utc,
-            last_seen_utc=device.last_seen_utc,
-            firmware_version=device.firmware_version or "v1.2.0-esp32s3",
-            last_calibration_time=device.last_calibration_time,
-            created_at=device.created_at,
-            bound_at_utc=bound_at_utc,
-        )
-        for device, bound_at_utc in rows
-    ]
-
-
-def list_all_devices(
-    db: Session,
-    skip: int = 0,
-    limit: int = 100,
-    cursor: str | None = None,
-) -> list[DeviceResponse]:
-    """Retrieve all registered devices for administrator overview."""
-    query = (
-        db.query(Device, DeviceOwnership.bound_at_utc)
-        .outerjoin(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
-    )
-
-    decoded = decode_cursor(cursor)
-    if decoded is not None:
-        cur_ts, cur_dev_id = decoded
-        query = query.filter(
-            or_(
-                Device.created_at < cur_ts,
-                and_(
-                    Device.created_at == cur_ts,
-                    Device.device_id < cur_dev_id,
-                ),
-            )
-        )
-
-    query = query.order_by(Device.created_at.desc(), Device.device_id.desc())
-
-    if decoded is None and skip > 0:
-        query = query.offset(skip)
-
-    rows = query.limit(limit).all()
-    return [
-        DeviceResponse(
-            uuid=device.uuid,
-            device_id=device.device_id,
-            name=device.name,
-            status=device.status,
-            is_online=(device.status == DeviceStatus.online),
-            last_seen=device.last_seen_utc,
-            last_seen_utc=device.last_seen_utc,
-            firmware_version=device.firmware_version or "v1.2.0-esp32s3",
-            last_calibration_time=device.last_calibration_time,
-            created_at=device.created_at,
-            bound_at_utc=bound_at_utc or device.created_at,
-        )
-        for device, bound_at_utc in rows
-    ]
-
-
-def _resolve_device_id(db: Session, identifier: str) -> str:
-    """Resolve a device identifier (either UUID or device_id string) to a device_id."""
-    try:
-        dev_uuid = UUID(str(identifier))
-        device = db.query(Device).filter(Device.uuid == dev_uuid).one_or_none()
-        if device is not None:
-            return device.device_id
-    except (ValueError, TypeError, AttributeError):
-        pass
-    return identifier
-
-
-def unbind_device(db: Session, user_id: int, device_id: str) -> None:
-    """Remove device ownership for the given user and device (by device_id or UUID)."""
-    resolved_id = _resolve_device_id(db, device_id)
-    ownership = (
-        db.query(DeviceOwnership)
-        .filter_by(user_id=user_id, device_id=resolved_id)
-        .one_or_none()
-    )
-    if ownership is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Device not bound to this user",
-        )
-    db.delete(ownership)
-    db.commit()
-
-
-def unbind_device_admin(db: Session, device_id: str) -> None:
-    """Remove all device ownerships for a device as an administrator (by device_id or UUID)."""
-    resolved_id = _resolve_device_id(db, device_id)
-    ownerships = db.query(DeviceOwnership).filter_by(device_id=resolved_id).all()
-    if not ownerships:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Device not bound to any user",
-        )
-    for o in ownerships:
-        db.delete(o)
-    db.commit()
+from uuid import UUID
+"""Service layer for device management and user-device association."""
+
+import logging
+from datetime import UTC, datetime, timedelta
+
+from fastapi import HTTPException, status
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
+from app.api.v1.utils import decode_cursor
+from app.core.config import settings
+from app.db.models import Device, DeviceOwnership, DeviceStatus, User, UserRole
+from app.schemas.device import DeviceCreate, DeviceResponse
+
+logger = logging.getLogger(__name__)
+
+
+def verify_device_ownership(
+    db: Session,
+    user: User,
+    device_id: str,
+    allow_clinician: bool = False,
+) -> None:
+    """Verify that a user is authorized to access/operate on a device.
+
+    Admins are always authorized. Clinicians are authorized if allow_clinician is True.
+    Regular users must have an active DeviceOwnership record for the device.
+    """
+    if user.role == UserRole.admin:
+        return
+    if allow_clinician and user.role == UserRole.clinician:
+        return
+
+    ownership = (
+        db.query(DeviceOwnership)
+        .filter_by(user_id=user.id, device_id=device_id)
+        .first()
+    )
+    if ownership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: device not bound to user",
+        )
+
+
+def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceResponse:
+    """Bind a factory-registered device to a user account."""
+    device = db.query(Device).filter_by(device_id=payload.device_id).one_or_none()
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not found",
+        )
+
+    existing_ownerships = (
+        db.query(DeviceOwnership)
+        .filter_by(device_id=payload.device_id)
+        .all()
+    )
+
+    # Check if already bound to the requesting user
+    if any(o.user_id == user_id for o in existing_ownerships):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Device already bound to this user",
+        )
+
+    # Check if currently bound to another user
+    if existing_ownerships:
+        previous_user_ids = [o.user_id for o in existing_ownerships]
+        timestamps = [device.last_seen_utc] + [o.bound_at_utc for o in existing_ownerships if o.bound_at_utc]
+        valid_timestamps = [t for t in timestamps if t is not None]
+
+        now = datetime.now(UTC)
+        if valid_timestamps:
+            last_activity = max(
+                t if t.tzinfo is not None else t.replace(tzinfo=UTC)
+                for t in valid_timestamps
+            )
+        else:
+            last_activity = None
+
+        inactivity_threshold = timedelta(days=settings.device_inactivity_days)
+        is_inactive = (last_activity is None) or ((now - last_activity) > inactivity_threshold)
+
+        if is_inactive:
+            logger.info(
+                "Device %s auto-unbound from user(s) %s due to inactivity (> %s days, last activity: %s) and re-bound to user %s",
+                payload.device_id,
+                previous_user_ids,
+                settings.device_inactivity_days,
+                last_activity,
+                user_id,
+            )
+            for o in existing_ownerships:
+                db.delete(o)
+            db.flush()
+        else:
+            logger.warning(
+                "Device binding rejected: device %s is currently bound to user(s) %s with recent activity at %s (threshold: %s days)",
+                payload.device_id,
+                previous_user_ids,
+                last_activity,
+                settings.device_inactivity_days,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device is already owned by another user",
+            )
+
+    # Update nickname if provided
+    if payload.name is not None:
+        device.name = payload.name
+
+    new_ownership = DeviceOwnership(user_id=user_id, device_id=payload.device_id)
+    db.add(new_ownership)
+    db.commit()
+    db.refresh(device)
+    db.refresh(new_ownership)
+
+    return DeviceResponse(
+        uuid=device.uuid,
+        device_id=device.device_id,
+        name=device.name,
+        status=device.status,
+        is_online=(device.status == DeviceStatus.online),
+        last_seen=device.last_seen_utc,
+        last_seen_utc=device.last_seen_utc,
+        firmware_version=device.firmware_version or "v1.2.0-esp32s3",
+        last_calibration_time=device.last_calibration_time,
+        created_at=device.created_at,
+        bound_at_utc=new_ownership.bound_at_utc,
+    )
+
+
+def list_user_devices(
+    db: Session,
+    user_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> list[DeviceResponse]:
+    """Retrieve all devices bound to a user, joined with ownership for bound_at_utc."""
+    query = (
+        db.query(Device, DeviceOwnership.bound_at_utc)
+        .join(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
+        .filter(DeviceOwnership.user_id == user_id)
+    )
+
+    decoded = decode_cursor(cursor)
+    if decoded is not None:
+        cur_ts, cur_dev_id = decoded
+        query = query.filter(
+            or_(
+                DeviceOwnership.bound_at_utc < cur_ts,
+                and_(
+                    DeviceOwnership.bound_at_utc == cur_ts,
+                    Device.device_id < cur_dev_id,
+                ),
+            )
+        )
+
+    query = query.order_by(DeviceOwnership.bound_at_utc.desc(), Device.device_id.desc())
+
+    if decoded is None and skip > 0:
+        query = query.offset(skip)
+
+    rows = query.limit(limit).all()
+    return [
+        DeviceResponse(
+            uuid=device.uuid,
+            device_id=device.device_id,
+            name=device.name,
+            status=device.status,
+            is_online=(device.status == DeviceStatus.online),
+            last_seen=device.last_seen_utc,
+            last_seen_utc=device.last_seen_utc,
+            firmware_version=device.firmware_version or "v1.2.0-esp32s3",
+            last_calibration_time=device.last_calibration_time,
+            created_at=device.created_at,
+            bound_at_utc=bound_at_utc,
+        )
+        for device, bound_at_utc in rows
+    ]
+
+
+def list_all_devices(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> list[DeviceResponse]:
+    """Retrieve all registered devices for administrator overview."""
+    query = (
+        db.query(Device, DeviceOwnership.bound_at_utc)
+        .outerjoin(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
+    )
+
+    decoded = decode_cursor(cursor)
+    if decoded is not None:
+        cur_ts, cur_dev_id = decoded
+        query = query.filter(
+            or_(
+                Device.created_at < cur_ts,
+                and_(
+                    Device.created_at == cur_ts,
+                    Device.device_id < cur_dev_id,
+                ),
+            )
+        )
+
+    query = query.order_by(Device.created_at.desc(), Device.device_id.desc())
+
+    if decoded is None and skip > 0:
+        query = query.offset(skip)
+
+    rows = query.limit(limit).all()
+    return [
+        DeviceResponse(
+            uuid=device.uuid,
+            device_id=device.device_id,
+            name=device.name,
+            status=device.status,
+            is_online=(device.status == DeviceStatus.online),
+            last_seen=device.last_seen_utc,
+            last_seen_utc=device.last_seen_utc,
+            firmware_version=device.firmware_version or "v1.2.0-esp32s3",
+            last_calibration_time=device.last_calibration_time,
+            created_at=device.created_at,
+            bound_at_utc=bound_at_utc or device.created_at,
+        )
+        for device, bound_at_utc in rows
+    ]
+
+
+def _resolve_device_by_uuid(db: Session, device_uuid: UUID | str) -> Device:
+    """Resolve a device strictly by its UUID, raising 404 if invalid or not found."""
+    if not isinstance(device_uuid, UUID):
+        try:
+            device_uuid = UUID(str(device_uuid))
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Device '{device_uuid}' not found",
+            )
+    device = db.query(Device).filter(Device.uuid == device_uuid).one_or_none()
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device '{device_uuid}' not found",
+        )
+    return device
+
+
+def unbind_device(db: Session, user_id: int, device_uuid: UUID | str) -> None:
+    """Remove device ownership for the given user strictly by device UUID."""
+    device = _resolve_device_by_uuid(db, device_uuid)
+    ownership = (
+        db.query(DeviceOwnership)
+        .filter_by(user_id=user_id, device_id=device.device_id)
+        .one_or_none()
+    )
+    if ownership is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not bound to this user",
+        )
+    db.delete(ownership)
+    db.commit()
+
+
+def unbind_device_admin(db: Session, device_uuid: UUID | str) -> None:
+    """Remove all device ownerships for a device as an administrator strictly by device UUID."""
+    device = _resolve_device_by_uuid(db, device_uuid)
+    ownerships = db.query(DeviceOwnership).filter_by(device_id=device.device_id).all()
+    if not ownerships:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not bound to any user",
+        )
+    for o in ownerships:
+        db.delete(o)
+    db.commit()
