@@ -219,6 +219,10 @@ def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) ->
     assert data["total_duration_sec"] == 15.0
     assert data["total_samples"] == 150
     assert data["by_label"] == {"walk": 1, "stumble": 1}
+    assert "by_label_validated" in data
+    assert "by_label_pending" in data
+    assert data["by_label_validated"]["walk"] == 0
+    assert data["by_label_pending"]["walk"] == 1
 
 
 def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) -> None:

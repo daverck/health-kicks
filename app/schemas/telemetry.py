@@ -63,3 +63,5 @@ class StudioDatasetStatsResponse(StrictModel):
     total_duration_sec: float = 0.0
     total_samples: int = 0
     by_label: dict[str, int]
+    by_label_validated: dict[str, int] = Field(default_factory=dict)
+    by_label_pending: dict[str, int] = Field(default_factory=dict)

@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import func
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
 from app.core.pseudonymization import get_subject_pseudonym
@@ -140,11 +140,18 @@ def compute_studio_stats(
     )
 
     label_rows = (
-        query.with_entities(StudioSession.label, func.count(StudioSession.uuid))
+        query.with_entities(
+            StudioSession.label,
+            func.count(StudioSession.uuid).label("total"),
+            func.coalesce(func.sum(case((StudioSession.is_validated == True, 1), else_=0)), 0).label("validated"),
+            func.coalesce(func.sum(case((StudioSession.is_validated == False, 1), else_=0)), 0).label("pending"),
+        )
         .group_by(StudioSession.label)
         .all()
     )
-    by_label = {str(lbl): int(cnt) for lbl, cnt in label_rows}
+    by_label = {str(lbl): int(total) for lbl, total, _val, _pend in label_rows}
+    by_label_validated = {str(lbl): int(val) for lbl, _tot, val, _pend in label_rows}
+    by_label_pending = {str(lbl): int(pend) for lbl, _tot, _val, pend in label_rows}
 
     return StudioDatasetStatsResponse(
         device_id=device_id,
@@ -152,5 +159,7 @@ def compute_studio_stats(
         total_duration_sec=round(float(total_duration), 2),
         total_samples=int(total_samples),
         by_label=by_label,
+        by_label_validated=by_label_validated,
+        by_label_pending=by_label_pending,
     )
 
