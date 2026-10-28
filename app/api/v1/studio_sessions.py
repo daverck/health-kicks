@@ -62,6 +62,7 @@ def create_studio_sessions_router(
         pseudonym: str | None = Query(default=None, description="Filtrer par pseudonyme de l'auteur (admin)"),
         is_validated: bool | None = Query(default=None, description="Filtrer par statut de validation de la session"),
         is_hitl: bool | None = Query(default=None, description="Filtrer par session HITL (True) ou standard (False)"),
+        classification: str | None = Query(default=None, description="Filtrer par classification ('edge_ai' ou 'research')"),
         start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
         end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
         sample_count_min: int | None = Query(default=None, ge=0, description="Minimum number of IMU samples"),
@@ -112,6 +113,17 @@ def create_studio_sessions_router(
 
         if is_hitl is not None and isinstance(is_hitl, bool):
             query = query.filter(StudioSession.is_hitl == is_hitl)
+
+        if classification is not None and classification.strip().lower() != "all":
+            edge_ai_labels = {
+                "idle", "walk", "run", "stairs", "stairs_up", "stairs_down",
+                "sit_down", "stand_up", "fall_forward", "fall_backward",
+                "fall_lateral", "fall_recovery", "stumble_recover", "fall_generic",
+            }
+            if classification.strip().lower() == "edge_ai":
+                query = query.filter(StudioSession.label.in_(edge_ai_labels))
+            elif classification.strip().lower() == "research":
+                query = query.filter(~StudioSession.label.in_(edge_ai_labels))
 
         if norm_start is not None:
             query = query.filter(StudioSession.created_at >= norm_start)
