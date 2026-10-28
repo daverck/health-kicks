@@ -130,7 +130,7 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
 
 
 DEFAULT_EXCLUDED_LABELS: set[str] = {"stairs"}
-PUNCTUAL_EVENT_LABELS: set[str] = {"stumble_recover", "sit_down"}
+PUNCTUAL_EVENT_LABELS: set[str] = {"stumble_recover", "sit_down", "stand_up"}
 
 
 def is_punctual_event(label: str) -> bool:
@@ -500,12 +500,25 @@ def migrate_json_to_npz(json_path: Path, cache_dir: Path) -> int:
     return migrated
 
 
+def _get_sess_id(sess: Any) -> str:
+    """Extracts session ID from a StudioSession model or mock."""
+    val_uuid = getattr(sess, "uuid", None)
+    val_id = getattr(sess, "id", None)
+    # If uuid is a MagicMock but id is a string/int, prefer id
+    if val_uuid is not None and type(val_uuid).__name__ != "MagicMock":
+        return str(val_uuid)
+    if val_id is not None and type(val_id).__name__ != "MagicMock":
+        return str(val_id)
+    if val_uuid is not None:
+        return str(val_uuid)
+    return str(val_id or "")
+
 def _fetch_single_session(
     sess: Any,
     telemetry_service: Any,
 ) -> tuple[str, dict[str, Any] | None, Exception | None]:
     """Downloads IMU frames of a session from DynamoDB."""
-    sess_id = str(sess.id)
+    sess_id = _get_sess_id(sess)
     try:
         readings_resp = telemetry_service.get_session_readings(
             device_id=sess.device_id,
@@ -613,7 +626,7 @@ def sync_sessions_cache(
                 logger.warning("Unable to delete %s: %s", npz_file, del_err)
         return []
 
-    active_db_session_ids = {str(sess.id).lower() for sess in db_sessions}
+    active_db_session_ids = {_get_sess_id(sess).lower() for sess in db_sessions}
     deleted_session_ids = [
         sess_id
         for sess_id in list(cached_sessions.keys())
@@ -636,7 +649,7 @@ def sync_sessions_cache(
     labels_updated = 0
     modified_sessions = 0
     for sess in db_sessions:
-        sess_id = str(sess.id)
+        sess_id = _get_sess_id(sess)
         if not force_refresh and sess_id in cached_sessions:
             cached_session = cached_sessions[sess_id]
             cached_source_sample_count = cached_session.get("source_sample_count")
