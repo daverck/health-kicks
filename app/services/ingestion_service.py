@@ -109,8 +109,6 @@ def ingest_raw_telemetry(
     """Ingest a raw IMU telemetry batch and update the StudioSession sample_count in Aurora DB."""
     header, payload = _parts(message, headers)
     device_id = str(payload.get("device_id") or header.get("device_id") or "")
-    if device_id.startswith("HealthKicks-"):
-        device_id = device_id.removeprefix("HealthKicks-")
     session_id_raw = payload.get("session_id") or header.get("session_id")
     if not session_id_raw:
         return None
