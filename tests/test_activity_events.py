@@ -718,3 +718,54 @@ def test_ingest_raw_telemetry_zero_samples_ignored(client, db_session, monkeypat
 
     # Ensure no session was inserted into Aurora
     assert db_session.query(StudioSession).filter_by(uuid=sess_id).first() is None
+
+
+def test_ingest_raw_telemetry_webhook_strips_healthkicks_prefix(client, db_session, monkeypatch):
+    """Verify /api/v1/ingest/telemetry/raw strips 'HealthKicks-' prefix and matches device ownership."""
+    import uuid
+    from app.db.models import StudioSession, User, UserRole
+
+    monkeypatch.setattr(
+        "app.api.v1.ingestion.settings",
+        ingestion_settings.__class__(ingest_token="secret-test-token", environment="production"),
+    )
+
+    user = User(
+        google_sub="sub-prefix-user",
+        email="prefix@example.com",
+        name="Prefix User",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.add(DeviceOwnership(user_id=user.id, device_id="HK-PREFIX"))
+    db_session.commit()
+
+    sess_id = uuid.uuid4()
+    raw_batch_payload = {
+        "header": {"device_id": "HealthKicks-HK-PREFIX", "session_id": str(sess_id)},
+        "payload": {
+            "device_id": "HealthKicks-HK-PREFIX",
+            "session_id": str(sess_id),
+            "label": "sit_down",
+            "sample_count": 76,
+            "duration_sec": 4.0,
+            "is_hitl": True,
+            "readings": [{"ax": 0.0, "ay": 0.0, "az": 1.0, "gx": 0.0, "gy": 0.0, "gz": 0.0}],
+        },
+    }
+
+    headers = {"X-HealthKicks-Ingest-Token": "secret-test-token"}
+    res = client.post("/api/v1/ingest/telemetry/raw", json=raw_batch_payload, headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ingested"
+    assert data["session_id"] == str(sess_id)
+    assert data["sample_count"] == 76
+
+    created = db_session.query(StudioSession).filter_by(uuid=sess_id).first()
+    assert created is not None
+    assert created.device_id == "HK-PREFIX"
+    assert created.label == "sit_down"
+    assert created.is_hitl is True
