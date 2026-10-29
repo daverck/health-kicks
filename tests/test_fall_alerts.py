@@ -1505,3 +1505,30 @@ def test_fall_alert_ingest_uuid_and_downlink_topic(
     expected_topic = f"healthkicks/v1/users/{patient_user.uuid}/fall-alert/status"
     assert last_pub["topic"] == expected_topic
     assert last_pub["payload"]["state"] == "PENDING"
+
+
+def test_fall_alert_postgresql_for_update_of_target_compilation(db_session):
+    """Verify that FallAlert query with FOR UPDATE in PostgreSQL specifically targets `OF fall_alerts`.
+
+    PostgreSQL forbids FOR UPDATE on the nullable side of an outer join (such as FallAlert.user
+    which has lazy='joined'). Using of=FallAlert avoids 'FOR UPDATE cannot be applied to the nullable
+    side of an outer join' errors in the escalation worker.
+    """
+    from sqlalchemy.dialects import postgresql
+    from app.db.models import FallAlert
+    from app.services.fall_alert_service import ACTIVE_ALERT_STATES
+
+    query = (
+        db_session.query(FallAlert)
+        .filter(
+            FallAlert.state.in_(ACTIVE_ALERT_STATES),
+            FallAlert.next_action_at_utc.is_not(None),
+        )
+        .order_by(FallAlert.next_action_at_utc.asc(), FallAlert.id.asc())
+        .with_for_update(of=FallAlert, skip_locked=True)
+    )
+
+    compiled_sql = str(query.statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE OF fall_alerts SKIP LOCKED" in compiled_sql
+    assert "FOR UPDATE OF users" not in compiled_sql
+

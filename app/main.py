@@ -74,7 +74,7 @@ async def _fall_alert_escalation_worker() -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.debug("[fall-alert-worker] Tick skipped or failed", exc_info=True)
+            logger.exception("[fall-alert-worker] Tick skipped or failed")
 
 
 @asynccontextmanager

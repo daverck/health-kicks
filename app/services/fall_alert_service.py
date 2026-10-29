@@ -754,7 +754,7 @@ def process_due_fall_alerts(
     bind = db.get_bind()
     dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
     if dialect_name == "postgresql":
-        query = query.with_for_update(skip_locked=True)
+        query = query.with_for_update(of=FallAlert, skip_locked=True)
 
     due_alerts = query.all()
     processed_count = 0
