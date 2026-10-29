@@ -162,12 +162,11 @@ def create_studio_sessions_router(
                 )
             )
 
-        # Unified keyset pagination on (created_at DESC, id DESC) without slow SQL OFFSET
-        sessions_plus_one = (
-            query.order_by(StudioSession.created_at.desc(), StudioSession.uuid.desc())
-            .limit(size + 1)
-            .all()
-        )
+        ordered_query = query.order_by(StudioSession.created_at.desc(), StudioSession.uuid.desc())
+        if cursor is None and page > 1:
+            ordered_query = ordered_query.offset((page - 1) * size)
+
+        sessions_plus_one = ordered_query.limit(size + 1).all()
         if len(sessions_plus_one) > size:
             sessions = sessions_plus_one[:size]
             next_cursor = encode_cursor(sessions[-1].created_at, sessions[-1].uuid)

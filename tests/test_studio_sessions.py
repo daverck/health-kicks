@@ -210,6 +210,11 @@ def test_list_sessions_filtering_and_pagination(client, user_a, db_session) -> N
     assert len(res_p1.json()["items"]) == 1
     # Check default sorting created_at DESC -> s3 is first
     assert res_p1.json()["items"][0]["uuid"] == str(s3.uuid)
+    # Check direct page jump without cursor (offset fallback for first/last page jump)
+    res_p2 = client.get("/api/v1/studio/sessions?page=2&size=1", headers=_auth_headers(user_a))
+    assert res_p2.json()["page"] == 2
+    assert len(res_p2.json()["items"]) == 1
+    assert res_p2.json()["items"][0]["uuid"] == str(s2.uuid)
 
 
 def test_list_sessions_filter_by_date_range(client, user_a, db_session) -> None:
