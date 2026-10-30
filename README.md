@@ -161,7 +161,7 @@ The [`scripts/update_edge_model.py`](scripts/update_edge_model.py) script automa
 
 ```powershell
 # Install ML dependencies in virtualenv
-uv sync --group ml
+uv sync
 
 # Authenticate with AWS CLI for live telemetry data
 aws sso login   # or aws login / aws configure

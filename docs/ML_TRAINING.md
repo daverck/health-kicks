@@ -18,11 +18,11 @@ The [`scripts/train_detector.py`](../scripts/train_detector.py) script accomplis
 ## 2. Prerequisites & Setup
 
 ### A. Python Dependencies
-Heavy data science dependencies (`scikit-learn`, `pandas`, `numpy`, `joblib`) are isolated in the optional `ml` dependency group in `pyproject.toml` to keep the production Docker container lightweight.
+The data science dependencies (`scikit-learn`, `pandas`, `numpy`, `joblib`, `m2cgen`) are declared in the main `dependencies` of `pyproject.toml`. There is no separate `ml` dependency group.
 
-To install or synchronize your local virtual environment:
+To install or synchronize your local virtual environment (including the ML dependencies):
 ```bash
-uv sync --group ml
+uv sync
 ```
 
 ### B. AWS CLI Authentication (`aws login` / `aws sso login`)
@@ -73,7 +73,7 @@ uv run python -m scripts.train_detector --batch-size 16
 ```
 
 ### C. Offline Synthetic / Demo Mode (No Database or AWS Required)
-Generates a representative synthetic dataset covering 5 key biomechanical movement and posture classes (`walk`, `idle`, `fall_forward`, `stairs`, `stumble_recover`), ideal for pipeline verification or offline work:
+Generates a representative synthetic dataset covering 6 key biomechanical movement and posture classes (`walk`, `idle`, `fall_forward`, `stairs_up`, `stairs_down`, `fall_recovery`), ideal for pipeline verification or offline work:
 ```bash
 uv run python -m scripts.train_detector --synthetic
 ```
@@ -137,6 +137,9 @@ While `scripts/train_detector.py` serves for model exploration and hyperparamete
 3. **Quality Gate**: Prevents degraded models from reaching firmware by asserting `macro F1 >= min_f1` (default 75%).
 4. **Zero-Configuration C Transpilation**: Generates pure C decision trees compatible with embedded C++17 (`activity_model_generated.h`).
 5. **Firmware Integrity Validation**: Runs PlatformIO (`pio run`) directly in `health-kicks-esp32-s3/` to guarantee RAM/Flash bounds before any git commit.
+6. **Excluded Classes**: The legacy `stairs` label is excluded from training (superseded by `stairs_up` / `stairs_down`), and classes with fewer than `--min-sessions-per-class` sessions (e.g. `stumble_recover`) are skipped automatically. Neither is part of the `edge_ai` classification filter of the Studio API.
+
+> **Model size limit**: m2cgen emits the whole forest as a single C++ function. If the generated header grows too large (roughly beyond 1.2 MB), the Xtensa linker fails with `dangerous relocation: l32r: literal target out of range`. Reduce the model size with `--max-sessions-per-class` (e.g. `30`) and re-run.
 
 ### CLI Usage:
 
@@ -152,6 +155,9 @@ uv run python -m scripts.update_edge_model --skip-train
 
 # Custom Quality Gate threshold (e.g. 90% F1 score)
 uv run python -m scripts.update_edge_model --min-f1 0.90
+
+# Cap training data per class to keep the generated C header compilable
+uv run python -m scripts.update_edge_model --max-sessions-per-class 30
 
 # Skip PlatformIO firmware compilation check
 uv run python -m scripts.update_edge_model --no-build-check
