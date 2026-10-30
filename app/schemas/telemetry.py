@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from app.core.edge_ai import edge_ai_labels_sorted
 from app.schemas.cloud import StrictModel
 
 
@@ -65,3 +66,4 @@ class StudioDatasetStatsResponse(StrictModel):
     by_label: dict[str, int]
     by_label_validated: dict[str, int] = Field(default_factory=dict)
     by_label_pending: dict[str, int] = Field(default_factory=dict)
+    edge_ai_labels: list[str] = Field(default_factory=edge_ai_labels_sorted)

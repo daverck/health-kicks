@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import RequireClinicianOrAdmin
 from app.api.v1.utils import validate_and_normalize_date_range
+from app.core.edge_ai import EDGE_AI_LABELS
 from app.core.pseudonymization import get_subject_pseudonym
 from app.db.database import get_db
 from app.db.models import StudioSession, User, UserRole
@@ -115,12 +116,7 @@ def create_studio_sessions_router(
             query = query.filter(StudioSession.is_hitl == is_hitl)
 
         if classification is not None and classification.strip().lower() != "all":
-            edge_ai_labels = {
-                "idle", "walk", "run", "stairs_up", "stairs_down",
-                "sit_down", "stand_up", "lie_down", "lying_supine", "lying_prone", "lying_lateral",
-                "jump", "fall_forward", "fall_backward", "fall_lateral", "fall_recovery",
-                "fall_generic",
-            }
+            edge_ai_labels = EDGE_AI_LABELS
             if classification.strip().lower() == "edge_ai":
                 query = query.filter(StudioSession.label.in_(edge_ai_labels))
             elif classification.strip().lower() == "research":

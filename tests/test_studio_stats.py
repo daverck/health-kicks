@@ -223,6 +223,11 @@ def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) ->
     assert "by_label_pending" in data
     assert data["by_label_validated"]["walk"] == 0
     assert data["by_label_pending"]["walk"] == 1
+    assert "edge_ai_labels" in data
+    assert "walk" in data["edge_ai_labels"]
+    assert "stairs_up" in data["edge_ai_labels"]
+    assert "stairs" not in data["edge_ai_labels"]
+    assert "stumble_recover" not in data["edge_ai_labels"]
 
 
 def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
