@@ -125,12 +125,16 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
         # Approximate kinetic / dynamic energy
         "acc_energy": float(np.sum(acc_mag**2) / n_samples),
         "gyro_energy": float(np.sum(gyro_mag**2) / n_samples),
+        # Individual axis means (static posture discrimination: idle vs lying_supine vs lying_prone)
+        "ax_mean": float(np.mean(ax)),
+        "ay_mean": float(np.mean(ay)),
+        "az_mean": float(np.mean(az)),
     }
     return features
 
 
 DEFAULT_EXCLUDED_LABELS: set[str] = {"stairs"}
-PUNCTUAL_EVENT_LABELS: set[str] = {"stumble_recover", "sit_down", "stand_up"}
+PUNCTUAL_EVENT_LABELS: set[str] = {"stumble_recover", "sit_down", "stand_up", "jump"}
 
 
 def is_punctual_event(label: str) -> bool:

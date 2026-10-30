@@ -116,13 +116,13 @@ While `scripts/train_detector.py` serves for model exploration and hyperparamete
 [ PostgreSQL + DynamoDB ]
          │ (Incremental caching)
          ▼
-[ Feature Extraction ] (16 canonical indicators, 3.0s window / 0.5s stride)
+[ Feature Extraction ] (19 canonical indicators, 3.0s window / 0.5s stride)
          │
          ▼
 [ Stratified 5-Fold CV ] (RandomForest, ExtraTrees, etc.)
          │
          ▼
-[ Quality Gate Check ] (Macro F1 >= 85%)
+[ Quality Gate Check ] (Macro F1 >= 75%)
          │
          ▼
 [ C Transpilation via m2cgen ] ──► health-kicks-esp32-s3/include/activity_model_generated.h
@@ -134,7 +134,7 @@ While `scripts/train_detector.py` serves for model exploration and hyperparamete
 ### Key Capabilities & Workflow:
 1. **Automated Data Sync**: Downloads missing raw telemetry sessions into `scripts/data/sessions/` via multithreaded workers.
 2. **Class Filtering**: Automatically selects classes with sufficient training sessions (`--min-sessions-per-class 20`).
-3. **Quality Gate**: Prevents degraded models from reaching firmware by asserting `macro F1 >= min_f1` (default 85%).
+3. **Quality Gate**: Prevents degraded models from reaching firmware by asserting `macro F1 >= min_f1` (default 75%).
 4. **Zero-Configuration C Transpilation**: Generates pure C decision trees compatible with embedded C++17 (`activity_model_generated.h`).
 5. **Firmware Integrity Validation**: Runs PlatformIO (`pio run`) directly in `health-kicks-esp32-s3/` to guarantee RAM/Flash bounds before any git commit.
 
@@ -169,7 +169,7 @@ uv run python -m scripts.update_edge_model --no-build-check
 | `--output-header` | `include/activity_model_generated.h` | Target C header relative to firmware directory. |
 | `--window-size` | `3.0` | Rolling analysis window size in seconds (default: 3.0s). |
 | `--window-step` | `0.5` | Sliding window step in seconds (default: 0.5s). |
-| `--min-f1` | `0.85` | Quality gate: minimum macro F1 score required to accept champion model. |
+| `--min-f1` | `0.75` | Quality gate: minimum macro F1 score required to accept champion model. |
 | `--min-sessions-per-class` | `20` | Minimum recording sessions required to include a class in training. |
 | `--max-sessions-per-class` | `None` | Maximum number of most recent sessions to include per class. |
 | `--skip-train` | `False` | Skip training phase and re-transpile existing model artifact directly. |

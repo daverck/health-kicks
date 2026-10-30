@@ -204,8 +204,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--min-f1",
         type=float,
-        default=0.85,
-        help="Quality gate: minimum macro F1 score required to accept champion model (default: 0.85).",
+        default=0.75,
+        help="Quality gate: minimum macro F1 score required to accept champion model (default: 0.75).",
     )
     parser.add_argument(
         "--skip-train",

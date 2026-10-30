@@ -155,7 +155,7 @@ A complete local ML training, benchmarking, and embedded transpilation pipeline 
 The [`scripts/update_edge_model.py`](scripts/update_edge_model.py) script automates the complete model lifecycle in a single command:
 1. **Incremental Data Ingestion**: Synchronizes validated Studio sessions from PostgreSQL and DynamoDB.
 2. **Cross-Validation Training**: Benchmarks candidate algorithms via 5-Fold Stratified Cross-Validation optimizing for macro F1-score.
-3. **Quality Gate Verification**: Enforces minimum F1-score standards (default: $\ge 85\%$).
+3. **Quality Gate Verification**: Enforces minimum F1-score standards (default: $\ge 75\%$).
 4. **C Transpilation**: Converts the champion model into embedded C code (`include/activity_model_generated.h`) via `m2cgen`.
 5. **Firmware Integrity Check**: Automatically verifies ESP32-S3 firmware compilation via PlatformIO.
 

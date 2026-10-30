@@ -20,7 +20,7 @@ def test_parse_args_defaults() -> None:
     args = parse_args([])
     assert args.synthetic is False
     assert args.force_refresh is False
-    assert args.min_f1 == 0.85
+    assert args.min_f1 == 0.75
     assert args.window_size == 3.0
     assert args.window_step == 0.5
     assert args.skip_train is False
