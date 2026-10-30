@@ -134,7 +134,7 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
 
 
 DEFAULT_EXCLUDED_LABELS: set[str] = {"stairs"}
-PUNCTUAL_EVENT_LABELS: set[str] = {"stumble_recover", "sit_down", "stand_up", "jump"}
+PUNCTUAL_EVENT_LABELS: set[str] = {"stumble_recover", "sit_down", "stand_up", "jump", "lie_down"}
 
 
 def is_punctual_event(label: str) -> bool:

@@ -117,8 +117,8 @@ def create_studio_sessions_router(
         if classification is not None and classification.strip().lower() != "all":
             edge_ai_labels = {
                 "idle", "walk", "run", "stairs", "stairs_up", "stairs_down",
-                "sit_down", "stand_up", "lying_supine", "lying_prone", "lying_lateral",
-                "fall_forward", "fall_backward", "fall_lateral", "fall_recovery",
+                "sit_down", "stand_up", "lie_down", "lying_supine", "lying_prone", "lying_lateral",
+                "jump", "fall_forward", "fall_backward", "fall_lateral", "fall_recovery",
                 "stumble_recover", "fall_generic",
             }
             if classification.strip().lower() == "edge_ai":
