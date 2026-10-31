@@ -964,13 +964,13 @@ def train_and_benchmark(
     # Base candidate models: 100% compatible m2cgen & optimized for ESP32 flash memory
     models: dict[str, Any] = {
         "RandomForest_Standard": RandomForestClassifier(
-            n_estimators=40, max_depth=8, class_weight="balanced", random_state=42, n_jobs=-1
+            n_estimators=40, max_depth=12, class_weight="balanced", random_state=42, n_jobs=-1
         ),
         "RandomForest_Light": RandomForestClassifier(
             n_estimators=30, max_depth=6, class_weight="balanced", random_state=42, n_jobs=-1
         ),
         "ExtraTrees_Standard": ExtraTreesClassifier(
-            n_estimators=40, max_depth=8, class_weight="balanced", random_state=42, n_jobs=-1
+            n_estimators=40, max_depth=12, class_weight="balanced", random_state=42, n_jobs=-1
         ),
     }
 

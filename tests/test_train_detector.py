@@ -104,9 +104,15 @@ def test_compute_window_features_keys_and_values():
         "ay_delta_end_start",
         "acc_energy_half_diff",
         "gz_mean",
+        "acc_mag_std_tail",
+        "gyro_mag_mean_tail",
+        "acc_jerk_max",
+        "gyro_mag_max_to_mean",
+        "ay_p2p_first_half",
+        "ay_p2p_second_half",
     }
     assert expected_keys.issubset(feats.keys())
-    assert len(feats) == 22
+    assert len(feats) == 28
     assert feats["ax_mean"] == pytest.approx(0.0, abs=1e-5)
     assert feats["ay_mean"] == pytest.approx(9.8, rel=1e-3)
     assert feats["az_mean"] == pytest.approx(0.0, abs=1e-5)
