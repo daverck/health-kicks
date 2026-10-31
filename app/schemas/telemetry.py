@@ -104,6 +104,8 @@ class StudioClassDetailStatsResponse(StrictModel):
     total_sessions: int
     validated_sessions: int
     pending_sessions: int
+    first_session_date: str | None = None
+    latest_session_date: str | None = None
     duration_metrics: StudioClassDurationStats
     ml_metrics: StudioClassMlMetrics
     daily_counts: list[StudioClassDailyCount] = Field(default_factory=list)
@@ -118,6 +120,7 @@ class StudioClassSummaryItem(StrictModel):
     pending_sessions: int
     total_duration_sec: float = 0.0
     median_duration_sec: float = 0.0
+    first_session_date: str | None = None
     latest_session_date: str | None = None
     precision: float = 0.0
     recall: float = 0.0

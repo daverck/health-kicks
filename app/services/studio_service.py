@@ -256,11 +256,17 @@ def compute_class_detail_stats(
     except Exception:
         pass
 
+    sorted_days = [d.date for d in daily_counts if d.date != "unknown"]
+    first_session_date = sorted_days[0] if sorted_days else None
+    latest_session_date = sorted_days[-1] if sorted_days else None
+
     return StudioClassDetailStatsResponse(
         label=clean_label,
         total_sessions=total_sessions,
         validated_sessions=validated_sessions,
         pending_sessions=pending_sessions,
+        first_session_date=first_session_date,
+        latest_session_date=latest_session_date,
         duration_metrics=duration_metrics,
         ml_metrics=ml_metrics,
         daily_counts=daily_counts,
@@ -349,10 +355,13 @@ def compute_classes_summary(
         total_duration_sec += c_tot_dur
         c_median_dur = round(float(np.median(c_durations)), 2) if c_durations else 0.0
 
+        first_date: str | None = None
         latest_date: str | None = None
         dates = [s.created_at.strftime("%Y-%m-%d") for s in sess_list if s.created_at]
         if dates:
-            latest_date = sorted(dates)[-1]
+            s_dates = sorted(dates)
+            first_date = s_dates[0]
+            latest_date = s_dates[-1]
 
         cm = class_metrics_map.get(lbl, {})
         precision = round(float(cm.get("precision", 0.0)), 4)
@@ -368,6 +377,7 @@ def compute_classes_summary(
                 pending_sessions=c_pending,
                 total_duration_sec=c_tot_dur,
                 median_duration_sec=c_median_dur,
+                first_session_date=first_date,
                 latest_session_date=latest_date,
                 precision=precision,
                 recall=recall,
