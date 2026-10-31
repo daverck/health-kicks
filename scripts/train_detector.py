@@ -1032,6 +1032,22 @@ def train_and_benchmark(
     best_info = scores_summary[best_name]
     best_clf = best_info["estimator"]
 
+    # Compute cross-validated predictions and per-class metrics for champion
+    from sklearn.model_selection import cross_val_predict
+    from sklearn.metrics import classification_report
+    y_pred_cv = cross_val_predict(best_clf, X, y, cv=cv, n_jobs=-1)
+    report_dict = classification_report(y, y_pred_cv, output_dict=True, zero_division=0)
+    class_metrics: dict[str, dict[str, Any]] = {}
+    for cls in np.unique(y):
+        cls_str = str(cls)
+        if cls_str in report_dict:
+            class_metrics[cls_str] = {
+                "precision": float(report_dict[cls_str]["precision"]),
+                "recall": float(report_dict[cls_str]["recall"]),
+                "f1_score": float(report_dict[cls_str]["f1-score"]),
+                "support_windows": int(report_dict[cls_str]["support"]),
+            }
+
     print(f"\n[CHAMPION] Selected model: {best_name}")
     print(f"   F1 Score (macro)     : {best_info['f1_macro']*100:.2f} %")
     print(f"   Precision (macro)    : {best_info['precision_macro']*100:.2f} %")
@@ -1063,6 +1079,7 @@ def train_and_benchmark(
             "accuracy": best_info["accuracy"],
             "precision_macro": best_info["precision_macro"],
             "recall_macro": best_info["recall_macro"],
+            "class_metrics": class_metrics,
         },
     }
 

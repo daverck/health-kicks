@@ -67,3 +67,43 @@ class StudioDatasetStatsResponse(StrictModel):
     by_label_validated: dict[str, int] = Field(default_factory=dict)
     by_label_pending: dict[str, int] = Field(default_factory=dict)
     edge_ai_labels: list[str] = Field(default_factory=edge_ai_labels_sorted)
+
+
+class StudioClassDurationStats(StrictModel):
+    """Descriptive statistics on session durations for a given activity class."""
+
+    median_sec: float = 0.0
+    mean_sec: float = 0.0
+    std_sec: float = 0.0
+    min_sec: float = 0.0
+    max_sec: float = 0.0
+
+
+class StudioClassMlMetrics(StrictModel):
+    """Edge ML benchmark metrics for a specific class (from trained champion model)."""
+
+    precision: float = 0.0
+    recall: float = 0.0
+    f1_score: float = 0.0
+    support_windows: int = 0
+
+
+class StudioClassDailyCount(StrictModel):
+    """Session count aggregation grouped by calendar day for a specific class."""
+
+    date: str
+    count: int
+    validated_count: int = 0
+    pending_count: int = 0
+
+
+class StudioClassDetailStatsResponse(StrictModel):
+    """Detailed statistics and distribution breakdown for a single activity class."""
+
+    label: str
+    total_sessions: int
+    validated_sessions: int
+    pending_sessions: int
+    duration_metrics: StudioClassDurationStats
+    ml_metrics: StudioClassMlMetrics
+    daily_counts: list[StudioClassDailyCount] = Field(default_factory=list)

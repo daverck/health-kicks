@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 from app.core.pseudonymization import get_subject_pseudonym
 from app.db.models import StudioSession, User
 from app.schemas.studio import StudioSessionSummary
-from app.schemas.telemetry import StudioDatasetStatsResponse
+from app.schemas.telemetry import (
+    StudioClassDailyCount,
+    StudioClassDetailStatsResponse,
+    StudioClassDurationStats,
+    StudioClassMlMetrics,
+    StudioDatasetStatsResponse,
+)
 
 
 def parse_session_uuid(session_id: str | UUID) -> UUID:
@@ -163,3 +169,97 @@ def compute_studio_stats(
         by_label_pending=by_label_pending,
     )
 
+
+def compute_class_detail_stats(
+    db: Session,
+    user: User,
+    label: str,
+) -> StudioClassDetailStatsResponse:
+    clean_label = str(label).strip()
+    query = db.query(StudioSession).filter(StudioSession.label == clean_label)
+
+    if not user.is_admin:
+        query = query.filter(StudioSession.user_id == user.id)
+
+    sessions = query.order_by(StudioSession.created_at.asc()).all()
+
+    total_sessions = len(sessions)
+    validated_sessions = sum(1 for s in sessions if bool(s.is_validated))
+    pending_sessions = total_sessions - validated_sessions
+
+    durations = [float(s.duration_sec) for s in sessions if s.duration_sec is not None and s.duration_sec > 0]
+    if durations:
+        import numpy as np
+
+        median_sec = float(np.median(durations))
+        mean_sec = float(np.mean(durations))
+        std_sec = float(np.std(durations))
+        min_sec = float(np.min(durations))
+        max_sec = float(np.max(durations))
+    else:
+        median_sec = mean_sec = std_sec = min_sec = max_sec = 0.0
+
+    duration_metrics = StudioClassDurationStats(
+        median_sec=round(median_sec, 2),
+        mean_sec=round(mean_sec, 2),
+        std_sec=round(std_sec, 2),
+        min_sec=round(min_sec, 2),
+        max_sec=round(max_sec, 2),
+    )
+
+    daily_map: dict[str, dict[str, int]] = {}
+    for s in sessions:
+        if s.created_at:
+            d_str = s.created_at.strftime("%Y-%m-%d")
+        else:
+            d_str = "unknown"
+        if d_str not in daily_map:
+            daily_map[d_str] = {"total": 0, "validated": 0, "pending": 0}
+        daily_map[d_str]["total"] += 1
+        if bool(s.is_validated):
+            daily_map[d_str]["validated"] += 1
+        else:
+            daily_map[d_str]["pending"] += 1
+
+    daily_counts = [
+        StudioClassDailyCount(
+            date=d_key,
+            count=d_val["total"],
+            validated_count=d_val["validated"],
+            pending_count=d_val["pending"],
+        )
+        for d_key, d_val in sorted(daily_map.items())
+    ]
+
+    ml_metrics = StudioClassMlMetrics()
+    try:
+        from pathlib import Path
+        import joblib
+
+        model_path = Path("scripts/models/activity_classifier.joblib")
+        if not model_path.exists():
+            model_path = Path(__file__).resolve().parents[2] / "scripts" / "models" / "activity_classifier.joblib"
+
+        if model_path.exists():
+            pkg = joblib.load(model_path)
+            class_metrics = pkg.get("metrics", {}).get("class_metrics", {})
+            if clean_label in class_metrics:
+                cm = class_metrics[clean_label]
+                ml_metrics = StudioClassMlMetrics(
+                    precision=round(float(cm.get("precision", 0.0)), 4),
+                    recall=round(float(cm.get("recall", 0.0)), 4),
+                    f1_score=round(float(cm.get("f1_score", 0.0)), 4),
+                    support_windows=int(cm.get("support_windows", 0)),
+                )
+    except Exception:
+        pass
+
+    return StudioClassDetailStatsResponse(
+        label=clean_label,
+        total_sessions=total_sessions,
+        validated_sessions=validated_sessions,
+        pending_sessions=pending_sessions,
+        duration_metrics=duration_metrics,
+        ml_metrics=ml_metrics,
+        daily_counts=daily_counts,
+    )
