@@ -14,6 +14,7 @@ from app.db.models import DeviceOwnership, StudioSession, UserRole
 from app.schemas.telemetry import (
     ImuReadingResponse,
     StudioClassDetailStatsResponse,
+    StudioClassesSummaryResponse,
     StudioDatasetStatsResponse,
     StudioSessionReadingsResponse,
     StudioStartRequest,
@@ -21,7 +22,7 @@ from app.schemas.telemetry import (
 )
 from app.services.device_service import verify_device_ownership
 from app.services.iot_service import IotCommandService
-from app.services.studio_service import compute_class_detail_stats, compute_studio_stats
+from app.services.studio_service import compute_class_detail_stats, compute_classes_summary, compute_studio_stats
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
@@ -228,6 +229,18 @@ def create_telemetry_router(
     ) -> StudioDatasetStatsResponse:
         """Get dataset statistics (session counts and duration by label) across all devices."""
         return compute_studio_stats(db=db, user=user, device_id=None)
+
+    @studio_router.get(
+        "/classes/summary",
+        response_model=StudioClassesSummaryResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def get_studio_classes_summary(
+        user: RequireClinicianOrAdmin,
+        db: Session = Depends(get_db),
+    ) -> StudioClassesSummaryResponse:
+        """Get global summary and comparative metrics across all activity classes."""
+        return compute_classes_summary(db=db, user=user)
 
     @studio_router.get(
         "/classes/{label}/stats",

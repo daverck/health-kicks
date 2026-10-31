@@ -207,3 +207,66 @@ def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_us
     assert d2["validated_count"] == 2
     assert d2["pending_count"] == 0
 
+
+
+def test_get_studio_classes_summary(test_client, db_session, clinician_user, other_user):
+    s1 = StudioSession(
+        user_id=clinician_user.id,
+        device_id="HK-1",
+        label="walk",
+        duration_sec=4.0,
+        sample_count=80,
+        is_validated=True,
+        created_at=datetime(2026, 10, 25, 10, 0, 0, tzinfo=UTC),
+    )
+    s2 = StudioSession(
+        user_id=clinician_user.id,
+        device_id="HK-1",
+        label="walk",
+        duration_sec=6.0,
+        sample_count=120,
+        is_validated=False,
+        created_at=datetime(2026, 10, 26, 11, 0, 0, tzinfo=UTC),
+    )
+    s3 = StudioSession(
+        user_id=clinician_user.id,
+        device_id="HK-1",
+        label="idle",
+        duration_sec=5.0,
+        sample_count=100,
+        is_validated=True,
+        created_at=datetime(2026, 10, 26, 12, 0, 0, tzinfo=UTC),
+    )
+    s_other_user = StudioSession(
+        user_id=other_user.id,
+        device_id="HK-2",
+        label="run",
+        duration_sec=8.0,
+        sample_count=160,
+        is_validated=True,
+        created_at=datetime(2026, 10, 26, 14, 0, 0, tzinfo=UTC),
+    )
+    db_session.add_all([s1, s2, s3, s_other_user])
+    db_session.commit()
+
+    resp = test_client.get("/api/v1/studio/classes/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["total_sessions"] == 3
+    assert data["validated_sessions"] == 2
+    assert data["pending_sessions"] == 1
+    assert data["total_duration_sec"] == 15.0
+
+    classes = {c["label"]: c for c in data["classes"]}
+    assert "walk" in classes
+    assert classes["walk"]["total_sessions"] == 2
+    assert classes["walk"]["validated_sessions"] == 1
+    assert classes["walk"]["pending_sessions"] == 1
+    assert classes["walk"]["total_duration_sec"] == 10.0
+    assert classes["walk"]["median_duration_sec"] == 5.0
+    assert classes["walk"]["latest_session_date"] == "2026-10-26"
+
+    assert "idle" in classes
+    assert classes["idle"]["total_sessions"] == 1
+    assert classes["idle"]["validated_sessions"] == 1

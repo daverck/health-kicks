@@ -107,3 +107,34 @@ class StudioClassDetailStatsResponse(StrictModel):
     duration_metrics: StudioClassDurationStats
     ml_metrics: StudioClassMlMetrics
     daily_counts: list[StudioClassDailyCount] = Field(default_factory=list)
+
+
+class StudioClassSummaryItem(StrictModel):
+    """Consolidated summary metrics for an activity class in Studio dataset overview."""
+
+    label: str
+    total_sessions: int
+    validated_sessions: int
+    pending_sessions: int
+    total_duration_sec: float = 0.0
+    median_duration_sec: float = 0.0
+    latest_session_date: str | None = None
+    precision: float = 0.0
+    recall: float = 0.0
+    f1_score: float = 0.0
+    support_windows: int = 0
+
+
+class StudioClassesSummaryResponse(StrictModel):
+    """Aggregated global overview across all activity classes."""
+
+    total_classes: int
+    total_sessions: int
+    validated_sessions: int
+    pending_sessions: int
+    total_duration_sec: float = 0.0
+    macro_precision: float = 0.0
+    macro_recall: float = 0.0
+    macro_f1: float = 0.0
+    classes: list[StudioClassSummaryItem] = Field(default_factory=list)
+

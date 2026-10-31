@@ -195,6 +195,7 @@ def build_dataset_from_sessions(
     min_sessions_per_class: int = 0,
     max_sessions_per_class: int | None = None,
     excluded_labels: set[str] | None = None,
+    min_date: str | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Splits each session into sliding windows and extracts features.
 
@@ -221,10 +222,22 @@ def build_dataset_from_sessions(
         label = session.get("label")
         if not label or label in excluded_labels:
             continue
-        if min_sessions_per_class > 0 and class_counts.get(label, 0) < min_sessions_per_class:
-            continue
         readings = session.get("readings", [])
         if len(readings) < 5:
+            continue
+
+        if min_date:
+            first_ts = readings[0].get("timestamp") or readings[0].get("timestamp_epoch_us")
+            if first_ts:
+                try:
+                    from datetime import datetime, UTC
+                    sess_date = datetime.fromtimestamp(float(first_ts) / 1e6, UTC).strftime("%Y-%m-%d")
+                    if sess_date < min_date:
+                        continue
+                except Exception:
+                    pass
+
+        if min_sessions_per_class > 0 and class_counts.get(label, 0) < min_sessions_per_class:
             continue
         candidate_sessions.append(session)
 
@@ -1156,6 +1169,13 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Maximum number of most recent recording sessions to keep per class (default: None, keep all).",
     )
+    parser.add_argument(
+        "--min-date",
+        "--since-date",
+        type=str,
+        default=None,
+        help="Filter sessions recorded on or after this date (format: YYYY-MM-DD).",
+    )
     return parser.parse_args(args)
 
 
@@ -1177,6 +1197,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Synthetic data       : {'YES' if args.synthetic else 'NO'}")
     print(f"* Min sessions / class : {min_sessions}")
     print(f"* Max sessions / class : {args.max_sessions_per_class if args.max_sessions_per_class else 'ALL (unlimited)'}")
+    print(f"* Min date filter      : {args.min_date if args.min_date else 'ALL (no date cutoff)'}")
     print(f"* Only m2cgen models   : {'NO (all models)' if args.include_unsupported_c else 'YES (default)'}")
     print("=" * 68 + "\n")
 
@@ -1200,6 +1221,7 @@ def main(argv: list[str] | None = None) -> int:
         step_sec=args.window_step,
         min_sessions_per_class=min_sessions,
         max_sessions_per_class=args.max_sessions_per_class,
+        min_date=args.min_date,
     )
 
     if len(X) == 0:

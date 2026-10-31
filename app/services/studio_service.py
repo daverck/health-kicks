@@ -14,6 +14,8 @@ from app.schemas.telemetry import (
     StudioClassDetailStatsResponse,
     StudioClassDurationStats,
     StudioClassMlMetrics,
+    StudioClassSummaryItem,
+    StudioClassesSummaryResponse,
     StudioDatasetStatsResponse,
 )
 
@@ -262,4 +264,106 @@ def compute_class_detail_stats(
         duration_metrics=duration_metrics,
         ml_metrics=ml_metrics,
         daily_counts=daily_counts,
+    )
+
+
+
+def compute_classes_summary(
+    db: Session,
+    user: User,
+) -> StudioClassesSummaryResponse:
+    from typing import Any
+    from app.core.edge_ai import edge_ai_labels_sorted
+    import numpy as np
+
+    query = db.query(StudioSession)
+    if not user.is_admin:
+        query = query.filter(StudioSession.user_id == user.id)
+
+    sessions = query.order_by(StudioSession.created_at.asc()).all()
+
+    class_metrics_map: dict[str, dict[str, Any]] = {}
+    macro_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    try:
+        from pathlib import Path
+        import joblib
+
+        model_path = Path("scripts/models/activity_classifier.joblib")
+        if not model_path.exists():
+            model_path = Path(__file__).resolve().parents[2] / "scripts" / "models" / "activity_classifier.joblib"
+
+        if model_path.exists():
+            pkg = joblib.load(model_path)
+            metrics_dict = pkg.get("metrics", {})
+            class_metrics_map = metrics_dict.get("class_metrics", {})
+            macro_metrics["precision"] = float(metrics_dict.get("macro_precision", 0.0))
+            macro_metrics["recall"] = float(metrics_dict.get("macro_recall", 0.0))
+            macro_metrics["f1"] = float(metrics_dict.get("macro_f1", 0.0))
+    except Exception:
+        pass
+
+    sessions_by_label: dict[str, list[StudioSession]] = {}
+    for s in sessions:
+        lbl = (s.label or "unknown").strip()
+        if lbl not in sessions_by_label:
+            sessions_by_label[lbl] = []
+        sessions_by_label[lbl].append(s)
+
+    all_labels = set(edge_ai_labels_sorted()) | set(sessions_by_label.keys()) | set(class_metrics_map.keys())
+    sorted_labels = sorted(all_labels)
+
+    items: list[StudioClassSummaryItem] = []
+    total_duration_sec = 0.0
+    total_sessions_count = len(sessions)
+    validated_sessions_count = sum(1 for s in sessions if bool(s.is_validated))
+    pending_sessions_count = total_sessions_count - validated_sessions_count
+
+    for lbl in sorted_labels:
+        sess_list = sessions_by_label.get(lbl, [])
+        c_total = len(sess_list)
+        c_validated = sum(1 for s in sess_list if bool(s.is_validated))
+        c_pending = c_total - c_validated
+
+        c_durations = [float(s.duration_sec) for s in sess_list if s.duration_sec is not None and s.duration_sec > 0]
+        c_tot_dur = round(sum(c_durations), 2)
+        total_duration_sec += c_tot_dur
+        c_median_dur = round(float(np.median(c_durations)), 2) if c_durations else 0.0
+
+        latest_date: str | None = None
+        dates = [s.created_at.strftime("%Y-%m-%d") for s in sess_list if s.created_at]
+        if dates:
+            latest_date = sorted(dates)[-1]
+
+        cm = class_metrics_map.get(lbl, {})
+        precision = round(float(cm.get("precision", 0.0)), 4)
+        recall = round(float(cm.get("recall", 0.0)), 4)
+        f1_score = round(float(cm.get("f1_score", 0.0)), 4)
+        support_windows = int(cm.get("support_windows", 0))
+
+        items.append(
+            StudioClassSummaryItem(
+                label=lbl,
+                total_sessions=c_total,
+                validated_sessions=c_validated,
+                pending_sessions=c_pending,
+                total_duration_sec=c_tot_dur,
+                median_duration_sec=c_median_dur,
+                latest_session_date=latest_date,
+                precision=precision,
+                recall=recall,
+                f1_score=f1_score,
+                support_windows=support_windows,
+            )
+        )
+
+    return StudioClassesSummaryResponse(
+        total_classes=len(items),
+        total_sessions=total_sessions_count,
+        validated_sessions=validated_sessions_count,
+        pending_sessions=pending_sessions_count,
+        total_duration_sec=round(total_duration_sec, 2),
+        macro_precision=round(macro_metrics["precision"], 4),
+        macro_recall=round(macro_metrics["recall"], 4),
+        macro_f1=round(macro_metrics["f1"], 4),
+        classes=items,
     )
