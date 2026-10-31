@@ -296,18 +296,38 @@ def compute_classes_summary(
             pkg = joblib.load(model_path)
             metrics_dict = pkg.get("metrics", {})
             class_metrics_map = metrics_dict.get("class_metrics", {})
-            macro_metrics["precision"] = float(metrics_dict.get("macro_precision", 0.0))
-            macro_metrics["recall"] = float(metrics_dict.get("macro_recall", 0.0))
-            macro_metrics["f1"] = float(metrics_dict.get("macro_f1", 0.0))
+            macro_metrics["precision"] = float(metrics_dict.get("precision_macro", metrics_dict.get("macro_precision", 0.0)))
+            macro_metrics["recall"] = float(metrics_dict.get("recall_macro", metrics_dict.get("macro_recall", 0.0)))
+            macro_metrics["f1"] = float(metrics_dict.get("f1_macro", metrics_dict.get("macro_f1", 0.0)))
     except Exception:
         pass
 
     sessions_by_label: dict[str, list[StudioSession]] = {}
+    daily_map: dict[str, dict[str, int]] = {}
     for s in sessions:
         lbl = (s.label or "unknown").strip()
         if lbl not in sessions_by_label:
             sessions_by_label[lbl] = []
         sessions_by_label[lbl].append(s)
+
+        d_str = s.created_at.strftime("%Y-%m-%d") if s.created_at else "unknown"
+        if d_str not in daily_map:
+            daily_map[d_str] = {"total": 0, "validated": 0, "pending": 0}
+        daily_map[d_str]["total"] += 1
+        if bool(s.is_validated):
+            daily_map[d_str]["validated"] += 1
+        else:
+            daily_map[d_str]["pending"] += 1
+
+    daily_counts = [
+        StudioClassDailyCount(
+            date=d_key,
+            count=d_val["total"],
+            validated_count=d_val["validated"],
+            pending_count=d_val["pending"],
+        )
+        for d_key, d_val in sorted(daily_map.items())
+    ]
 
     all_labels = set(edge_ai_labels_sorted()) | set(sessions_by_label.keys()) | set(class_metrics_map.keys())
     sorted_labels = sorted(all_labels)
@@ -365,5 +385,6 @@ def compute_classes_summary(
         macro_precision=round(macro_metrics["precision"], 4),
         macro_recall=round(macro_metrics["recall"], 4),
         macro_f1=round(macro_metrics["f1"], 4),
+        daily_counts=daily_counts,
         classes=items,
     )

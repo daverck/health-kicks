@@ -136,5 +136,6 @@ class StudioClassesSummaryResponse(StrictModel):
     macro_precision: float = 0.0
     macro_recall: float = 0.0
     macro_f1: float = 0.0
+    daily_counts: list[StudioClassDailyCount] = Field(default_factory=list)
     classes: list[StudioClassSummaryItem] = Field(default_factory=list)
 
