@@ -129,6 +129,15 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
         "ax_mean": float(np.mean(ax)),
         "ay_mean": float(np.mean(ay)),
         "az_mean": float(np.mean(az)),
+        # Temporal directionality features (breaks sit_down vs stand_up symmetry)
+        # 1) Vertical / Longitudinal acceleration slope (end minus start)
+        "ay_delta_end_start": float(ay[-1] - ay[0]),
+        # 2) Energy distribution ratio: first half vs second half
+        "acc_energy_half_diff": float(
+            (np.sum(acc_mag[: n_samples // 2] ** 2) - np.sum(acc_mag[n_samples // 2 :] ** 2)) / n_samples
+        ),
+        # 3) Longitudinal angular rate direction (pitch integration proxy)
+        "gz_mean": float(np.mean(gz)),
     }
     return features
 

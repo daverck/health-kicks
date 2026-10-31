@@ -101,9 +101,12 @@ def test_compute_window_features_keys_and_values():
         "ax_mean",
         "ay_mean",
         "az_mean",
+        "ay_delta_end_start",
+        "acc_energy_half_diff",
+        "gz_mean",
     }
     assert expected_keys.issubset(feats.keys())
-    assert len(feats) == 19
+    assert len(feats) == 22
     assert feats["ax_mean"] == pytest.approx(0.0, abs=1e-5)
     assert feats["ay_mean"] == pytest.approx(9.8, rel=1e-3)
     assert feats["az_mean"] == pytest.approx(0.0, abs=1e-5)
