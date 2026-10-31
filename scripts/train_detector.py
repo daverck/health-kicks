@@ -138,6 +138,9 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
         ),
         # 3) Longitudinal angular rate direction (pitch integration proxy)
         "gz_mean": float(np.mean(gz)),
+        # 4) Multi-scale short tail features (second half: settles into stillness vs ongoing locomotion)
+        "acc_mag_std_tail": float(np.std(acc_mag[n_samples // 2 :])) if n_samples > 1 else 0.0,
+        "gyro_mag_mean_tail": float(np.mean(gyro_mag[n_samples // 2 :])) if n_samples > 0 else 0.0,
     }
     return features
 
