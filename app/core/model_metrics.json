@@ -1,0 +1,109 @@
+{
+  "trained_at_utc": "2026-10-31T15:36:26.059970+00:00",
+  "model_name": "RandomForest_Standard",
+  "window_size_sec": 3.0,
+  "metrics": {
+    "f1_macro": 0.9129087101179738,
+    "accuracy": 0.93934743736564,
+    "precision_macro": 0.9239573290826268,
+    "recall_macro": 0.9068448300778247,
+    "class_metrics": {
+      "fall_backward": {
+        "precision": 0.9227642276422764,
+        "recall": 0.9578059071729957,
+        "f1_score": 0.9399585921325052,
+        "support_windows": 237
+      },
+      "fall_forward": {
+        "precision": 0.9438202247191011,
+        "recall": 0.8888888888888888,
+        "f1_score": 0.9155313351498637,
+        "support_windows": 189
+      },
+      "fall_lateral": {
+        "precision": 0.9345794392523364,
+        "recall": 0.975609756097561,
+        "f1_score": 0.954653937947494,
+        "support_windows": 205
+      },
+      "fall_recovery": {
+        "precision": 0.8461538461538461,
+        "recall": 0.8270676691729323,
+        "f1_score": 0.8365019011406845,
+        "support_windows": 133
+      },
+      "idle": {
+        "precision": 0.968,
+        "recall": 0.9603174603174603,
+        "f1_score": 0.9641434262948207,
+        "support_windows": 504
+      },
+      "jump": {
+        "precision": 0.9736842105263158,
+        "recall": 0.7872340425531915,
+        "f1_score": 0.8705882352941177,
+        "support_windows": 47
+      },
+      "lie_down": {
+        "precision": 0.8888888888888888,
+        "recall": 0.8275862068965517,
+        "f1_score": 0.8571428571428571,
+        "support_windows": 116
+      },
+      "lying_lateral": {
+        "precision": 0.9292929292929293,
+        "recall": 0.989247311827957,
+        "f1_score": 0.9583333333333334,
+        "support_windows": 93
+      },
+      "lying_prone": {
+        "precision": 0.9468085106382979,
+        "recall": 0.956989247311828,
+        "f1_score": 0.9518716577540107,
+        "support_windows": 93
+      },
+      "lying_supine": {
+        "precision": 0.9887640449438202,
+        "recall": 0.9263157894736842,
+        "f1_score": 0.9565217391304348,
+        "support_windows": 95
+      },
+      "run": {
+        "precision": 0.9913294797687862,
+        "recall": 0.9828080229226361,
+        "f1_score": 0.9870503597122302,
+        "support_windows": 349
+      },
+      "sit_down": {
+        "precision": 0.8257261410788381,
+        "recall": 0.8805309734513275,
+        "f1_score": 0.8522483940042827,
+        "support_windows": 226
+      },
+      "stairs_down": {
+        "precision": 0.9518518518518518,
+        "recall": 0.969811320754717,
+        "f1_score": 0.9607476635514018,
+        "support_windows": 265
+      },
+      "stairs_up": {
+        "precision": 0.9469387755102041,
+        "recall": 0.9469387755102041,
+        "f1_score": 0.9469387755102041,
+        "support_windows": 245
+      },
+      "stand_up": {
+        "precision": 0.7215189873417721,
+        "recall": 0.6477272727272727,
+        "f1_score": 0.6826347305389222,
+        "support_windows": 88
+      },
+      "walk": {
+        "precision": 0.9754224270353302,
+        "recall": 0.9875583203732504,
+        "f1_score": 0.98145285935085,
+        "support_windows": 643
+      }
+    }
+  }
+}

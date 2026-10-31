@@ -235,24 +235,18 @@ def compute_class_detail_stats(
 
     ml_metrics = StudioClassMlMetrics()
     try:
-        from pathlib import Path
-        import joblib
+        from app.core.model_metrics import load_champion_model_metrics
 
-        model_path = Path("scripts/models/activity_classifier.joblib")
-        if not model_path.exists():
-            model_path = Path(__file__).resolve().parents[2] / "scripts" / "models" / "activity_classifier.joblib"
-
-        if model_path.exists():
-            pkg = joblib.load(model_path)
-            class_metrics = pkg.get("metrics", {}).get("class_metrics", {})
-            if clean_label in class_metrics:
-                cm = class_metrics[clean_label]
-                ml_metrics = StudioClassMlMetrics(
-                    precision=round(float(cm.get("precision", 0.0)), 4),
-                    recall=round(float(cm.get("recall", 0.0)), 4),
-                    f1_score=round(float(cm.get("f1_score", 0.0)), 4),
-                    support_windows=int(cm.get("support_windows", 0)),
-                )
+        metrics_pkg = load_champion_model_metrics()
+        class_metrics = metrics_pkg.get("class_metrics", {})
+        if clean_label in class_metrics:
+            cm = class_metrics[clean_label]
+            ml_metrics = StudioClassMlMetrics(
+                precision=round(float(cm.get("precision", 0.0)), 4),
+                recall=round(float(cm.get("recall", 0.0)), 4),
+                f1_score=round(float(cm.get("f1_score", 0.0)), 4),
+                support_windows=int(cm.get("support_windows", 0)),
+            )
     except Exception:
         pass
 
@@ -291,20 +285,13 @@ def compute_classes_summary(
     class_metrics_map: dict[str, dict[str, Any]] = {}
     macro_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
     try:
-        from pathlib import Path
-        import joblib
+        from app.core.model_metrics import load_champion_model_metrics
 
-        model_path = Path("scripts/models/activity_classifier.joblib")
-        if not model_path.exists():
-            model_path = Path(__file__).resolve().parents[2] / "scripts" / "models" / "activity_classifier.joblib"
-
-        if model_path.exists():
-            pkg = joblib.load(model_path)
-            metrics_dict = pkg.get("metrics", {})
-            class_metrics_map = metrics_dict.get("class_metrics", {})
-            macro_metrics["precision"] = float(metrics_dict.get("precision_macro", metrics_dict.get("macro_precision", 0.0)))
-            macro_metrics["recall"] = float(metrics_dict.get("recall_macro", metrics_dict.get("macro_recall", 0.0)))
-            macro_metrics["f1"] = float(metrics_dict.get("f1_macro", metrics_dict.get("macro_f1", 0.0)))
+        metrics_dict = load_champion_model_metrics()
+        class_metrics_map = metrics_dict.get("class_metrics", {})
+        macro_metrics["precision"] = float(metrics_dict.get("precision_macro", metrics_dict.get("macro_precision", 0.0)))
+        macro_metrics["recall"] = float(metrics_dict.get("recall_macro", metrics_dict.get("macro_recall", 0.0)))
+        macro_metrics["f1"] = float(metrics_dict.get("f1_macro", metrics_dict.get("macro_f1", 0.0)))
     except Exception:
         pass
 
