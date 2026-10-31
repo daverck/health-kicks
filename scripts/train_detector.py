@@ -141,6 +141,9 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
         # 4) Multi-scale short tail features (second half: settles into stillness vs ongoing locomotion)
         "acc_mag_std_tail": float(np.std(acc_mag[n_samples // 2 :])) if n_samples > 1 else 0.0,
         "gyro_mag_mean_tail": float(np.mean(gyro_mag[n_samples // 2 :])) if n_samples > 0 else 0.0,
+        # 5) Dynamic transition & Jerk features (discriminates sudden violent falls from gentle lie_down / lying)
+        "acc_jerk_max": float(np.max(np.abs(np.diff(acc_mag)))) if n_samples > 1 else 0.0,
+        "gyro_mag_max_to_mean": float(np.max(gyro_mag) / (np.mean(gyro_mag) + 1e-4)),
     }
     return features
 
