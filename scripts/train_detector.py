@@ -144,6 +144,9 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
         # 5) Dynamic transition & Jerk features (discriminates sudden violent falls from gentle lie_down / lying)
         "acc_jerk_max": float(np.max(np.abs(np.diff(acc_mag)))) if n_samples > 1 else 0.0,
         "gyro_mag_max_to_mean": float(np.max(gyro_mag) / (np.mean(gyro_mag) + 1e-4)),
+        # 6) Temporal half-window asymmetry (breaks sit_down vs stand_up symmetry)
+        "ay_p2p_first_half": float(np.ptp(ay[: n_samples // 2])) if n_samples > 1 else 0.0,
+        "ay_p2p_second_half": float(np.ptp(ay[n_samples // 2 :])) if n_samples > 1 else 0.0,
     }
     return features
 
