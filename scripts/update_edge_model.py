@@ -229,6 +229,13 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Maximum number of most recent recording sessions to keep per class (default: None, keep all).",
     )
+    parser.add_argument(
+        "--min-date",
+        "--since-date",
+        type=str,
+        default=None,
+        help="Filter sessions recorded on or after this date (format: YYYY-MM-DD).",
+    )
     return parser.parse_args(args)
 
 
@@ -247,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Window Parameters    : {args.window_size:.1f}s window, {args.window_step:.1f}s step")
     print(f"* Min Sessions / Class : {min_sessions}")
     print(f"* Max Sessions / Class : {args.max_sessions_per_class if args.max_sessions_per_class else 'ALL (unlimited)'}")
+    print(f"* Min Date Cutoff      : {args.min_date if args.min_date else 'ALL (no cutoff)'}")
     print(f"* Build Check Enabled  : {'NO' if args.no_build_check else 'YES'}")
     print("=" * 72 + "\n")
 
@@ -285,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
             step_sec=args.window_step,
             min_sessions_per_class=min_sessions,
             max_sessions_per_class=args.max_sessions_per_class,
+            min_date=args.min_date,
         )
 
         if len(X) == 0:
@@ -315,6 +324,27 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         print("[QUALITY GATE] PASSED! Model meets accuracy standards for embedded deployment.")
+
+        # Automatically synchronize lightweight model_metrics.json for runtime API
+        try:
+            import json
+            metrics_payload = {
+                "trained_at_utc": str(package.get("trained_at_utc")),
+                "model_name": str(package.get("model_name")),
+                "window_size_sec": float(package.get("window_size_sec") or 3.0),
+                "metrics": {
+                    "f1_macro": float(package.get("metrics", {}).get("f1_macro", 0.0)),
+                    "accuracy": float(package.get("metrics", {}).get("accuracy", 0.0)),
+                    "precision_macro": float(package.get("metrics", {}).get("precision_macro", 0.0)),
+                    "recall_macro": float(package.get("metrics", {}).get("recall_macro", 0.0)),
+                    "class_metrics": package.get("metrics", {}).get("class_metrics", {}),
+                },
+            }
+            json_target = Path(__file__).resolve().parent.parent / "app" / "core" / "model_metrics.json"
+            json_target.write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
+            print(f"[OK] Updated model_metrics.json -> {json_target}")
+        except Exception as json_err:
+            logger.warning("Could not update model_metrics.json: %s", json_err)
     else:
         print("\n>>> [STEP 1-3/4] Skipping training (--skip-train). Using existing artifact:")
         if not model_path.exists():

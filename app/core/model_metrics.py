@@ -33,3 +33,4 @@ def load_champion_model_metrics() -> dict[str, Any]:
         pass
 
     return {}
+
