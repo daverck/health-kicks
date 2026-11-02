@@ -1256,7 +1256,7 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     assert pat_items[0]["id"] == alert_patient.id
     assert pat_items[0]["is_pseudonymized"] is False
     assert pat_items[0]["user_display_name"] == f"Patient {patient_user.pseudonym}"
-    assert pat_items[0]["acknowledged_by"] == {"first_name": "Marie", "last_name": "Dupont"}
+    assert pat_items[0]["acknowledged_by"] == {"first_name": "Marie", "last_name": "Dupont", "rank": 1}
 
     det_pat = client.get(
         f"/api/v1/fall-alerts/{alert_patient.id}",
@@ -1297,7 +1297,7 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     adm_body = det_adm.json()
     assert adm_body["is_pseudonymized"] is True
     assert adm_body["user_display_name"].startswith("Patient SUBJ-")
-    assert adm_body["acknowledged_by"] == {"first_name": "Marie", "last_name": "D."}
+    assert adm_body["acknowledged_by"] == {"first_name": "Marie", "last_name": "D.", "rank": 1}
     assert adm_body["notifications"][0]["contact_last_name"] == "D."
     assert adm_body["notifications"][0]["contact_email"] == "m***@e***.com"
     assert adm_body["notifications"][0]["contact_phone"] == "+32*******56"

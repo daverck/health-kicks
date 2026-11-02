@@ -1185,6 +1185,8 @@ def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSumm
     user_uuid = getattr(alert.user, "uuid", None) if alert.user else None
     alert_uuid = getattr(alert, "uuid", None)
 
+    notifications = alert.notifications or []
+
     ack_by: FallAlertAcknowledgedBy | None = None
     if alert.acknowledged_by_first_name:
         ack_last = (
@@ -1192,12 +1194,21 @@ def to_fall_alert_summary(alert: FallAlert, current_user: User) -> FallAlertSumm
             if is_own
             else _mask_last_name(alert.acknowledged_by_last_name)
         )
+        ack_rank: int | None = None
+        for n in notifications:
+            if n.status == FallAlertNotificationStatus.ACKNOWLEDGED.value:
+                ack_rank = n.rank
+                break
+        if ack_rank is None and alert.acknowledged_by_contact_id:
+            for n in notifications:
+                if n.contact_id == alert.acknowledged_by_contact_id:
+                    ack_rank = n.rank
+                    break
         ack_by = FallAlertAcknowledgedBy(
             first_name=alert.acknowledged_by_first_name,
             last_name=ack_last,
+            rank=ack_rank,
         )
-
-    notifications = alert.notifications or []
     notified_count = len(
         {
             n.rank

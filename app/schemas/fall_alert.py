@@ -257,6 +257,7 @@ class FallAlertAcknowledgedBy(BaseModel):
 
     first_name: str
     last_name: str
+    rank: int | None = None
 
 
 class FallAlertLocationResponse(BaseModel):
