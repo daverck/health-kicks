@@ -183,6 +183,18 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
           }
         },
         "required": [
@@ -453,8 +465,15 @@
         "description": "Payload used to bind a device to the authenticated user.",
         "properties": {
           "device_id": {
-            "title": "Device Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
           },
           "name": {
             "anyOf": [
@@ -467,21 +486,22 @@
             ],
             "title": "Name"
           },
-          "user_id": {
+          "user_uuid": {
             "anyOf": [
               {
-                "type": "integer"
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "User Id"
+            "title": "User Uuid"
           }
         },
-        "required": [
-          "device_id"
-        ],
         "title": "DeviceCreate",
         "type": "object"
       },
@@ -616,10 +636,6 @@
             ],
             "title": "Firmware Version"
           },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
           "is_online": {
             "default": false,
             "title": "Is Online",
@@ -674,10 +690,15 @@
           },
           "status": {
             "$ref": "#/components/schemas/DeviceStatus"
+          },
+          "uuid": {
+            "format": "uuid",
+            "title": "Uuid",
+            "type": "string"
           }
         },
         "required": [
-          "id",
+          "uuid",
           "device_id",
           "status",
           "created_at",
@@ -695,6 +716,179 @@
         "title": "DeviceStatus",
         "type": "string"
       },
+      "FallAlertAckInfoResponse": {
+        "additionalProperties": false,
+        "description": "Safe read-only metadata returned to the frontend acknowledgment page.",
+        "properties": {
+          "accuracy_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy M"
+          },
+          "alert_id": {
+            "title": "Alert Id",
+            "type": "integer"
+          },
+          "already_acknowledged_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Already Acknowledged By"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
+          },
+          "confidence_pct": {
+            "title": "Confidence Pct",
+            "type": "integer"
+          },
+          "contact_name": {
+            "title": "Contact Name",
+            "type": "string"
+          },
+          "detected_at": {
+            "format": "date-time",
+            "title": "Detected At",
+            "type": "string"
+          },
+          "detected_at_paris": {
+            "title": "Detected At Paris",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "event_type_label": {
+            "title": "Event Type Label",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "maps_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maps Url"
+          },
+          "patient_name": {
+            "title": "Patient Name",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "alert_id",
+          "patient_name",
+          "contact_name",
+          "detected_at",
+          "detected_at_paris",
+          "event_type",
+          "event_type_label",
+          "confidence_pct",
+          "state"
+        ],
+        "title": "FallAlertAckInfoResponse",
+        "type": "object"
+      },
+      "FallAlertAckPayload": {
+        "additionalProperties": false,
+        "description": "JSON body option for POST /api/v1/fall-alerts/ack.",
+        "properties": {
+          "token": {
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "FallAlertAckPayload",
+        "type": "object"
+      },
+      "FallAlertAckResultResponse": {
+        "additionalProperties": false,
+        "description": "Result returned on successful acknowledgment.",
+        "properties": {
+          "acknowledged_by": {
+            "title": "Acknowledged By",
+            "type": "string"
+          },
+          "alert_id": {
+            "title": "Alert Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "status": {
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "alert_id",
+          "acknowledged_by",
+          "message"
+        ],
+        "title": "FallAlertAckResultResponse",
+        "type": "object"
+      },
       "FallAlertAcknowledgedBy": {
         "additionalProperties": false,
         "description": "Summary of the emergency contact who acknowledged the alert.",
@@ -706,6 +900,17 @@
           "last_name": {
             "title": "Last Name",
             "type": "string"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
           }
         },
         "required": [
@@ -866,6 +1071,41 @@
           "user_id": {
             "title": "User Id",
             "type": "integer"
+          },
+          "user_pseudonym": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Pseudonym"
+          },
+          "user_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Uuid"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
           }
         },
         "required": [
@@ -1283,6 +1523,53 @@
         "title": "FallAlertNotificationResponse",
         "type": "object"
       },
+      "FallAlertSmsStatusRequest": {
+        "additionalProperties": false,
+        "description": "Payload sent by mobile client to report execution status of SMS relay.",
+        "properties": {
+          "error_message": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "notification_id": {
+            "title": "Notification Id",
+            "type": "integer"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "sms_status": {
+            "enum": [
+              "SENT",
+              "FAILED"
+            ],
+            "title": "Sms Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "notification_id",
+          "sms_status"
+        ],
+        "title": "FallAlertSmsStatusRequest",
+        "type": "object"
+      },
       "FallAlertSummary": {
         "additionalProperties": false,
         "description": "Summary item for paginated fall alert history.",
@@ -1369,6 +1656,16 @@
             "title": "Is Pseudonymized",
             "type": "boolean"
           },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallAlertLocationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "notified_contacts_count": {
             "title": "Notified Contacts Count",
             "type": "integer"
@@ -1388,6 +1685,41 @@
           "user_id": {
             "title": "User Id",
             "type": "integer"
+          },
+          "user_pseudonym": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Pseudonym"
+          },
+          "user_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Uuid"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
           }
         },
         "required": [
@@ -1964,16 +2296,9 @@
             "title": "Session Token",
             "type": "string"
           },
-          "user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User Id"
+          "user_uuid": {
+            "title": "User Uuid",
+            "type": "string"
           }
         },
         "required": [
@@ -1982,7 +2307,8 @@
           "session_token",
           "expiration",
           "iot_endpoint",
-          "region"
+          "region",
+          "user_uuid"
         ],
         "title": "IoTCredentialsResponse",
         "type": "object"
@@ -2188,6 +2514,12 @@
             "default": 5.0,
             "title": "Duration Sec"
           },
+          "is_hitl": {
+            "default": false,
+            "description": "Flag indicating human-in-the-loop validated detection",
+            "title": "Is Hitl",
+            "type": "boolean"
+          },
           "label": {
             "anyOf": [
               {
@@ -2261,15 +2593,38 @@
         "additionalProperties": false,
         "description": "Author metadata summary for studio recording curation.",
         "properties": {
+          "author_pseudonym": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deterministic author pseudonym",
+            "title": "Author Pseudonym"
+          },
+          "author_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unique author UUID",
+            "title": "Author Uuid"
+          },
           "email": {
             "description": "User email address",
             "title": "Email",
             "type": "string"
-          },
-          "id": {
-            "description": "Unique user identifier",
-            "title": "Id",
-            "type": "integer"
           },
           "is_pseudonymized": {
             "default": false,
@@ -2303,10 +2658,313 @@
           }
         },
         "required": [
-          "id",
           "email"
         ],
         "title": "StudioAuthorSummary",
+        "type": "object"
+      },
+      "StudioClassDailyCount": {
+        "additionalProperties": false,
+        "description": "Session count aggregation grouped by calendar day for a specific class.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "pending_count": {
+            "default": 0,
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "validated_count": {
+            "default": 0,
+            "title": "Validated Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "count"
+        ],
+        "title": "StudioClassDailyCount",
+        "type": "object"
+      },
+      "StudioClassDetailStatsResponse": {
+        "additionalProperties": false,
+        "description": "Detailed statistics and distribution breakdown for a single activity class.",
+        "properties": {
+          "daily_counts": {
+            "items": {
+              "$ref": "#/components/schemas/StudioClassDailyCount"
+            },
+            "title": "Daily Counts",
+            "type": "array"
+          },
+          "duration_metrics": {
+            "$ref": "#/components/schemas/StudioClassDurationStats"
+          },
+          "first_session_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Session Date"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "latest_session_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Session Date"
+          },
+          "ml_metrics": {
+            "$ref": "#/components/schemas/StudioClassMlMetrics"
+          },
+          "pending_sessions": {
+            "title": "Pending Sessions",
+            "type": "integer"
+          },
+          "total_sessions": {
+            "title": "Total Sessions",
+            "type": "integer"
+          },
+          "validated_sessions": {
+            "title": "Validated Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "total_sessions",
+          "validated_sessions",
+          "pending_sessions",
+          "duration_metrics",
+          "ml_metrics"
+        ],
+        "title": "StudioClassDetailStatsResponse",
+        "type": "object"
+      },
+      "StudioClassDurationStats": {
+        "additionalProperties": false,
+        "description": "Descriptive statistics on session durations for a given activity class.",
+        "properties": {
+          "max_sec": {
+            "default": 0.0,
+            "title": "Max Sec",
+            "type": "number"
+          },
+          "mean_sec": {
+            "default": 0.0,
+            "title": "Mean Sec",
+            "type": "number"
+          },
+          "median_sec": {
+            "default": 0.0,
+            "title": "Median Sec",
+            "type": "number"
+          },
+          "min_sec": {
+            "default": 0.0,
+            "title": "Min Sec",
+            "type": "number"
+          },
+          "std_sec": {
+            "default": 0.0,
+            "title": "Std Sec",
+            "type": "number"
+          }
+        },
+        "title": "StudioClassDurationStats",
+        "type": "object"
+      },
+      "StudioClassMlMetrics": {
+        "additionalProperties": false,
+        "description": "Edge ML benchmark metrics for a specific class (from trained champion model).",
+        "properties": {
+          "f1_score": {
+            "default": 0.0,
+            "title": "F1 Score",
+            "type": "number"
+          },
+          "precision": {
+            "default": 0.0,
+            "title": "Precision",
+            "type": "number"
+          },
+          "recall": {
+            "default": 0.0,
+            "title": "Recall",
+            "type": "number"
+          },
+          "support_windows": {
+            "default": 0,
+            "title": "Support Windows",
+            "type": "integer"
+          }
+        },
+        "title": "StudioClassMlMetrics",
+        "type": "object"
+      },
+      "StudioClassSummaryItem": {
+        "additionalProperties": false,
+        "description": "Consolidated summary metrics for an activity class in Studio dataset overview.",
+        "properties": {
+          "f1_score": {
+            "default": 0.0,
+            "title": "F1 Score",
+            "type": "number"
+          },
+          "first_session_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Session Date"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "latest_session_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Session Date"
+          },
+          "median_duration_sec": {
+            "default": 0.0,
+            "title": "Median Duration Sec",
+            "type": "number"
+          },
+          "pending_sessions": {
+            "title": "Pending Sessions",
+            "type": "integer"
+          },
+          "precision": {
+            "default": 0.0,
+            "title": "Precision",
+            "type": "number"
+          },
+          "recall": {
+            "default": 0.0,
+            "title": "Recall",
+            "type": "number"
+          },
+          "support_windows": {
+            "default": 0,
+            "title": "Support Windows",
+            "type": "integer"
+          },
+          "total_duration_sec": {
+            "default": 0.0,
+            "title": "Total Duration Sec",
+            "type": "number"
+          },
+          "total_sessions": {
+            "title": "Total Sessions",
+            "type": "integer"
+          },
+          "validated_sessions": {
+            "title": "Validated Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "total_sessions",
+          "validated_sessions",
+          "pending_sessions"
+        ],
+        "title": "StudioClassSummaryItem",
+        "type": "object"
+      },
+      "StudioClassesSummaryResponse": {
+        "additionalProperties": false,
+        "description": "Aggregated global overview across all activity classes.",
+        "properties": {
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/StudioClassSummaryItem"
+            },
+            "title": "Classes",
+            "type": "array"
+          },
+          "daily_counts": {
+            "items": {
+              "$ref": "#/components/schemas/StudioClassDailyCount"
+            },
+            "title": "Daily Counts",
+            "type": "array"
+          },
+          "macro_f1": {
+            "default": 0.0,
+            "title": "Macro F1",
+            "type": "number"
+          },
+          "macro_precision": {
+            "default": 0.0,
+            "title": "Macro Precision",
+            "type": "number"
+          },
+          "macro_recall": {
+            "default": 0.0,
+            "title": "Macro Recall",
+            "type": "number"
+          },
+          "pending_sessions": {
+            "title": "Pending Sessions",
+            "type": "integer"
+          },
+          "total_classes": {
+            "title": "Total Classes",
+            "type": "integer"
+          },
+          "total_duration_sec": {
+            "default": 0.0,
+            "title": "Total Duration Sec",
+            "type": "number"
+          },
+          "total_sessions": {
+            "title": "Total Sessions",
+            "type": "integer"
+          },
+          "validated_sessions": {
+            "title": "Validated Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_classes",
+          "total_sessions",
+          "validated_sessions",
+          "pending_sessions"
+        ],
+        "title": "StudioClassesSummaryResponse",
         "type": "object"
       },
       "StudioDatasetStatsResponse": {
@@ -2320,6 +2978,20 @@
             "title": "By Label",
             "type": "object"
           },
+          "by_label_pending": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Label Pending",
+            "type": "object"
+          },
+          "by_label_validated": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Label Validated",
+            "type": "object"
+          },
           "device_id": {
             "anyOf": [
               {
@@ -2330,6 +3002,13 @@
               }
             ],
             "title": "Device Id"
+          },
+          "edge_ai_labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edge Ai Labels",
+            "type": "array"
           },
           "total_duration_sec": {
             "default": 0.0,
@@ -2368,6 +3047,29 @@
             ],
             "title": "Author Name"
           },
+          "author_pseudonym": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Pseudonym"
+          },
+          "author_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Uuid"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2382,10 +3084,10 @@
             "title": "Duration Sec",
             "type": "number"
           },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+          "is_hitl": {
+            "default": false,
+            "title": "Is Hitl",
+            "type": "boolean"
           },
           "is_pseudonymized": {
             "default": false,
@@ -2431,10 +3133,15 @@
           "user_id": {
             "title": "User Id",
             "type": "integer"
+          },
+          "uuid": {
+            "format": "uuid",
+            "title": "Uuid",
+            "type": "string"
           }
         },
         "required": [
-          "id",
+          "uuid",
           "device_id",
           "user_id",
           "label",
@@ -2502,6 +3209,29 @@
             ],
             "title": "Author Name"
           },
+          "author_pseudonym": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Pseudonym"
+          },
+          "author_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Uuid"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2516,10 +3246,10 @@
             "title": "Duration Sec",
             "type": "number"
           },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+          "is_hitl": {
+            "default": false,
+            "title": "Is Hitl",
+            "type": "boolean"
           },
           "is_pseudonymized": {
             "default": false,
@@ -2565,10 +3295,15 @@
           "user_id": {
             "title": "User Id",
             "type": "integer"
+          },
+          "uuid": {
+            "format": "uuid",
+            "title": "Uuid",
+            "type": "string"
           }
         },
         "required": [
-          "id",
+          "uuid",
           "device_id",
           "user_id",
           "label",
@@ -2804,10 +3539,6 @@
             "title": "Email",
             "type": "string"
           },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
           "is_active": {
             "title": "Is Active",
             "type": "boolean"
@@ -2823,13 +3554,22 @@
             ],
             "title": "Name"
           },
+          "pseudonym": {
+            "default": "",
+            "title": "Pseudonym",
+            "type": "string"
+          },
           "role": {
             "title": "Role",
+            "type": "string"
+          },
+          "uuid": {
+            "format": "uuid",
+            "title": "Uuid",
             "type": "string"
           }
         },
         "required": [
-          "id",
           "email",
           "role",
           "is_active"
@@ -3618,25 +4358,25 @@
         "operationId": "list_devices_api_v1_devices_get",
         "parameters": [
           {
-            "description": "Optional user ID filter for admins",
+            "description": "Optional user UUID filter for admins",
             "in": "query",
-            "name": "user_id",
+            "name": "user_uuid",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Optional user ID filter for admins",
-              "title": "User Id"
+              "description": "Optional user UUID filter for admins",
+              "title": "User Uuid"
             }
           },
           {
-            "description": "Opaque cursor (timestamp_utc|id) for keyset pagination",
+            "description": "Opaque cursor (timestamp_utc|device_id) for keyset pagination",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -3649,7 +4389,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor (timestamp_utc|id) for keyset pagination",
+              "description": "Opaque cursor (timestamp_utc|device_id) for keyset pagination",
               "title": "Cursor"
             }
           },
@@ -3754,47 +4494,6 @@
           }
         ],
         "summary": "Bind Device",
-        "tags": [
-          "Devices"
-        ]
-      }
-    },
-    "/api/v1/devices/{device_id}": {
-      "delete": {
-        "description": "Dissociate/unbind a device.",
-        "operationId": "unbind_device_api_v1_devices__device_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "device_id",
-            "required": true,
-            "schema": {
-              "title": "Device Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Unbind Device",
         "tags": [
           "Devices"
         ]
@@ -4543,6 +5242,48 @@
         ]
       }
     },
+    "/api/v1/devices/{device_uuid}": {
+      "delete": {
+        "description": "Dissociate/unbind a device by UUID.",
+        "operationId": "unbind_device_api_v1_devices__device_uuid__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Device Uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unbind Device",
+        "tags": [
+          "Devices"
+        ]
+      }
+    },
     "/api/v1/fall-alerts": {
       "get": {
         "description": "List fall alerts with pagination, state/date filtering, RBAC isolation, and GDPR pseudonymization.",
@@ -4624,21 +5365,39 @@
             }
           },
           {
-            "description": "Filter by user_id (taken into account only for admin role)",
+            "description": "Filtrer par user_id num\u00e9rique ou pseudonyme sujet (d\u00e9pr\u00e9ci\u00e9 au profit de pseudonym)",
             "in": "query",
             "name": "user_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter by user_id (taken into account only for admin role)",
+              "description": "Filtrer par user_id num\u00e9rique ou pseudonyme sujet (d\u00e9pr\u00e9ci\u00e9 au profit de pseudonym)",
               "title": "User Id"
+            }
+          },
+          {
+            "description": "Filtrer par pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
+            "in": "query",
+            "name": "pseudonym",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtrer par pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
+              "title": "Pseudonym"
             }
           }
         ],
@@ -4676,27 +5435,25 @@
       }
     },
     "/api/v1/fall-alerts/ack": {
-      "get": {
-        "description": "Render the read-only confirmation landing page for an emergency contact (no DB mutation).",
-        "operationId": "get_fall_alert_ack_page_api_v1_fall_alerts_ack_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "token",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "Token",
-              "type": "string"
+      "post": {
+        "description": "Confirm acknowledgment of a fall alert via JSON payload.",
+        "operationId": "confirm_fall_alert_ack_api_v1_fall_alerts_ack_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FallAlertAckPayload"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
-              "text/html": {
+              "application/json": {
                 "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FallAlertAckResultResponse"
                 }
               }
             },
@@ -4713,44 +5470,115 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Fall Alert Ack Page",
-        "tags": [
-          "Fall Alerts"
-        ]
-      },
-      "post": {
-        "description": "Confirm acknowledgment of a fall alert via form submission or JSON body.",
-        "operationId": "confirm_fall_alert_ack_api_v1_fall_alerts_ack_post",
-        "responses": {
-          "200": {
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
         "summary": "Confirm Fall Alert Ack",
         "tags": [
           "Fall Alerts"
         ]
       }
     },
-    "/api/v1/fall-alerts/{alert_id}": {
+    "/api/v1/fall-alerts/ack/info": {
       "get": {
-        "description": "Retrieve full details and notification log for a single fall alert.",
-        "operationId": "get_fall_alert_detail_api_v1_fall_alerts__alert_id__get",
+        "description": "Safe read-only information endpoint consumed by the frontend acknowledgment page.",
+        "operationId": "get_fall_alert_ack_info_api_v1_fall_alerts_ack_info_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FallAlertAckInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fall Alert Ack Info",
+        "tags": [
+          "Fall Alerts"
+        ]
+      }
+    },
+    "/api/v1/fall-alerts/sms-status": {
+      "post": {
+        "description": "Report execution status of SMS relay directly from authenticated mobile client.",
+        "operationId": "report_sms_status_api_v1_fall_alerts_sms_status_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FallAlertSmsStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FallAlertIngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report native SMS delivery status from mobile gateway",
+        "tags": [
+          "Fall Alerts"
+        ]
+      }
+    },
+    "/api/v1/fall-alerts/{alert_identifier}": {
+      "get": {
+        "description": "Retrieve full details and notification log for a single fall alert (by int ID or UUID).",
+        "operationId": "get_fall_alert_detail_api_v1_fall_alerts__alert_identifier__get",
         "parameters": [
           {
             "in": "path",
-            "name": "alert_id",
+            "name": "alert_identifier",
             "required": true,
             "schema": {
-              "title": "Alert Id",
-              "type": "integer"
+              "title": "Alert Identifier",
+              "type": "string"
             }
           }
         ],
@@ -5545,6 +6373,81 @@
         ]
       }
     },
+    "/api/v1/studio/classes/summary": {
+      "get": {
+        "description": "Get global summary and comparative metrics across all activity classes.",
+        "operationId": "get_studio_classes_summary_api_v1_studio_classes_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioClassesSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Studio Classes Summary",
+        "tags": [
+          "Studio"
+        ]
+      }
+    },
+    "/api/v1/studio/classes/{label}/stats": {
+      "get": {
+        "description": "Get detailed daily counts, duration distribution, and ML metrics for a specific activity class.",
+        "operationId": "get_studio_class_stats_api_v1_studio_classes__label__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioClassDetailStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Studio Class Stats",
+        "tags": [
+          "Studio"
+        ]
+      }
+    },
     "/api/v1/studio/sessions": {
       "get": {
         "description": "List studio sessions with RBAC, cursor keyset pagination, and multi-value filters.",
@@ -5628,9 +6531,9 @@
             }
           },
           {
-            "description": "Single user ID or comma-separated list of user IDs",
+            "description": "Filtrer par pseudonyme de l'auteur (admin)",
             "in": "query",
-            "name": "user_id",
+            "name": "pseudonym",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5641,8 +6544,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Single user ID or comma-separated list of user IDs",
-              "title": "User Id"
+              "description": "Filtrer par pseudonyme de l'auteur (admin)",
+              "title": "Pseudonym"
             }
           },
           {
@@ -5661,6 +6564,42 @@
               ],
               "description": "Filtrer par statut de validation de la session",
               "title": "Is Validated"
+            }
+          },
+          {
+            "description": "Filtrer par session HITL (True) ou standard (False)",
+            "in": "query",
+            "name": "is_hitl",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtrer par session HITL (True) ou standard (False)",
+              "title": "Is Hitl"
+            }
+          },
+          {
+            "description": "Filtrer par classification ('edge_ai' ou 'research')",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtrer par classification ('edge_ai' ou 'research')",
+              "title": "Classification"
             }
           },
           {
@@ -6325,18 +7264,18 @@
         ]
       }
     },
-    "/api/v1/users/me/alert-contacts/{contact_id}": {
+    "/api/v1/users/me/alert-contacts/{contact_identifier}": {
       "delete": {
-        "description": "Delete an emergency contact and re-compact remaining priorities.",
-        "operationId": "remove_my_alert_contact_api_v1_users_me_alert_contacts__contact_id__delete",
+        "description": "Delete an emergency contact and re-compact remaining priorities (by int ID or UUID).",
+        "operationId": "remove_my_alert_contact_api_v1_users_me_alert_contacts__contact_identifier__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "contact_id",
+            "name": "contact_identifier",
             "required": true,
             "schema": {
-              "title": "Contact Id",
-              "type": "integer"
+              "title": "Contact Identifier",
+              "type": "string"
             }
           }
         ],
@@ -6366,16 +7305,16 @@
         ]
       },
       "patch": {
-        "description": "Update first_name, last_name, email, or phone of an emergency contact.",
-        "operationId": "patch_my_alert_contact_api_v1_users_me_alert_contacts__contact_id__patch",
+        "description": "Update first_name, last_name, email, or phone of an emergency contact (by int ID or UUID).",
+        "operationId": "patch_my_alert_contact_api_v1_users_me_alert_contacts__contact_identifier__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "contact_id",
+            "name": "contact_identifier",
             "required": true,
             "schema": {
-              "title": "Contact Id",
-              "type": "integer"
+              "title": "Contact Identifier",
+              "type": "string"
             }
           }
         ],
@@ -6422,18 +7361,18 @@
         ]
       }
     },
-    "/api/v1/users/me/alert-contacts/{contact_id}/test-email": {
+    "/api/v1/users/me/alert-contacts/{contact_identifier}/test-email": {
       "post": {
-        "description": "Send a verification email (and optional test SMS) to an emergency contact (rate-limited to 3/hour per user).",
-        "operationId": "send_my_alert_contact_test_email_api_v1_users_me_alert_contacts__contact_id__test_email_post",
+        "description": "Send a verification email (and optional test SMS) to an emergency contact (by int ID or UUID).",
+        "operationId": "send_my_alert_contact_test_email_api_v1_users_me_alert_contacts__contact_identifier__test_email_post",
         "parameters": [
           {
             "in": "path",
-            "name": "contact_id",
+            "name": "contact_identifier",
             "required": true,
             "schema": {
-              "title": "Contact Id",
-              "type": "integer"
+              "title": "Contact Identifier",
+              "type": "string"
             }
           }
         ],
@@ -6470,18 +7409,19 @@
         ]
       }
     },
-    "/api/v1/users/{user_id}": {
+    "/api/v1/users/{user_uuid}": {
       "patch": {
         "description": "Update user profile. Users can only update their own profile; admins can update anyone.",
-        "operationId": "update_user_api_v1_users__user_id__patch",
+        "operationId": "update_user_api_v1_users__user_uuid__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "user_id",
+            "name": "user_uuid",
             "required": true,
             "schema": {
-              "title": "User Id",
-              "type": "integer"
+              "format": "uuid",
+              "title": "User Uuid",
+              "type": "string"
             }
           }
         ],
@@ -6501,7 +7441,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Update User Api V1 Users  User Id  Patch",
+                  "title": "Response Update User Api V1 Users  User Uuid  Patch",
                   "type": "object"
                 }
               }
