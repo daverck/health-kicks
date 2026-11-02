@@ -3,7 +3,12 @@
 from fastapi import APIRouter, Depends, FastAPI, status
 from fastapi.testclient import TestClient
 
-from app.core.rate_limit import DynamoDbRateLimiter, SlidingWindowRateLimiter, rate_limit, rate_limiter
+from app.core.rate_limit import (
+    DynamoDbRateLimiter,
+    SlidingWindowRateLimiter,
+    rate_limit,
+    rate_limiter,
+)
 
 
 def test_sliding_window_unit_logic() -> None:

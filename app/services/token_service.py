@@ -3,9 +3,9 @@
 Issues and verifies signed JWT access tokens and refresh tokens used for API authentication.
 """
 
+import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
-import uuid as _uuid
 
 import jwt
 from fastapi import HTTPException, status

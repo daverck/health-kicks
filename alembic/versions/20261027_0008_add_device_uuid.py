@@ -5,10 +5,11 @@ Revises: 20261026_0007
 Create Date: 2026-10-27 09:00:00.000000
 
 """
-from collections.abc import Sequence
 import uuid
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.

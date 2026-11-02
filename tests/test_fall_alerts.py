@@ -12,11 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 from itsdangerous import URLSafeTimedSerializer
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings, get_settings
-from app.core.pseudonymization import get_subject_pseudonym
 from app.core.rate_limit import rate_limiter
 from app.db.database import get_db
 from app.db.models import (
@@ -1140,7 +1139,7 @@ def test_public_ack_get_is_side_effect_free_and_post_acknowledges(
     post_data = res_post.json()
     assert post_data["status"] == "ok"
     assert post_data["state"] == "ACKNOWLEDGED"
-    assert post_data["acknowledged_by"] == "Marie Dupont" 
+    assert post_data["acknowledged_by"] == "Marie Dupont"
 
     db_session.refresh(alert)
     db_session.refresh(notif)
@@ -1515,6 +1514,7 @@ def test_fall_alert_postgresql_for_update_of_target_compilation(db_session):
     side of an outer join' errors in the escalation worker.
     """
     from sqlalchemy.dialects import postgresql
+
     from app.db.models import FallAlert
     from app.services.fall_alert_service import ACTIVE_ALERT_STATES
 

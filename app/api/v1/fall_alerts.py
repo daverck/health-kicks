@@ -13,8 +13,7 @@ from app.api.deps import CurrentUser
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.core.rate_limit import rate_limiter
 from app.db.database import get_db
-from app.core.pseudonymization import get_subject_pseudonym
-from app.db.models import FallAlert, FallAlertNotification, FallAlertState, User, UserRole
+from app.db.models import FallAlert, User, UserRole
 from app.schemas.fall_alert import (
     AlertContactCreate,
     AlertContactResponse,

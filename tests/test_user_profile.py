@@ -4,21 +4,7 @@ import uuid
 Validates that modifying user email is strictly forbidden to preserve OIDC IdP consistency.
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from pydantic import ValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from app.db.database import get_db
-from app.db.models import Base, User, UserRole
-from app.main import app
-from app.schemas.user import UserUpdate
-from app.services import token_service
-
-
-@pytest.fixture()
+import pytestfrom fastapi.testclient import TestClientfrom pydantic import ValidationErrorfrom sqlalchemy import create_enginefrom sqlalchemy.orm import sessionmakerfrom sqlalchemy.pool import StaticPoolfrom app.db.database import get_dbfrom app.db.models import Base, User, UserRolefrom app.main import appfrom app.schemas.user import UserUpdatefrom app.services import token_service@pytest.fixture()
 def db_session():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool

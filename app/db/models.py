@@ -6,6 +6,9 @@ from enum import Enum
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    UUID as PgUUID,
+)
+from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
@@ -17,7 +20,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    UUID as PgUUID,
     Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship

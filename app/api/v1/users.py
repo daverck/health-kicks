@@ -1,17 +1,6 @@
 """User management routes."""
 
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-
-from app.api.deps import CurrentUser, RequireAdmin
-from app.db.database import get_db
-from app.db.models import User, UserRole
-from app.schemas.user import UserUpdate
-
-
-def _serialize(user: User) -> dict:
+from uuid import UUIDfrom fastapi import APIRouter, Depends, HTTPException, statusfrom sqlalchemy.orm import Sessionfrom app.api.deps import CurrentUser, RequireAdminfrom app.db.database import get_dbfrom app.db.models import User, UserRolefrom app.schemas.user import UserUpdatedef _serialize(user: User) -> dict:
     return {
         "uuid": str(user.uuid),
         "pseudonym": user.pseudonym,

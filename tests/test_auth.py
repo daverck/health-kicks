@@ -785,7 +785,9 @@ def test_user_response_and_jwt_uuid_alignment(db_session) -> None:
 def test_legacy_integer_sub_fallback(db_session) -> None:
     """Verify backward-compatible resolution when a token contains integer ID as sub."""
     import time
+
     import jwt
+
     from app.core.config import settings
     from app.db.database import get_db
     from app.main import app

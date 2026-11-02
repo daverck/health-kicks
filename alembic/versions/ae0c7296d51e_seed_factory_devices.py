@@ -5,15 +5,7 @@ Revises: ac994f8fce7b
 Create Date: 2026-09-03 11:28:00.377094
 
 """
-import logging
-import uuid
-from collections.abc import Sequence
-from datetime import UTC, datetime
-
-import sqlalchemy as sa
-from alembic import op
-
-# revision identifiers, used by Alembic.
+import loggingimport uuidfrom collections.abc import Sequencefrom datetime import UTC, datetimeimport sqlalchemy as safrom alembic import op# revision identifiers, used by Alembic.
 revision: str = 'ae0c7296d51e'
 down_revision: str | Sequence[str] | None = 'ac994f8fce7b'
 branch_labels: str | Sequence[str] | None = None

@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -27,9 +28,10 @@ def _backfill_sessions_from_dynamodb(conn: sa.Connection) -> None:
     """Scan DynamoDB telemetry items with session_id and provision studio_sessions."""
     try:
         import boto3
-        from app.core.config import settings
         from boto3.dynamodb.conditions import Attr
         from botocore.exceptions import BotoCoreError, ClientError
+
+        from app.core.config import settings
     except Exception as exc:
         logger.warning(f"[backfill] boto3 or app settings not available ({exc}), skipping backfill.")
         return

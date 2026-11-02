@@ -680,6 +680,7 @@ def test_list_activities_unowned_device_forbidden(client, db_session) -> None:
 def test_ingest_raw_telemetry_zero_samples_ignored(client, db_session, monkeypatch):
     """Verify /api/v1/ingest/telemetry/raw ignores payloads with 0 samples and creates no session in Aurora."""
     import uuid
+
     from app.db.models import StudioSession, User, UserRole
 
     monkeypatch.setattr(

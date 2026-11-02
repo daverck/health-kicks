@@ -1,13 +1,14 @@
 """add users and device_ownership tables
 
 Revision ID: ac994f8fce7b
-Revises: 
+Revises:
 Create Date: 2026-08-31 12:04:12.759590
 
 """
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.

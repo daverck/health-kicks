@@ -40,29 +40,19 @@ Usage examples:
     # Development / offline demo mode with synthetic dataset (no AWS access needed):
     $ uv run python -m scripts.train_detector --synthetic
 """
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-
-def load_project_env() -> None:
-    """Loads project .env file without overriding already defined variables."""
-    env_file = Path(__file__).resolve().parent.parent / ".env"
-    if env_file.exists():
-        load_dotenv(env_file, override=False)
-
 import argparse
 import json
 import logging
 import sys
 import warnings
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-from app.schemas.studio import StudioSessionDatasetRecord
+from dotenv import load_dotenv
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     HistGradientBoostingClassifier,
@@ -74,12 +64,21 @@ from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from app.schemas.studio import StudioSessionDatasetRecord
+
 # Logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
 logger = logging.getLogger("train_detector")
+
+
+def load_project_env() -> None:
+    """Loads project .env file without overriding already defined variables."""
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
 
 
 # -----------------------------------------------------------------------------
@@ -230,7 +229,7 @@ def build_dataset_from_sessions(
             first_ts = readings[0].get("timestamp") or readings[0].get("timestamp_epoch_us")
             if first_ts:
                 try:
-                    from datetime import datetime, UTC
+                    from datetime import UTC, datetime
                     sess_date = datetime.fromtimestamp(float(first_ts) / 1e6, UTC).strftime("%Y-%m-%d")
                     if sess_date < min_date:
                         continue
@@ -1046,8 +1045,8 @@ def train_and_benchmark(
     best_clf = best_info["estimator"]
 
     # Compute cross-validated predictions and per-class metrics for champion
-    from sklearn.model_selection import cross_val_predict
     from sklearn.metrics import classification_report
+    from sklearn.model_selection import cross_val_predict
     y_pred_cv = cross_val_predict(best_clf, X, y, cv=cv, n_jobs=-1)
     report_dict = classification_report(y, y_pred_cv, output_dict=True, zero_division=0)
     class_metrics: dict[str, dict[str, Any]] = {}

@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, case
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.core.pseudonymization import get_subject_pseudonym
@@ -13,9 +13,9 @@ from app.schemas.telemetry import (
     StudioClassDailyCount,
     StudioClassDetailStatsResponse,
     StudioClassDurationStats,
+    StudioClassesSummaryResponse,
     StudioClassMlMetrics,
     StudioClassSummaryItem,
-    StudioClassesSummaryResponse,
     StudioDatasetStatsResponse,
 )
 
@@ -151,8 +151,8 @@ def compute_studio_stats(
         query.with_entities(
             StudioSession.label,
             func.count(StudioSession.uuid).label("total"),
-            func.coalesce(func.sum(case((StudioSession.is_validated == True, 1), else_=0)), 0).label("validated"),
-            func.coalesce(func.sum(case((StudioSession.is_validated == False, 1), else_=0)), 0).label("pending"),
+            func.coalesce(func.sum(case((StudioSession.is_validated.is_(True), 1), else_=0)), 0).label("validated"),
+            func.coalesce(func.sum(case((StudioSession.is_validated.is_(False), 1), else_=0)), 0).label("pending"),
         )
         .group_by(StudioSession.label)
         .all()
@@ -273,8 +273,10 @@ def compute_classes_summary(
     user: User,
 ) -> StudioClassesSummaryResponse:
     from typing import Any
-    from app.core.edge_ai import edge_ai_labels_sorted
+
     import numpy as np
+
+    from app.core.edge_ai import edge_ai_labels_sorted
 
     query = db.query(StudioSession)
     if not user.is_admin:

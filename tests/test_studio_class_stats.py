@@ -1,7 +1,8 @@
 """Unit tests for Studio class-level detailed statistics endpoint."""
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,7 +14,6 @@ from app.api.deps import get_current_user
 from app.api.v1.telemetry import create_telemetry_router
 from app.db.database import get_db
 from app.db.models import Base, StudioSession, User, UserRole
-from app.services import token_service
 from app.services.telemetry_service import TelemetryService
 
 

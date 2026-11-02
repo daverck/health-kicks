@@ -8,7 +8,7 @@ SPA Frontend-First flow:
 """
 
 import logging
-from typing import Any, Callable
+from typing import Callable
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -27,8 +27,6 @@ from app.schemas.auth import (
     GoogleLoginResponse,
     IoTCredentialsRequest,
     IoTCredentialsResponse,
-    OAuthCallbackRequest,
-    OAuthLoginResponse,
     OAuthTicketExchangeRequest,
     RefreshTokenRequest,
     TokenResponse,
@@ -36,11 +34,10 @@ from app.schemas.auth import (
 )
 from app.services import azure_auth_service, google_auth_service, token_service
 from app.services.aws_sts_service import AWSSTSService
-from app.services.oauth_ticket_service import TICKET_TTL_SECONDS, oauth_ticket_store
+from app.services.oauth_ticket_service import oauth_ticket_store
 from app.services.pkce_service import (
     generate_oauth_state,
     get_state_platform,
-    get_timed_serializer,
     verify_oauth_state,
     verify_pkce_challenge,
 )

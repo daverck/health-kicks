@@ -1,8 +1,8 @@
-from uuid import UUID
 """Service layer for device management and user-device association."""
 
 import logging
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, or_

@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -22,7 +22,11 @@ from app.schemas.telemetry import (
 )
 from app.services.device_service import verify_device_ownership
 from app.services.iot_service import IotCommandService
-from app.services.studio_service import compute_class_detail_stats, compute_classes_summary, compute_studio_stats
+from app.services.studio_service import (
+    compute_class_detail_stats,
+    compute_classes_summary,
+    compute_studio_stats,
+)
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)

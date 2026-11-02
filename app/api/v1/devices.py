@@ -1,5 +1,6 @@
-from uuid import UUID
 """Device association and management routes."""
+
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session

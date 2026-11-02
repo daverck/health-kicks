@@ -37,8 +37,8 @@ from app.schemas.fall_alert import (
     FallAlertIngestPayload,
     FallAlertIngestResponse,
     FallAlertLocationResponse,
-    FallAlertSmsStatusRequest,
     FallAlertNotificationResponse,
+    FallAlertSmsStatusRequest,
     FallAlertSummary,
 )
 from app.services.aws_iot_service import AWSIoTPublishService
@@ -1261,15 +1261,6 @@ def to_fall_alert_detail(alert: FallAlert, current_user: User) -> FallAlertDetai
     """Serialize a FallAlert ORM instance to FallAlertDetail with notifications and GPS coordinates."""
     summary = to_fall_alert_summary(alert, current_user)
     is_own = alert.user_id == current_user.id
-
-    location: FallAlertLocationResponse | None = None
-    if alert.lat is not None and alert.lon is not None:
-        location = FallAlertLocationResponse(
-            lat=alert.lat,
-            lon=alert.lon,
-            accuracy_m=alert.accuracy_m,
-            captured_at=alert.location_captured_at_utc,
-        )
 
     notif_items: list[FallAlertNotificationResponse] = []
     for n in alert.notifications or []:
