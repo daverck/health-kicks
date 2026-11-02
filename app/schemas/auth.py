@@ -14,7 +14,7 @@ from app.schemas.cloud import StrictModel
 class UserResponse(StrictModel):
     """User profile response."""
 
-    uuid: UUID = Field(default_factory=uuid4)
+    uuid: UUID = Field(...)
     pseudonym: str = Field(default="")
     email: str
     name: str | None = None

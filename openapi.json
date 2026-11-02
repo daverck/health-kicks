@@ -3570,6 +3570,7 @@
           }
         },
         "required": [
+          "uuid",
           "email",
           "role",
           "is_active"
