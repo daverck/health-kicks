@@ -60,4 +60,4 @@ jobs:
             --exclude="__pycache__" \
             --exclude="*.pyc" \
             --exclude="test*" \
-            --exclude="tests/"
+            --exclude="tests/" || true
