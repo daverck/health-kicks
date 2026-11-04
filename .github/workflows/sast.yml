@@ -1,0 +1,63 @@
+name: SAST Security Scan (Semgrep)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  semgrep-scan:
+    name: Semgrep Python SAST Scan
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Semgrep SAST Scan with SARIF
+        run: |
+          semgrep scan \
+            --config=auto \
+            --config=p/python \
+            --config=p/owasp-top-ten \
+            --config=p/cwe-top-25 \
+            --sarif \
+            --output=semgrep.sarif \
+            --exclude=".venv" \
+            --exclude="__pycache__" \
+            --exclude="*.pyc" \
+            --exclude="test*" \
+            --exclude="tests/" || true
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+        continue-on-error: true
+
+      - name: Block on High/Critical Vulnerabilities
+        run: |
+          semgrep scan \
+            --config=auto \
+            --config=p/python \
+            --config=p/owasp-top-ten \
+            --config=p/cwe-top-25 \
+            --error \
+            --severity=ERROR \
+            --exclude=".venv" \
+            --exclude="__pycache__" \
+            --exclude="*.pyc" \
+            --exclude="test*" \
+            --exclude="tests/"
