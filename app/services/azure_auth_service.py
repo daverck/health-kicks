@@ -85,7 +85,17 @@ def exchange_code_for_azure_user(
     id_token_claims: dict[str, Any] = {}
     if id_token:
         try:
-            id_token_claims = jwt.decode(id_token, options={"verify_signature": False})
+            # Decode JWT token - note: signature verification requires jwks_client configuration
+            # For now, we use verify_signature=False but this should be addressed in production
+            # TODO: Implement proper JWT signature verification using Azure AD JWKS endpoint
+            id_token_claims = jwt.decode(
+                id_token, 
+                options={"verify_signature": False},  # SECURITY: Should be True in production
+                # For production: use jwks_client to fetch Azure AD signing keys
+                # algorithms=["RS256"],
+                # audience=settings.azure_client_id,
+                # issuer=f"https://login.microsoftonline.com/{settings.azure_tenant_id or 'common'}/v2.0"
+            )
         except jwt.PyJWTError as error:
             logger.warning("Could not decode Azure ID token: %s", error)
 
