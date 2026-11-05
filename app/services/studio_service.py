@@ -286,14 +286,22 @@ def compute_classes_summary(
 
     class_metrics_map: dict[str, dict[str, Any]] = {}
     macro_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    confusion_matrix_obj = None
     try:
         from app.core.model_metrics import load_champion_model_metrics
+        from app.schemas.telemetry import StudioConfusionMatrix
 
         metrics_dict = load_champion_model_metrics()
         class_metrics_map = metrics_dict.get("class_metrics", {})
         macro_metrics["precision"] = float(metrics_dict.get("precision_macro", metrics_dict.get("macro_precision", 0.0)))
         macro_metrics["recall"] = float(metrics_dict.get("recall_macro", metrics_dict.get("macro_recall", 0.0)))
         macro_metrics["f1"] = float(metrics_dict.get("f1_macro", metrics_dict.get("macro_f1", 0.0)))
+        raw_cm = metrics_dict.get("confusion_matrix")
+        if raw_cm and isinstance(raw_cm, dict) and "labels" in raw_cm and "matrix" in raw_cm:
+            confusion_matrix_obj = StudioConfusionMatrix(
+                labels=[str(lbl) for lbl in raw_cm["labels"]],
+                matrix=[[float(cell) for cell in row] for row in raw_cm["matrix"]],
+            )
     except Exception:
         pass
 
@@ -386,4 +394,5 @@ def compute_classes_summary(
         macro_f1=round(macro_metrics["f1"], 4),
         daily_counts=daily_counts,
         classes=items,
+        confusion_matrix=confusion_matrix_obj,
     )

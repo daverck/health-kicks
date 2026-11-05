@@ -338,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
                     "precision_macro": float(package.get("metrics", {}).get("precision_macro", 0.0)),
                     "recall_macro": float(package.get("metrics", {}).get("recall_macro", 0.0)),
                     "class_metrics": package.get("metrics", {}).get("class_metrics", {}),
+                    "confusion_matrix": package.get("metrics", {}).get("confusion_matrix"),
                 },
             }
             json_target = Path(__file__).resolve().parent.parent / "app" / "core" / "model_metrics.json"

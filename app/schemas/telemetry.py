@@ -128,6 +128,13 @@ class StudioClassSummaryItem(StrictModel):
     support_windows: int = 0
 
 
+class StudioConfusionMatrix(StrictModel):
+    """Normalized confusion matrix for evaluated Edge AI classes."""
+
+    labels: list[str] = Field(default_factory=list)
+    matrix: list[list[float]] = Field(default_factory=list)
+
+
 class StudioClassesSummaryResponse(StrictModel):
     """Aggregated global overview across all activity classes."""
 
@@ -141,4 +148,5 @@ class StudioClassesSummaryResponse(StrictModel):
     macro_f1: float = 0.0
     daily_counts: list[StudioClassDailyCount] = Field(default_factory=list)
     classes: list[StudioClassSummaryItem] = Field(default_factory=list)
+    confusion_matrix: StudioConfusionMatrix | None = None
 
