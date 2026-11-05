@@ -2914,6 +2914,16 @@
             "title": "Classes",
             "type": "array"
           },
+          "confusion_matrix": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudioConfusionMatrix"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "daily_counts": {
             "items": {
               "$ref": "#/components/schemas/StudioClassDailyCount"
@@ -2965,6 +2975,31 @@
           "pending_sessions"
         ],
         "title": "StudioClassesSummaryResponse",
+        "type": "object"
+      },
+      "StudioConfusionMatrix": {
+        "additionalProperties": false,
+        "description": "Normalized confusion matrix for evaluated Edge AI classes.",
+        "properties": {
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "matrix": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Matrix",
+            "type": "array"
+          }
+        },
+        "title": "StudioConfusionMatrix",
         "type": "object"
       },
       "StudioDatasetStatsResponse": {
