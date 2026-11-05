@@ -89,7 +89,7 @@ def exchange_code_for_azure_user(
             # For now, we use verify_signature=False but this should be addressed in production
             # TODO: Implement proper JWT signature verification using Azure AD JWKS endpoint
             id_token_claims = jwt.decode(
-                id_token, 
+                id_token,
                 options={"verify_signature": False},  # SECURITY: Should be True in production
                 # For production: use jwks_client to fetch Azure AD signing keys
                 # algorithms=["RS256"],
