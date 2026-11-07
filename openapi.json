@@ -3438,7 +3438,7 @@
             "type": "number"
           },
           "label": {
-            "description": "Label d'activit\u00e9 (ex: walk, idle, fall_forward)",
+            "description": "Activity label (e.g. walk, idle, fall_forward)",
             "maxLength": 64,
             "minLength": 1,
             "title": "Label",
