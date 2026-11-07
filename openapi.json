@@ -4607,7 +4607,7 @@
             }
           },
           {
-            "description": "Filtre par type d'activit\u00e9 (ex: 'walk', 'run', ou 'falls' pour toutes les chutes)",
+            "description": "Filter by activity type (e.g. 'walk', 'run', or 'falls' for all falls)",
             "in": "query",
             "name": "event_type",
             "required": false,
@@ -4620,12 +4620,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filtre par type d'activit\u00e9 (ex: 'walk', 'run', ou 'falls' pour toutes les chutes)",
+              "description": "Filter by activity type (e.g. 'walk', 'run', or 'falls' for all falls)",
               "title": "Event Type"
             }
           },
           {
-            "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+            "description": "Start date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "start_date",
             "required": false,
@@ -4639,12 +4639,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+              "description": "Start date/time (inclusive, ISO 8601)",
               "title": "Start Date"
             }
           },
           {
-            "description": "Date/heure de fin (inclusive, ISO 8601)",
+            "description": "End date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "end_date",
             "required": false,
@@ -4658,7 +4658,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de fin (inclusive, ISO 8601)",
+              "description": "End date/time (inclusive, ISO 8601)",
               "title": "End Date"
             }
           },
@@ -4752,7 +4752,7 @@
             }
           },
           {
-            "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+            "description": "Start date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "start_date",
             "required": false,
@@ -4766,12 +4766,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+              "description": "Start date/time (inclusive, ISO 8601)",
               "title": "Start Date"
             }
           },
           {
-            "description": "Date/heure de fin (inclusive, ISO 8601)",
+            "description": "End date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "end_date",
             "required": false,
@@ -4785,7 +4785,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de fin (inclusive, ISO 8601)",
+              "description": "End date/time (inclusive, ISO 8601)",
               "title": "End Date"
             }
           },
@@ -4879,7 +4879,7 @@
             }
           },
           {
-            "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+            "description": "Start date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "start_date",
             "required": false,
@@ -4893,12 +4893,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+              "description": "Start date/time (inclusive, ISO 8601)",
               "title": "Start Date"
             }
           },
           {
-            "description": "Date/heure de fin (inclusive, ISO 8601)",
+            "description": "End date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "end_date",
             "required": false,
@@ -4912,7 +4912,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de fin (inclusive, ISO 8601)",
+              "description": "End date/time (inclusive, ISO 8601)",
               "title": "End Date"
             }
           },
@@ -5401,7 +5401,7 @@
             }
           },
           {
-            "description": "Filtrer par user_id num\u00e9rique ou pseudonyme sujet (d\u00e9pr\u00e9ci\u00e9 au profit de pseudonym)",
+            "description": "Filter by numeric user_id or subject pseudonym (deprecated in favor of pseudonym)",
             "in": "query",
             "name": "user_id",
             "required": false,
@@ -5414,12 +5414,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filtrer par user_id num\u00e9rique ou pseudonyme sujet (d\u00e9pr\u00e9ci\u00e9 au profit de pseudonym)",
+              "description": "Filter by numeric user_id or subject pseudonym (deprecated in favor of pseudonym)",
               "title": "User Id"
             }
           },
           {
-            "description": "Filtrer par pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
+            "description": "Filter by subject pseudonym SUBJ-XXXXXXXX (admin only)",
             "in": "query",
             "name": "pseudonym",
             "required": false,
@@ -5432,7 +5432,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filtrer par pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
+              "description": "Filter by subject pseudonym SUBJ-XXXXXXXX (admin only)",
               "title": "Pseudonym"
             }
           }
@@ -6567,7 +6567,7 @@
             }
           },
           {
-            "description": "Filtrer par pseudonyme de l'auteur (admin)",
+            "description": "Filter by author pseudonym (admin)",
             "in": "query",
             "name": "pseudonym",
             "required": false,
@@ -6580,12 +6580,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filtrer par pseudonyme de l'auteur (admin)",
+              "description": "Filter by author pseudonym (admin)",
               "title": "Pseudonym"
             }
           },
           {
-            "description": "Filtrer par statut de validation de la session",
+            "description": "Filter by session validation status",
             "in": "query",
             "name": "is_validated",
             "required": false,
@@ -6598,12 +6598,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filtrer par statut de validation de la session",
+              "description": "Filter by session validation status",
               "title": "Is Validated"
             }
           },
           {
-            "description": "Filtrer par session HITL (True) ou standard (False)",
+            "description": "Filter by HITL session (True) or standard (False)",
             "in": "query",
             "name": "is_hitl",
             "required": false,
@@ -6616,12 +6616,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filtrer par session HITL (True) ou standard (False)",
+              "description": "Filter by HITL session (True) or standard (False)",
               "title": "Is Hitl"
             }
           },
           {
-            "description": "Filtrer par classification ('edge_ai' ou 'research')",
+            "description": "Filter by classification ('edge_ai' or 'research')",
             "in": "query",
             "name": "classification",
             "required": false,
@@ -6634,12 +6634,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filtrer par classification ('edge_ai' ou 'research')",
+              "description": "Filter by classification ('edge_ai' or 'research')",
               "title": "Classification"
             }
           },
           {
-            "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+            "description": "Start date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "start_date",
             "required": false,
@@ -6653,12 +6653,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de d\u00e9but (inclusive, ISO 8601)",
+              "description": "Start date/time (inclusive, ISO 8601)",
               "title": "Start Date"
             }
           },
           {
-            "description": "Date/heure de fin (inclusive, ISO 8601)",
+            "description": "End date/time (inclusive, ISO 8601)",
             "in": "query",
             "name": "end_date",
             "required": false,
@@ -6672,7 +6672,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Date/heure de fin (inclusive, ISO 8601)",
+              "description": "End date/time (inclusive, ISO 8601)",
               "title": "End Date"
             }
           },
