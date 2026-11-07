@@ -76,9 +76,9 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
     def list_activities(
         device_id: str,
         user: CurrentUser,
-        event_type: str | None = Query(None, description="Filtre par type d'activité (ex: 'walk', 'run', ou 'falls' pour toutes les chutes)"),
-        start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
-        end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
+        event_type: str | None = Query(None, description="Filter by activity type (e.g. 'walk', 'run', or 'falls' for all falls)"),
+        start_date: datetime | None = Query(None, description="Start date/time (inclusive, ISO 8601)"),
+        end_date: datetime | None = Query(None, description="End date/time (inclusive, ISO 8601)"),
         cursor: str | None = Query(None, description="Opaque cursor (timestamp_utc|id) for keyset pagination"),
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),
@@ -197,8 +197,8 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
     def list_haptic_history(
         device_id: str,
         user: CurrentUser,
-        start_date: datetime | None = Query(None, description="Date/heure de début (inclusive, ISO 8601)"),
-        end_date: datetime | None = Query(None, description="Date/heure de fin (inclusive, ISO 8601)"),
+        start_date: datetime | None = Query(None, description="Start date/time (inclusive, ISO 8601)"),
+        end_date: datetime | None = Query(None, description="End date/time (inclusive, ISO 8601)"),
         cursor: str | None = Query(None, description="Opaque cursor (timestamp_utc|id) for keyset pagination"),
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=100),

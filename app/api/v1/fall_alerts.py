@@ -282,11 +282,11 @@ def create_fall_alerts_router(
         end_date: datetime | None = Query(default=None),
         user_id: str | None = Query(
             default=None,
-            description="Filtrer par user_id numérique ou pseudonyme sujet (déprécié au profit de pseudonym)",
+            description="Filter by numeric user_id or subject pseudonym (deprecated in favor of pseudonym)",
         ),
         pseudonym: str | None = Query(
             default=None,
-            description="Filtrer par pseudonyme sujet SUBJ-XXXXXXXX (admin uniquement)",
+            description="Filter by subject pseudonym SUBJ-XXXXXXXX (admin only)",
         ),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
