@@ -523,7 +523,7 @@ def test_unauthenticated_rejected(client) -> None:
 
 
 def test_idle_session_lifecycle_and_filtering(client, user_a, mock_telemetry_service, db_session) -> None:
-    """Vérifie qu'une session avec le label 'idle' est acceptée, filtrée, paginée et modifiable."""
+    """Verify that a session with label 'idle' is accepted, filtered, paginated, and updatable."""
     sess_id = uuid.uuid4()
     s = StudioSession(
         uuid=sess_id,

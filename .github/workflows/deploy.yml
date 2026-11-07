@@ -42,38 +42,38 @@ jobs:
     concurrency:
       group: backend-ec2-deployment
       cancel-in-progress: false
-    # Déploiement automatique après succès des tests sur la branche main
+    # Automatic deployment after tests succeed on the main branch
     if: github.ref == 'refs/heads/main'
     # if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: AWS
 
     steps:
-      - name: Checkout du code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configuration des identifiants AWS
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Connexion à Amazon ECR
+      - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build et Push de l'image Docker sur ECR
+      - name: Build and push Docker image to ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Build de l'image et tag en latest + commit SHA
+          # Build image and tag as latest + commit SHA
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Déploiement SSH sur l'instance EC2
+      - name: SSH Deployment to EC2 instance
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -84,14 +84,14 @@ jobs:
 
             IMAGE_URI=${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-            # Connexion à ECR depuis l'EC2
+            # Log in to ECR from EC2
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-            # Nettoyage préventif des conteneurs arrêtés et des images inutilisées (y compris taguées)
+            # Preventive cleanup of stopped containers and unused images (including tagged)
             docker container prune -f
             docker image prune -a -f
 
-            # Récupération de l'image construite pour ce commit
+            # Pull newly built image for this commit
             attempt=1
             max_attempts=3
             until docker pull "$IMAGE_URI"; do
@@ -107,11 +107,11 @@ jobs:
               attempt=$((attempt + 1))
             done
 
-            # Arrêt et suppression de l'ancien conteneur s'il existe
+            # Stop and remove previous container if exists
             docker stop healthkicks-backend || true
             docker rm healthkicks-backend || true
 
-            # Relancement du conteneur avec les variables IAM
+            # Restart container with IAM variables
             docker run -d \
               --name healthkicks-backend \
               --restart unless-stopped \
@@ -119,5 +119,5 @@ jobs:
               --env-file /home/ubuntu/.env \
               "$IMAGE_URI"
 
-            # Nettoyage de l'ancienne image remplacée pour garder le disque propre
+            # Cleanup replaced old image to keep disk space clean
             docker image prune -a -f

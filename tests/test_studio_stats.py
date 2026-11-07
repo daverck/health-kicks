@@ -120,7 +120,7 @@ def test_get_dataset_stats_aggregates_and_deduplicates(telemetry_service, mock_t
 
 
 def test_get_dataset_stats_with_idle_label(telemetry_service, mock_table) -> None:
-    """Vérifie que le label 'idle' est correctement comptabilisé dans les statistiques."""
+    """Verify that the 'idle' label is correctly tallied in dataset statistics."""
     items = [
         {"session_id": "sess-idle-1", "label": "idle"},
         {"session_id": "sess-idle-1", "label": "idle"},
