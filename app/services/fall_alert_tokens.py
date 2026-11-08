@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 from datetime import UTC, datetime
-from typing import Any
 
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
