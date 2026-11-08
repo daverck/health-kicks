@@ -31,7 +31,11 @@ class StudioSessionSummary(StrictModel):
 
     uuid: UUID
     device_id: str
-    user_id: int
+    user_id: int = Field(
+        ...,
+        description="Numeric user ID (deprecated in favor of author_pseudonym)",
+        json_schema_extra={"deprecated": True},
+    )
     user_email: str | None = None
     author_name: str | None = None
     subject_pseudonym: str | None = None

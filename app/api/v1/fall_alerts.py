@@ -283,6 +283,7 @@ def create_fall_alerts_router(
         user_id: str | None = Query(
             default=None,
             description="Filter by numeric user_id or subject pseudonym (deprecated in favor of pseudonym)",
+            deprecated=True,
         ),
         pseudonym: str | None = Query(
             default=None,
