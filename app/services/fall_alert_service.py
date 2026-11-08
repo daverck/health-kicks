@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
@@ -41,12 +39,8 @@ from app.schemas.fall_alert import (
     FallAlertSummary,
 )
 from app.services.aws_iot_service import AWSIoTPublishService
-from app.services.email_service import (
-    SmtpEmailChannel,
-    build_fall_alert_sms_body,
-    build_test_sms_body,
-    format_paris_datetime,
-)
+from app.services.email_service import SmtpEmailChannel
+from app.services.fall_alert_notifier import dispatch_test_email_and_sms
 from app.services.fall_alert_resolution import (
     _apply_location_to_alert,
     _publish_status_safe,
@@ -57,12 +51,18 @@ from app.services.fall_alert_tokens import (
     ACK_TOKEN_SALT,
     AckTokenError,
     _ensure_utc,
-    _iso_utc,
     _mask_last_name,
     _mask_phone,
     build_ack_url,
     generate_ack_token,
     verify_ack_token,
+)
+from app.services.fall_alert_workflow import (
+    ACTIVE_ALERT_STATES,
+    acknowledge_fall_alert,
+    get_alert_and_notification_for_token,
+    process_due_fall_alerts,
+    start_or_advance_escalation,
 )
 
 __all__ = [
@@ -90,209 +90,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger("healthkicks.fall_alert")
-
-ACTIVE_ALERT_STATES = (FallAlertState.PENDING.value, FallAlertState.ESCALATING.value)
-
-
-def _start_or_advance_escalation(
-    db: Session,
-    alert: FallAlert,
-    now_utc: datetime,
-    email_channel: SmtpEmailChannel,
-    iot_publisher: AWSIoTPublishService | None,
-    cfg: Settings,
-) -> None:
-    """Transition PENDING -> ESCALATING/EXHAUSTED or advance ESCALATING to the next contact."""
-    if alert.state == FallAlertState.PENDING.value:
-        contacts = (
-            db.query(AlertContact)
-            .filter(AlertContact.user_id == alert.user_id)
-            .order_by(AlertContact.priority.asc(), AlertContact.id.asc())
-            .all()
-        )
-        snapshot = [
-            {
-                "contact_id": c.id,
-                "first_name": c.first_name,
-                "last_name": c.last_name,
-                "email": c.email,
-                "phone": c.phone,
-                "rank": idx,
-            }
-            for idx, c in enumerate(contacts, start=1)
-        ]
-        alert.contacts_snapshot_json = json.dumps(snapshot)
-
-        if not snapshot:
-            alert.state = FallAlertState.EXHAUSTED.value
-            alert.closed_at_utc = now_utc
-            alert.next_action_at_utc = None
-            alert.updated_at_utc = now_utc
-            db.commit()
-            db.refresh(alert)
-            _publish_status_safe(db, alert, iot_publisher)
-            return
-
-        alert.state = FallAlertState.ESCALATING.value
-        alert.escalation_started_at_utc = now_utc
-        alert.current_contact_rank = 0
-        alert.updated_at_utc = now_utc
-        db.flush()
-
-    if alert.state != FallAlertState.ESCALATING.value:
-        return
-
-    try:
-        snapshot_list: list[dict[str, Any]] = json.loads(alert.contacts_snapshot_json or "[]")
-    except Exception:
-        snapshot_list = []
-
-    total_contacts = len(snapshot_list)
-    next_rank = alert.current_contact_rank + 1
-
-    user = alert.user or db.query(User).filter(User.id == alert.user_id).first()
-    patient_name = (
-        (user.name if user and user.name else (user.email if user else None))
-        or f"Patient #{alert.user_id}"
-    )
-
-    while next_rank <= total_contacts:
-        contact_entry = snapshot_list[next_rank - 1]
-        contact_phone: str | None = contact_entry.get("phone")
-
-        # 1. Email notification channel
-        email_notif = FallAlertNotification(
-            alert_id=alert.id,
-            rank=next_rank,
-            channel="email",
-            contact_id=contact_entry.get("contact_id"),
-            contact_first_name=contact_entry["first_name"],
-            contact_last_name=contact_entry["last_name"],
-            contact_email=contact_entry["email"],
-            contact_phone=contact_phone,
-            status=FallAlertNotificationStatus.SENT.value,
-            sent_at_utc=now_utc,
-        )
-        db.add(email_notif)
-        db.flush()
-
-        email_ack_url = build_ack_url(alert.id, email_notif.id, config=cfg)
-        email_sent = False
-        try:
-            email_channel.send_fall_alert_email(
-                recipient_email=contact_entry["email"],
-                contact_first_name=contact_entry["first_name"],
-                contact_last_name=contact_entry["last_name"],
-                patient_name=patient_name,
-                device_id=alert.device_id,
-                event_type=alert.event_type,
-                confidence_score=alert.confidence_score,
-                detected_at_utc=_ensure_utc(alert.detected_at_utc) or now_utc,
-                rank=next_rank,
-                total_contacts=total_contacts,
-                ack_url=email_ack_url,
-                lat=alert.lat,
-                lon=alert.lon,
-                accuracy_m=alert.accuracy_m,
-            )
-            email_notif.status = FallAlertNotificationStatus.SENT.value
-            email_notif.sent_at_utc = now_utc
-            email_sent = True
-        except Exception as exc:
-            logger.error(
-                "SMTP escalation failed for alert %s rank %d (%s): %s",
-                alert.id,
-                next_rank,
-                contact_entry["email"],
-                exc,
-            )
-            email_notif.status = FallAlertNotificationStatus.FAILED.value
-            email_notif.sent_at_utc = now_utc
-            email_notif.error_message = str(exc)[:512]
-            db.flush()
-
-        # 2. SMS notification channel (when phone is configured on this contact)
-        sms_notif: FallAlertNotification | None = None
-        sms_command: dict[str, Any] | None = None
-        if contact_phone:
-            sms_notif = FallAlertNotification(
-                alert_id=alert.id,
-                rank=next_rank,
-                channel="sms",
-                contact_id=contact_entry.get("contact_id"),
-                contact_first_name=contact_entry["first_name"],
-                contact_last_name=contact_entry["last_name"],
-                contact_email=contact_entry["email"],
-                contact_phone=contact_phone,
-                status=FallAlertNotificationStatus.PENDING_SMS.value,
-                sent_at_utc=now_utc,
-            )
-            db.add(sms_notif)
-            db.flush()
-
-            sms_ack_url = build_ack_url(alert.id, sms_notif.id, config=cfg)
-            maps_url = (
-                f"https://www.google.com/maps?q={alert.lat:.6f},{alert.lon:.6f}"
-                if (alert.lat is not None and alert.lon is not None)
-                else None
-            )
-            detected_at_str = format_paris_datetime(_ensure_utc(alert.detected_at_utc) or now_utc)
-            sms_body = build_fall_alert_sms_body(
-                patient_name=patient_name,
-                detected_at_str=detected_at_str,
-                ack_url=sms_ack_url,
-                maps_url=maps_url,
-            )
-            sms_command = {
-                "notification_id": sms_notif.id,
-                "contact_id": contact_entry.get("contact_id"),
-                "contact_first_name": contact_entry["first_name"],
-                "recipient_phone": contact_phone,
-                "message": sms_body,
-                "is_test": False,
-            }
-
-        # 3. Evaluate whether this contact rank was reached via at least one channel
-        if email_sent or sms_command is not None:
-            alert.current_contact_rank = next_rank
-            alert.next_action_at_utc = now_utc + timedelta(
-                seconds=cfg.fall_alert_escalation_step_sec
-            )
-            alert.updated_at_utc = now_utc
-            db.commit()
-            db.refresh(alert)
-
-            mqtt_ok = _publish_status_safe(
-                db,
-                alert,
-                iot_publisher,
-                sms_command=sms_command,
-            )
-            if sms_notif is not None and not mqtt_ok:
-                sms_notif.status = FallAlertNotificationStatus.FAILED.value
-                sms_notif.error_message = "MQTT downlink publish failed"
-                db.commit()
-                db.refresh(alert)
-                if not email_sent:
-                    # Neither email nor SMS succeeded for this contact -> try next contact immediately
-                    next_rank += 1
-                    continue
-            return
-
-        # Both email failed and no phone configured -> immediately try next contact
-        alert.current_contact_rank = next_rank
-        alert.updated_at_utc = now_utc
-        db.flush()
-        next_rank += 1
-
-    # All contacts have been notified and the last step expired (or all failed)
-    alert.state = FallAlertState.EXHAUSTED.value
-    alert.closed_at_utc = now_utc
-    alert.next_action_at_utc = None
-    alert.updated_at_utc = now_utc
-    db.commit()
-    db.refresh(alert)
-    _publish_status_safe(db, alert, iot_publisher)
 
 
 def ingest_fall_alert_event(
@@ -429,7 +226,7 @@ def ingest_fall_alert_event(
             db.flush()
 
         if alert.state == FallAlertState.PENDING.value:
-            _start_or_advance_escalation(
+            start_or_advance_escalation(
                 db=db,
                 alert=alert,
                 now_utc=now,
@@ -542,117 +339,6 @@ def ingest_fall_alert_event(
         state=alert.state,
         duplicate=True,
     )
-
-
-def process_due_fall_alerts(
-    db: Session,
-    *,
-    now_utc: datetime | None = None,
-    email_channel: SmtpEmailChannel | None = None,
-    iot_publisher: AWSIoTPublishService | None = None,
-    config: Settings | None = None,
-) -> int:
-    """Process all PENDING and ESCALATING alerts whose next_action_at_utc has elapsed.
-
-    Returns the number of due alerts processed in this tick.
-    """
-    cfg = config or get_settings()
-    now = _ensure_utc(now_utc) or datetime.now(UTC)
-    channel = email_channel or SmtpEmailChannel(config=cfg)
-
-    query = (
-        db.query(FallAlert)
-        .filter(
-            FallAlert.state.in_(ACTIVE_ALERT_STATES),
-            FallAlert.next_action_at_utc.is_not(None),
-            FallAlert.next_action_at_utc <= now,
-        )
-        .order_by(FallAlert.next_action_at_utc.asc(), FallAlert.id.asc())
-    )
-
-    bind = db.get_bind()
-    dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
-    if dialect_name == "postgresql":
-        query = query.with_for_update(of=FallAlert, skip_locked=True)
-
-    due_alerts = query.all()
-    processed_count = 0
-    for alert in due_alerts:
-        try:
-            _start_or_advance_escalation(
-                db=db,
-                alert=alert,
-                now_utc=now,
-                email_channel=channel,
-                iot_publisher=iot_publisher,
-                cfg=cfg,
-            )
-            processed_count += 1
-        except Exception:
-            logger.exception("Error processing due fall alert id=%s", alert.id)
-            db.rollback()
-
-    return processed_count
-
-
-def get_alert_and_notification_for_token(
-    db: Session,
-    token: str,
-    *,
-    config: Settings | None = None,
-) -> tuple[FallAlert, FallAlertNotification]:
-    """Validate token and load the corresponding FallAlert and FallAlertNotification without side effects."""
-    alert_id, notification_id = verify_ack_token(token, config=config)
-    alert = db.query(FallAlert).filter(FallAlert.id == alert_id).one_or_none()
-    if alert is None:
-        raise AckTokenError("Alerte de chute introuvable.", expired=False)
-    notif = (
-        db.query(FallAlertNotification)
-        .filter(
-            FallAlertNotification.id == notification_id,
-            FallAlertNotification.alert_id == alert.id,
-        )
-        .one_or_none()
-    )
-    if notif is None:
-        raise AckTokenError("Notification d'alerte introuvable.", expired=False)
-    return alert, notif
-
-
-def acknowledge_fall_alert(
-    db: Session,
-    token: str,
-    *,
-    now_utc: datetime | None = None,
-    iot_publisher: AWSIoTPublishService | None = None,
-    config: Settings | None = None,
-) -> tuple[FallAlert, FallAlertNotification, bool]:
-    """Acknowledge a fall alert from a verified signed token.
-
-    Returns (alert, notification, transitioned_to_acknowledged).
-    """
-    now = _ensure_utc(now_utc) or datetime.now(UTC)
-    alert, notif = get_alert_and_notification_for_token(db, token, config=config)
-
-    if alert.state in (FallAlertState.ESCALATING.value, FallAlertState.EXHAUSTED.value):
-        alert.state = FallAlertState.ACKNOWLEDGED.value
-        alert.acknowledged_by_first_name = notif.contact_first_name
-        alert.acknowledged_by_last_name = notif.contact_last_name
-        alert.acknowledged_by_contact_id = notif.contact_id
-        alert.closed_at_utc = now
-        alert.next_action_at_utc = None
-        alert.updated_at_utc = now
-
-        notif.status = FallAlertNotificationStatus.ACKNOWLEDGED.value
-        notif.acknowledged_at_utc = now
-
-        db.commit()
-        db.refresh(alert)
-        db.refresh(notif)
-        _publish_status_safe(db, alert, iot_publisher)
-        return alert, notif, True
-
-    return alert, notif, False
 
 
 # --- Emergency Contacts CRUD ---
@@ -868,74 +554,13 @@ def send_test_email_to_contact(
             detail="Emergency contact not found",
         )
 
-    cfg = config or get_settings()
-    channel = email_channel or SmtpEmailChannel(config=cfg)
-    patient_name = user.name or user.email or f"Utilisateur #{user.id}"
-
-    try:
-        channel.send_test_email(
-            recipient_email=contact.email,
-            contact_first_name=contact.first_name,
-            contact_last_name=contact.last_name,
-            patient_name=patient_name,
-            priority=contact.priority,
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to send test email to contact %s (%s): %s", contact.id, contact.email, exc
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to send test email via SMTP server",
-        ) from exc
-
-    now = datetime.now(UTC)
-    contact.last_test_email_at = now
-    contact.updated_at = now
-    db.commit()
-    db.refresh(contact)
-
-    sms_dispatched = False
-    if contact.phone and iot_publisher is not None:
-        sms_body = build_test_sms_body(
-            patient_name=patient_name,
-            priority=contact.priority,
-        )
-        test_payload: dict[str, Any] = {
-            "event_id": f"test-sms-{contact.id}-{int(now.timestamp())}",
-            "alert_id": 0,
-            "state": "TEST_SMS",
-            "current_contact_rank": contact.priority,
-            "contacts_total": 1,
-            "acknowledged_by": None,
-            "cancel_reason": None,
-            "next_action_at": None,
-            "updated_at": _iso_utc(now),
-            "sms_command": {
-                "notification_id": None,
-                "contact_id": contact.id,
-                "contact_first_name": contact.first_name,
-                "recipient_phone": contact.phone,
-                "message": sms_body,
-                "is_test": True,
-            },
-        }
-        try:
-            target_sub = str(user.uuid) if getattr(user, "uuid", None) else str(user.id)
-            sms_dispatched = bool(iot_publisher.publish_fall_alert_status(target_sub, test_payload))
-        except Exception:
-            logger.exception(
-                "Failed to publish test SMS command for contact %s (user %s)",
-                contact.id,
-                user.id,
-            )
-            sms_dispatched = False
-
-    return AlertContactTestEmailResponse(
-        status="sent",
-        contact_id=contact.id,
-        sent_at=now,
-        sms_dispatched=sms_dispatched,
+    return dispatch_test_email_and_sms(
+        db,
+        user,
+        contact,
+        email_channel=email_channel,
+        iot_publisher=iot_publisher,
+        config=config,
     )
 
 
