@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -48,231 +47,27 @@ from app.services.email_service import (
     build_test_sms_body,
     format_paris_datetime,
 )
+from app.services.fall_alert_resolution import (
+    _apply_location_to_alert,
+    _publish_status_safe,
+    build_downlink_status_payload,
+    resolve_user_for_ingest,
+)
+from app.services.fall_alert_tokens import (
+    ACK_TOKEN_SALT,
+    AckTokenError,
+    _ensure_utc,
+    _iso_utc,
+    _mask_last_name,
+    _mask_phone,
+    build_ack_url,
+    generate_ack_token,
+    verify_ack_token,
+)
 
 logger = logging.getLogger("healthkicks.fall_alert")
 
-ACK_TOKEN_SALT = "healthkicks-fall-alert-ack-v1"
 ACTIVE_ALERT_STATES = (FallAlertState.PENDING.value, FallAlertState.ESCALATING.value)
-
-
-class AckTokenError(Exception):
-    """Raised when a fall alert acknowledgment token is invalid or expired."""
-
-    def __init__(self, message: str, *, expired: bool = False) -> None:
-        super().__init__(message)
-        self.message = message
-        self.expired = expired
-
-
-def _ensure_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
-
-
-def _iso_utc(dt: datetime | None) -> str | None:
-    norm = _ensure_utc(dt)
-    if norm is None:
-        return None
-    return norm.isoformat().replace("+00:00", "Z")
-
-
-def _mask_last_name(last_name: str | None) -> str:
-    if not last_name:
-        return ""
-    cleaned = last_name.strip()
-    return f"{cleaned[0].upper()}." if cleaned else ""
-
-
-def _mask_phone(phone: str | None) -> str | None:
-    if not phone:
-        return None
-    cleaned = phone.strip()
-    if not cleaned:
-        return None
-    if len(cleaned) <= 4:
-        return "*" * len(cleaned)
-    prefix_len = 3 if cleaned.startswith("+") else 2
-    if len(cleaned) <= prefix_len + 2:
-        return cleaned[:1] + "*" * (len(cleaned) - 2) + cleaned[-1:]
-    return f"{cleaned[:prefix_len]}{'*' * (len(cleaned) - prefix_len - 2)}{cleaned[-2:]}"
-
-
-def generate_ack_token(
-    alert_id: int,
-    notification_id: int,
-    config: Settings | None = None,
-) -> str:
-    """Create an HMAC-signed timed token for acknowledging a fall alert."""
-    cfg = config or get_settings()
-    serializer = URLSafeTimedSerializer(
-        secret_key=cfg.fall_alert_ack_secret,
-        salt=ACK_TOKEN_SALT,
-    )
-    return str(serializer.dumps({"a": int(alert_id), "n": int(notification_id)}))
-
-
-def verify_ack_token(
-    token: str,
-    config: Settings | None = None,
-) -> tuple[int, int]:
-    """Verify signature and TTL of an acknowledgment token, returning (alert_id, notification_id)."""
-    if not token or not token.strip():
-        raise AckTokenError("Jeton de prise en charge manquant.", expired=False)
-    cfg = config or get_settings()
-    serializer = URLSafeTimedSerializer(
-        secret_key=cfg.fall_alert_ack_secret,
-        salt=ACK_TOKEN_SALT,
-    )
-    try:
-        data = serializer.loads(token.strip(), max_age=cfg.fall_alert_ack_token_ttl_sec)
-    except SignatureExpired as exc:
-        raise AckTokenError(
-            "Ce lien de prise en charge a expiré (validité maximale : 2 heures).",
-            expired=True,
-        ) from exc
-    except BadSignature as exc:
-        raise AckTokenError(
-            "Ce lien de prise en charge est invalide ou altéré.",
-            expired=False,
-        ) from exc
-
-    if not isinstance(data, dict) or "a" not in data or "n" not in data:
-        raise AckTokenError("Structure de jeton invalide.", expired=False)
-    try:
-        return int(data["a"]), int(data["n"])
-    except (TypeError, ValueError) as exc:
-        raise AckTokenError("Identifiants de jeton invalides.", expired=False) from exc
-
-
-def build_ack_url(
-    alert_id: int,
-    notification_id: int,
-    config: Settings | None = None,
-) -> str:
-    """Build the full public URL for the emergency contact acknowledgment page on the frontend."""
-    cfg = config or get_settings()
-    token = generate_ack_token(alert_id, notification_id, config=cfg)
-    base = cfg.frontend_url.rstrip("/")
-    return f"{base}/fall-alerts/ack?token={token}"
-
-
-def build_downlink_status_payload(
-    db: Session,
-    alert: FallAlert,
-    *,
-    sms_command: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build the MQTT downlink payload for healthkicks/v1/users/{user_id}/fall-alert/status."""
-    contacts_total = 0
-    if alert.contacts_snapshot_json:
-        try:
-            contacts_total = len(json.loads(alert.contacts_snapshot_json))
-        except Exception:
-            contacts_total = 0
-    else:
-        contacts_total = (
-            db.query(func.count(AlertContact.id))
-            .filter(AlertContact.user_id == alert.user_id)
-            .scalar()
-            or 0
-        )
-
-    acknowledged_by: dict[str, str] | None = None
-    if alert.acknowledged_by_first_name:
-        acknowledged_by = {
-            "first_name": alert.acknowledged_by_first_name,
-            "last_name": alert.acknowledged_by_last_name or "",
-        }
-
-    payload: dict[str, Any] = {
-        "event_id": alert.event_id,
-        "alert_id": alert.id,
-        "state": alert.state,
-        "current_contact_rank": alert.current_contact_rank,
-        "contacts_total": int(contacts_total),
-        "acknowledged_by": acknowledged_by,
-        "cancel_reason": alert.cancel_reason,
-        "next_action_at": _iso_utc(alert.next_action_at_utc),
-        "updated_at": _iso_utc(alert.updated_at_utc or datetime.now(UTC)),
-    }
-    if sms_command is not None:
-        payload["sms_command"] = sms_command
-    return payload
-
-
-def _publish_status_safe(
-    db: Session,
-    alert: FallAlert,
-    iot_publisher: AWSIoTPublishService | None,
-    *,
-    sms_command: dict[str, Any] | None = None,
-) -> bool:
-    if iot_publisher is None:
-        return False
-    try:
-        payload = build_downlink_status_payload(db, alert, sms_command=sms_command)
-        user = alert.user or db.query(User).filter(User.id == alert.user_id).first()
-        target_sub = str(user.uuid) if (user and getattr(user, "uuid", None)) else str(alert.user_id)
-        return bool(iot_publisher.publish_fall_alert_status(target_sub, payload))
-    except Exception:
-        logger.exception("Failed to publish downlink fall alert status for alert %s", alert.id)
-        return False
-
-
-def resolve_user_for_ingest(db: Session, raw_user_id: int | str | uuid.UUID) -> User:
-    """Resolve user from UUID, integer ID, numeric string, SSO subject, or email."""
-    user: User | None = None
-    if isinstance(raw_user_id, uuid.UUID):
-        user = db.query(User).filter(User.uuid == raw_user_id).first()
-    elif isinstance(raw_user_id, int):
-        user = db.query(User).filter(User.id == raw_user_id).first()
-    elif isinstance(raw_user_id, str):
-        cleaned = raw_user_id.strip()
-        try:
-            val_uuid = uuid.UUID(cleaned)
-            user = db.query(User).filter(User.uuid == val_uuid).first()
-        except (ValueError, TypeError, AttributeError):
-            pass
-
-        if user is None and cleaned.isdigit():
-            try:
-                user = db.query(User).filter(User.id == int(cleaned)).first()
-            except (ValueError, TypeError):
-                pass
-
-        if user is None:
-            user = (
-                db.query(User)
-                .filter(
-                    (User.google_sub == cleaned)
-                    | (User.azure_sub == cleaned)
-                    | (User.email == cleaned)
-                )
-                .first()
-            )
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User '{raw_user_id}' not found",
-        )
-    return user
-
-
-def _apply_location_to_alert(alert: FallAlert, location: Any) -> None:
-    if location is None:
-        return
-    alert.lat = location.lat
-    alert.lon = location.lon
-    alert.accuracy_m = location.accuracy_m
-    if location.captured_at is not None:
-        alert.location_captured_at_utc = datetime.fromtimestamp(
-            location.captured_at / 1000.0, tz=UTC
-        )
-    elif alert.location_captured_at_utc is None:
-        alert.location_captured_at_utc = datetime.now(UTC)
 
 
 def _start_or_advance_escalation(
