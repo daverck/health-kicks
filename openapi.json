@@ -3166,6 +3166,8 @@
             "title": "User Email"
           },
           "user_id": {
+            "deprecated": true,
+            "description": "Numeric user ID (deprecated in favor of author_pseudonym)",
             "title": "User Id",
             "type": "integer"
           },
@@ -3328,6 +3330,8 @@
             "title": "User Email"
           },
           "user_id": {
+            "deprecated": true,
+            "description": "Numeric user ID (deprecated in favor of author_pseudonym)",
             "title": "User Id",
             "type": "integer"
           },
@@ -5401,6 +5405,7 @@
             }
           },
           {
+            "deprecated": true,
             "description": "Filter by numeric user_id or subject pseudonym (deprecated in favor of pseudonym)",
             "in": "query",
             "name": "user_id",
@@ -5414,6 +5419,7 @@
                   "type": "null"
                 }
               ],
+              "deprecated": true,
               "description": "Filter by numeric user_id or subject pseudonym (deprecated in favor of pseudonym)",
               "title": "User Id"
             }
