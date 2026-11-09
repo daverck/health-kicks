@@ -13,7 +13,7 @@ from app.schemas.fall_alert import FallAlertIngestPayload, FallAlertIngestRespon
 from app.schemas.internal import DevicePresencePayload, DevicePresenceResponse
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.device_service import (
-    handle_user_lwt_disconnect,
+    disconnect_user_devices_on_lwt,
     update_single_device_presence,
 )
 from app.services.email_service import SmtpEmailChannel
@@ -41,20 +41,17 @@ def create_internal_router(
         db: Session = Depends(get_db),
     ) -> DevicePresenceResponse:
         """Update device connection status and last seen timestamp from IoT lifecycle events."""
-        norm_status = payload.effective_state
-        if norm_status not in ("online", "connected", "offline", "disconnected"):
+        if not payload.is_valid_state:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid status '{payload.effective_state}'. Expected 'online', 'offline', 'connected', or 'disconnected'.",
             )
 
-        is_online = norm_status in ("online", "connected")
-
         if payload.device_id:
             device = update_single_device_presence(
                 db=db,
                 device_id=payload.device_id,
-                is_online=is_online,
+                is_online=payload.is_online,
                 timestamp=payload.timestamp,
             )
             return DevicePresenceResponse(
@@ -64,7 +61,7 @@ def create_internal_router(
             )
 
         # LWT user-level bulk disconnect
-        handle_user_lwt_disconnect(db=db, user_identifier=payload.user_id)
+        disconnect_user_devices_on_lwt(db=db, user_identifier=payload.user_id)
         return DevicePresenceResponse(
             status="ok",
             device_id=None,

@@ -393,7 +393,7 @@ def update_single_device_presence(
     return device
 
 
-def handle_user_lwt_disconnect(db: Session, user_identifier: int | str | None) -> list[str]:
+def disconnect_user_devices_on_lwt(db: Session, user_identifier: int | str | None) -> list[str]:
     """Mark all devices owned by the identified user as offline upon MQTT LWT disconnect."""
     user = resolve_user_by_identifier(db, user_identifier)
     if user is None:
@@ -421,4 +421,8 @@ def handle_user_lwt_disconnect(db: Session, user_identifier: int | str | None) -
     db.commit()
     logger.info("Relayed user LWT presence update: user_id=%s, state=offline", user_identifier)
     return device_ids
+
+
+# Backwards compatibility alias
+handle_user_lwt_disconnect = disconnect_user_devices_on_lwt
 

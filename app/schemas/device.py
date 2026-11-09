@@ -137,12 +137,19 @@ class DevicePresencePayload(StrictModel):
 
 
     @property
-
     def effective_state(self) -> str:
-
         val = self.state or self.status or "offline"
-
         return val.lower().strip()
+
+    @property
+    def is_online(self) -> bool:
+        """Return True if the effective state represents an online/connected presence state."""
+        return self.effective_state in ("online", "connected")
+
+    @property
+    def is_valid_state(self) -> bool:
+        """Validate if the effective state is one of the recognized presence states."""
+        return self.effective_state in ("online", "connected", "offline", "disconnected")
 
 
 
