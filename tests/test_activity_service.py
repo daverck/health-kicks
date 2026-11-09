@@ -7,7 +7,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import ActivityEvent, Base, Device, DeviceOwnership, HapticLog, User, UserRole
+from app.schemas.cloud import HapticTrigger
 from app.services.activity_service import (
+    dispatch_haptic_command,
     query_activity_events,
     query_haptic_logs,
     resolve_target_device_ids,
@@ -126,3 +128,53 @@ def test_query_haptic_logs_service(db_session, sample_data) -> None:
     assert len(page_haptic.items) == 1
     assert page_haptic.items[0].intensity == 80
     assert cursor is None
+
+
+class DummyPublisher:
+    def __init__(self, succeeds: bool = True):
+        self.succeeds = succeeds
+        self.calls = []
+
+    def publish_haptic(self, device_id: str, command: HapticTrigger) -> bool:
+        self.calls.append((device_id, command))
+        return self.succeeds
+
+
+def test_dispatch_haptic_command_service_success(db_session) -> None:
+    pub = DummyPublisher(succeeds=True)
+    res = dispatch_haptic_command(
+        db=db_session,
+        publisher=pub,
+        device_id="dev-new",
+        command=HapticTrigger(intensity=90, duration_ms=500),
+    )
+    assert res["status"] == "command_sent"
+    assert res["device_id"] == "dev-new"
+    assert res["intensity"] == 90
+    assert res["duration_ms"] == 500
+
+    # Device auto-created
+    dev = db_session.query(Device).filter_by(device_id="dev-new").one_or_none()
+    assert dev is not None
+
+    # HapticLog persisted
+    log = db_session.query(HapticLog).filter_by(device_id="dev-new").first()
+    assert log is not None
+    assert log.intensity == 90
+    assert log.duration_ms == 500
+    assert log.triggered_by_user is True
+
+
+def test_dispatch_haptic_command_service_publish_failed(db_session) -> None:
+    from fastapi import HTTPException
+    pub = DummyPublisher(succeeds=False)
+    with pytest.raises(HTTPException) as exc_info:
+        dispatch_haptic_command(
+            db=db_session,
+            publisher=pub,
+            device_id="dev-fail",
+            command=HapticTrigger(intensity=50, duration_ms=200),
+        )
+    assert exc_info.value.status_code == 503
+    assert "AWS IoT publish unavailable" in exc_info.value.detail
+

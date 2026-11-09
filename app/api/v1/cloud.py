@@ -1,11 +1,10 @@
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
@@ -13,7 +12,6 @@ from app.core.config import settings
 from app.core.metrics import metrics_collector
 from app.core.rate_limit import rate_limit
 from app.db.database import get_db
-from app.db.models import Device, HapticLog
 from app.schemas.cloud import (
     ActivityEventPage,
     DatabasePoolStatus,
@@ -34,28 +32,19 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         "/devices/{device_id}/haptic/trigger",
         dependencies=[Depends(rate_limit("haptic_trigger", max_requests=10, window_seconds=60.0))],
     )
-    def trigger_haptic(device_id: str, command: HapticTrigger, user: CurrentUser, db: Session = Depends(get_db)) -> dict[str, str | int]:
+    def trigger_haptic(
+        device_id: str,
+        command: HapticTrigger,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> dict[str, str | int]:
         verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
-        device = db.query(Device).filter_by(device_id=device_id).one_or_none()
-        if device is None:
-            db.add(Device(device_id=device_id))
-        now = datetime.now(UTC)
-        try:
-            published = publisher.publish_haptic(device_id, command)
-            db.add(HapticLog(
-                device_id=device_id,
-                intensity=command.intensity,
-                duration_ms=command.duration_ms,
-                triggered_by_user=True,
-                triggered_at_utc=now,
-            ))
-            db.commit()
-        except SQLAlchemyError:
-            db.rollback()
-            raise HTTPException(status_code=500, detail="Unable to persist haptic command")
-        if not published:
-            raise HTTPException(status_code=503, detail="AWS IoT publish unavailable")
-        return {"status": "command_sent", "device_id": device_id, "intensity": command.intensity, "duration_ms": command.duration_ms}
+        return activity_service.dispatch_haptic_command(
+            db=db,
+            publisher=publisher,
+            device_id=device_id,
+            command=command,
+        )
 
     @router.get("/devices/{device_id}/events/activities", response_model=ActivityEventPage)
     def list_activities(

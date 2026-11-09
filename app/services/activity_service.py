@@ -1,8 +1,10 @@
 """Service layer for querying device activity events and haptic vibration logs."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
+from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.v1.utils import decode_cursor, encode_cursor, validate_and_normalize_date_range
@@ -12,7 +14,9 @@ from app.schemas.cloud import (
     ActivityEventResponse,
     HapticLogPage,
     HapticLogResponse,
+    HapticTrigger,
 )
+from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.device_service import verify_device_ownership
 
 
@@ -228,3 +232,45 @@ def query_haptic_logs(
         next_cursor=next_cursor,
     )
     return page_obj, next_cursor
+
+
+def dispatch_haptic_command(
+    db: Session,
+    publisher: AWSIoTPublishService,
+    device_id: str,
+    command: HapticTrigger,
+) -> dict[str, str | int]:
+    """Ensure device exists, publish haptic command to AWS IoT, and record in HapticLog."""
+    device = db.query(Device).filter_by(device_id=device_id).one_or_none()
+    if device is None:
+        db.add(Device(device_id=device_id))
+    now = datetime.now(UTC)
+    try:
+        published = publisher.publish_haptic(device_id, command)
+        db.add(
+            HapticLog(
+                device_id=device_id,
+                intensity=command.intensity,
+                duration_ms=command.duration_ms,
+                triggered_by_user=True,
+                triggered_at_utc=now,
+            )
+        )
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to persist haptic command",
+        )
+    if not published:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AWS IoT publish unavailable",
+        )
+    return {
+        "status": "command_sent",
+        "device_id": device_id,
+        "intensity": command.intensity,
+        "duration_ms": command.duration_ms,
+    }
