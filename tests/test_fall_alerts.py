@@ -39,6 +39,7 @@ from app.services.fall_alert_service import (
     ingest_fall_alert_event,
     process_due_fall_alerts,
     to_fall_alert_ack_info,
+    to_fall_alert_ack_result,
 )
 
 
@@ -1573,4 +1574,33 @@ def test_to_fall_alert_ack_info_unit(db_session, patient_user) -> None:
     assert ack_info.confidence_pct == 88
     assert "google.com/maps" in ack_info.maps_url
     assert ack_info.state == FallAlertState.ESCALATING.value
+
+
+def test_to_fall_alert_ack_result_unit(patient_user) -> None:
+    alert = FallAlert(
+        id=42,
+        user_id=patient_user.id,
+        event_id="evt-unit-002",
+        device_id="HK-TEST",
+        event_type="fall_forward",
+        confidence_score=0.91,
+        detected_at_utc=datetime.now(UTC),
+        state=FallAlertState.ACKNOWLEDGED.value,
+        acknowledged_by_first_name="Jean",
+        acknowledged_by_last_name="Valjean",
+    )
+    notif = FallAlertNotification(
+        alert_id=1,
+        contact_id=1,
+        rank=1,
+        contact_first_name="Jean",
+        contact_last_name="Valjean",
+        contact_email="jean@example.com",
+        status=FallAlertNotificationStatus.SENT.value,
+    )
+    res = to_fall_alert_ack_result(alert, notif)
+    assert res.status == "ok"
+    assert res.state == FallAlertState.ACKNOWLEDGED.value
+    assert res.acknowledged_by == "Jean Valjean"
+    assert "Prise en charge enregistrée avec succès par Jean Valjean." in res.message
 

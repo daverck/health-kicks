@@ -40,6 +40,7 @@ from app.services.fall_alert_service import (
     reorder_alert_contacts,
     send_test_email_to_contact,
     to_fall_alert_ack_info,
+    to_fall_alert_ack_result,
     to_fall_alert_detail,
     update_alert_contact,
     update_sms_notification_status,
@@ -201,14 +202,7 @@ def create_fall_alerts_router(
                 detail=err.message,
             )
 
-        ack_name = f"{alert.acknowledged_by_first_name or notif.contact_first_name or ''} {alert.acknowledged_by_last_name or notif.contact_last_name or ''}".strip()
-        return FallAlertAckResultResponse(
-            status="ok",
-            state=alert.state,
-            alert_id=alert.id,
-            acknowledged_by=ack_name,
-            message=f"Prise en charge enregistrée avec succès par {ack_name}.",
-        )
+        return to_fall_alert_ack_result(alert, notif)
 
     # C. Fall Alert History (/api/v1/fall-alerts)
     # ------------------------------------------------------------------

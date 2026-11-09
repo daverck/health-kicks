@@ -25,6 +25,7 @@ from app.db.models import (
 from app.schemas.fall_alert import (
     FallAlertAckInfoResponse,
     FallAlertAcknowledgedBy,
+    FallAlertAckResultResponse,
     FallAlertDetail,
     FallAlertIngestPayload,
     FallAlertIngestResponse,
@@ -92,6 +93,7 @@ __all__ = [
     "resolve_user_for_ingest",
     "send_test_email_to_contact",
     "to_fall_alert_ack_info",
+    "to_fall_alert_ack_result",
     "to_fall_alert_detail",
     "to_fall_alert_summary",
     "update_alert_contact",
@@ -566,6 +568,20 @@ def to_fall_alert_ack_info(
         maps_url=maps_url,
         already_acknowledged_by=ack_person,
         cancel_reason=alert.cancel_reason,
+    )
+
+
+def to_fall_alert_ack_result(
+    alert: FallAlert, notif: FallAlertNotification
+) -> FallAlertAckResultResponse:
+    """Format JSON response confirming acknowledgment of a fall alert."""
+    ack_name = f"{alert.acknowledged_by_first_name or notif.contact_first_name or ''} {alert.acknowledged_by_last_name or notif.contact_last_name or ''}".strip()
+    return FallAlertAckResultResponse(
+        status="ok",
+        state=alert.state,
+        alert_id=alert.id,
+        acknowledged_by=ack_name,
+        message=f"Prise en charge enregistrée avec succès par {ack_name}.",
     )
 
 
