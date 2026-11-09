@@ -13,6 +13,7 @@ from app.services.activity_service import (
     query_activity_events,
     query_haptic_logs,
     resolve_target_device_ids,
+    resolve_temporal_isolation_conditions,
 )
 
 
@@ -177,4 +178,42 @@ def test_dispatch_haptic_command_service_publish_failed(db_session) -> None:
         )
     assert exc_info.value.status_code == 503
     assert "AWS IoT publish unavailable" in exc_info.value.detail
+
+
+def test_resolve_temporal_isolation_conditions_admin_and_user(db_session, sample_data) -> None:
+    admin = sample_data["admin"]
+    user = sample_data["user"]
+
+    # Admin: unrestricted access, no filter clause
+    has_access, clause = resolve_temporal_isolation_conditions(
+        db=db_session,
+        user=admin,
+        target_device_ids=["dev-1", "dev-2"],
+        device_id_col=ActivityEvent.device_id,
+        timestamp_col=ActivityEvent.timestamp_utc,
+    )
+    assert has_access is True
+    assert clause is None
+
+    # User with owned device: access granted with temporal filter clause
+    has_access, clause = resolve_temporal_isolation_conditions(
+        db=db_session,
+        user=user,
+        target_device_ids=["dev-1"],
+        device_id_col=ActivityEvent.device_id,
+        timestamp_col=ActivityEvent.timestamp_utc,
+    )
+    assert has_access is True
+    assert clause is not None
+
+    # User with unowned device: access denied
+    has_access, clause = resolve_temporal_isolation_conditions(
+        db=db_session,
+        user=user,
+        target_device_ids=["dev-unowned"],
+        device_id_col=ActivityEvent.device_id,
+        timestamp_col=ActivityEvent.timestamp_utc,
+    )
+    assert has_access is False
+    assert clause is None
 

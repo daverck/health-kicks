@@ -1,6 +1,7 @@
 """Service layer for querying device activity events and haptic vibration logs."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_
@@ -33,6 +34,43 @@ def resolve_target_device_ids(device_id: str, user: User, db: Session) -> list[s
     return raw_devs
 
 
+def resolve_temporal_isolation_conditions(
+    db: Session,
+    user: User,
+    target_device_ids: list[str],
+    device_id_col: Any,
+    timestamp_col: Any,
+) -> tuple[bool, Any | None]:
+    """Resolve temporal isolation SQL conditions for non-admin users.
+
+    Returns:
+        (has_access, filter_clause)
+        - If user is admin: (True, None)
+        - If user has no active ownerships for the devices: (False, None)
+        - If user has ownerships: (True, or_(*bound_conditions))
+    """
+    if user.role == UserRole.admin:
+        return True, None
+
+    ownerships = (
+        db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
+        .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))
+        .all()
+    )
+    if not ownerships:
+        return False, None
+
+    bound_conds = []
+    for dev_id, bound_at in ownerships:
+        if bound_at is not None:
+            bound_conds.append(and_(device_id_col == dev_id, timestamp_col >= bound_at))
+        else:
+            bound_conds.append(device_id_col == dev_id)
+
+    filter_clause = or_(*bound_conds) if bound_conds else None
+    return True, filter_clause
+
+
 def query_activity_events(
     db: Session,
     user: User,
@@ -55,22 +93,17 @@ def query_activity_events(
     query = db.query(ActivityEvent).filter(ActivityEvent.device_id.in_(target_device_ids))
 
     # Temporal isolation for non-admin users: cannot view historical data from before device binding
-    if user.role != UserRole.admin:
-        ownerships = (
-            db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
-            .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))
-            .all()
-        )
-        if not ownerships:
-            return ActivityEventPage(items=[], page=page, page_size=page_size, total=0), None
-        bound_conds = []
-        for dev_id, bound_at in ownerships:
-            if bound_at is not None:
-                bound_conds.append(and_(ActivityEvent.device_id == dev_id, ActivityEvent.timestamp_utc >= bound_at))
-            else:
-                bound_conds.append(ActivityEvent.device_id == dev_id)
-        if bound_conds:
-            query = query.filter(or_(*bound_conds))
+    has_access, temporal_filter = resolve_temporal_isolation_conditions(
+        db=db,
+        user=user,
+        target_device_ids=target_device_ids,
+        device_id_col=ActivityEvent.device_id,
+        timestamp_col=ActivityEvent.timestamp_utc,
+    )
+    if not has_access:
+        return ActivityEventPage(items=[], page=page, page_size=page_size, total=0), None
+    if temporal_filter is not None:
+        query = query.filter(temporal_filter)
 
     if event_type is not None and isinstance(event_type, str):
         clean_types = [t.strip() for t in event_type.split(",") if t.strip()]
@@ -171,22 +204,17 @@ def query_haptic_logs(
     query = db.query(HapticLog).filter(HapticLog.device_id.in_(target_device_ids))
 
     # Temporal isolation for non-admin users: cannot view historical haptics from before device binding
-    if user.role != UserRole.admin:
-        ownerships = (
-            db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
-            .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))
-            .all()
-        )
-        if not ownerships:
-            return HapticLogPage(items=[], page=page, page_size=page_size, total=0), None
-        bound_conds = []
-        for dev_id, bound_at in ownerships:
-            if bound_at is not None:
-                bound_conds.append(and_(HapticLog.device_id == dev_id, HapticLog.triggered_at_utc >= bound_at))
-            else:
-                bound_conds.append(HapticLog.device_id == dev_id)
-        if bound_conds:
-            query = query.filter(or_(*bound_conds))
+    has_access, temporal_filter = resolve_temporal_isolation_conditions(
+        db=db,
+        user=user,
+        target_device_ids=target_device_ids,
+        device_id_col=HapticLog.device_id,
+        timestamp_col=HapticLog.triggered_at_utc,
+    )
+    if not has_access:
+        return HapticLogPage(items=[], page=page, page_size=page_size, total=0), None
+    if temporal_filter is not None:
+        query = query.filter(temporal_filter)
 
     if norm_start is not None:
         query = query.filter(HapticLog.triggered_at_utc >= norm_start)
