@@ -1,16 +1,12 @@
-import base64
 import logging
 from datetime import datetime
-from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import RequireClinicianOrAdmin
 from app.api.v1.utils import validate_and_normalize_date_range
-from app.core.edge_ai import EDGE_AI_LABELS
 from app.core.pseudonymization import get_subject_pseudonym
 from app.db.database import get_db
 from app.db.models import StudioSession, User, UserRole
@@ -23,26 +19,14 @@ from app.schemas.studio import (
     StudioSessionUpdatePayload,
 )
 from app.schemas.telemetry import StudioSessionReadingsResponse
-from app.services.studio_service import get_authorized_session, to_session_summary
+from app.services.studio_service import (
+    get_authorized_session,
+    query_studio_sessions,
+    to_session_summary,
+)
 from app.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
-
-
-def encode_cursor(created_at: datetime, session_id: UUID) -> str:
-    """Encode created_at timestamp and session UUID into an opaque URL-safe base64 cursor."""
-    raw = f"{created_at.isoformat()}|{str(session_id)}"
-    return base64.urlsafe_b64encode(raw.encode("ascii")).decode("ascii")
-
-
-def decode_cursor(cursor_str: str) -> tuple[datetime, UUID] | None:
-    """Safely decode an opaque cursor into (created_at, session_id) or return None."""
-    try:
-        raw = base64.urlsafe_b64decode(cursor_str.encode("ascii")).decode("ascii")
-        ts_part, id_part = raw.split("|", 1)
-        return datetime.fromisoformat(ts_part), UUID(id_part)
-    except Exception:
-        return None
 
 
 def create_studio_sessions_router(
@@ -74,109 +58,27 @@ def create_studio_sessions_router(
         request: Request = None,  # type: ignore[assignment]
     ) -> PaginatedSessionsResponse:
         """List studio sessions with RBAC, cursor keyset pagination, and multi-value filters."""
-        if sample_count_min is not None and sample_count_max is not None and sample_count_min > sample_count_max:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="sample_count_min must be less than or equal to sample_count_max",
-            )
-        if duration_sec_min is not None and duration_sec_max is not None and duration_sec_min > duration_sec_max:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="duration_sec_min must be less than or equal to duration_sec_max",
-            )
-
         raw_end = request.query_params.get("end_date") if request is not None else None
         norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
-        query = db.query(StudioSession)
-
-        if user.role != UserRole.admin:
-            query = query.filter(StudioSession.user_id == user.id)
-        elif pseudonym is not None:
-            val = pseudonym.strip()
-            if val and val.lower() != "all":
-                query = query.join(User, StudioSession.user_id == User.id).filter(
-                    User.pseudonym.ilike(f"%{val}%")
-                )
-
-        if label is not None:
-            target_labels = [lbl.strip() for lbl in label.split(",") if lbl.strip()]
-            if target_labels and not any(lbl.lower() == "all" for lbl in target_labels):
-                query = query.filter(StudioSession.label.in_(target_labels))
-
-        if device_id is not None:
-            target_devs = [d.strip() for d in device_id.split(",") if d.strip()]
-            if target_devs and not any(d.lower() == "all" for d in target_devs):
-                query = query.filter(StudioSession.device_id.in_(target_devs))
-
-        if is_validated is not None and isinstance(is_validated, bool):
-            query = query.filter(StudioSession.is_validated == is_validated)
-
-        if is_hitl is not None and isinstance(is_hitl, bool):
-            query = query.filter(StudioSession.is_hitl == is_hitl)
-
-        if classification is not None and classification.strip().lower() != "all":
-            edge_ai_labels = EDGE_AI_LABELS
-            if classification.strip().lower() == "edge_ai":
-                query = query.filter(StudioSession.label.in_(edge_ai_labels))
-            elif classification.strip().lower() == "research":
-                query = query.filter(~StudioSession.label.in_(edge_ai_labels))
-
-        if norm_start is not None:
-            query = query.filter(StudioSession.created_at >= norm_start)
-
-        if norm_end is not None:
-            query = query.filter(StudioSession.created_at <= norm_end)
-
-        if sample_count_min is not None:
-            query = query.filter(StudioSession.sample_count >= sample_count_min)
-        if sample_count_max is not None:
-            query = query.filter(StudioSession.sample_count <= sample_count_max)
-        if duration_sec_min is not None:
-            query = query.filter(StudioSession.duration_sec >= duration_sec_min)
-        if duration_sec_max is not None:
-            query = query.filter(StudioSession.duration_sec <= duration_sec_max)
-
-        total = query.count()
-        next_cursor: str | None = None
-
-        if cursor is not None:
-            decoded = decode_cursor(cursor)
-            if decoded is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid pagination cursor format",
-                )
-            cursor_dt, cursor_id = decoded
-            query = query.filter(
-                or_(
-                    StudioSession.created_at < cursor_dt,
-                    and_(
-                        StudioSession.created_at == cursor_dt,
-                        StudioSession.uuid < cursor_id,
-                    ),
-                )
-            )
-
-        ordered_query = query.order_by(StudioSession.created_at.desc(), StudioSession.uuid.desc())
-        if cursor is None and page > 1:
-            ordered_query = ordered_query.offset((page - 1) * size)
-
-        sessions_plus_one = ordered_query.limit(size + 1).all()
-        if len(sessions_plus_one) > size:
-            sessions = sessions_plus_one[:size]
-            next_cursor = encode_cursor(sessions[-1].created_at, sessions[-1].uuid)
-        else:
-            sessions = sessions_plus_one
-            next_cursor = None
-
-        items = [to_session_summary(s, is_admin=user.is_admin, current_user_id=user.id) for s in sessions]
-        return PaginatedSessionsResponse(
-            items=items,
-            total=total,
+        return query_studio_sessions(
+            db,
+            user,
             page=page,
             size=size,
-            next_cursor=next_cursor,
+            cursor=cursor,
+            label=label,
+            device_id=device_id,
+            pseudonym=pseudonym,
+            is_validated=is_validated,
+            is_hitl=is_hitl,
+            classification=classification,
+            start_date=norm_start,
+            end_date=norm_end,
+            sample_count_min=sample_count_min,
+            sample_count_max=sample_count_max,
+            duration_sec_min=duration_sec_min,
+            duration_sec_max=duration_sec_max,
         )
 
     @router.get("/authors", response_model=list[StudioAuthorSummary])

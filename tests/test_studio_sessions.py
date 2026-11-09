@@ -1110,3 +1110,45 @@ def test_list_sessions_filter_by_is_hitl(client, user_a, db_session) -> None:
     assert res_all.status_code == 200
     assert len(res_all.json()["items"]) == 2
 
+
+def test_query_studio_sessions_direct_service_call(db_session, user_a):
+    """Directly test query_studio_sessions service function with multi-parameter filtering."""
+    from app.services.studio_service import query_studio_sessions
+
+    s1 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-1",
+        label="walk",
+        sample_count=100,
+        duration_sec=5.0,
+        is_validated=True,
+    )
+    s2 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=user_a.id,
+        device_id="HK-2",
+        label="jump",
+        sample_count=50,
+        duration_sec=2.5,
+        is_validated=False,
+    )
+    db_session.add_all([s1, s2])
+    db_session.commit()
+
+    # Query with label filter
+    resp = query_studio_sessions(db_session, user_a, label="walk")
+    assert resp.total == 1
+    assert resp.items[0].label == "walk"
+
+    # Query with device_id filter
+    resp_dev = query_studio_sessions(db_session, user_a, device_id="HK-2")
+    assert resp_dev.total == 1
+    assert resp_dev.items[0].label == "jump"
+
+    # Query with is_validated filter
+    resp_val = query_studio_sessions(db_session, user_a, is_validated=True)
+    assert resp_val.total == 1
+    assert resp_val.items[0].label == "walk"
+
+
