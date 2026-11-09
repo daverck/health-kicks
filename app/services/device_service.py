@@ -44,6 +44,41 @@ def verify_device_ownership(
         )
 
 
+def resolve_target_user_for_binding(
+    db: Session,
+    current_user: User,
+    target_user_uuid: UUID | str | None,
+) -> int:
+    """Resolve the target user ID for a device binding request.
+
+    If target_user_uuid is None, returns current_user.id.
+    Non-admin users can only bind devices to themselves.
+    Raises HTTPException(403) or HTTPException(404) if invalid.
+    """
+    if target_user_uuid is None:
+        return current_user.id
+
+    if current_user.role != UserRole.admin and str(target_user_uuid) != str(current_user.uuid):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: cannot bind device for another user",
+        )
+
+    try:
+        t_uuid = UUID(str(target_user_uuid))
+        target_user = db.query(User).filter(User.uuid == t_uuid).one_or_none()
+    except (ValueError, TypeError):
+        target_user = None
+
+    if target_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target user not found",
+        )
+
+    return target_user.id
+
+
 def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceResponse:
     """Bind a factory-registered device to a user account."""
     device = db.query(Device).filter_by(device_id=payload.device_id).one_or_none()

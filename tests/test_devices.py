@@ -485,3 +485,32 @@ def test_query_devices_service_directly(db_session, user_a, user_b) -> None:
     empty_items, empty_cursor = query_devices(db=db_session, user=admin, user_uuid="invalid-uuid")
     assert len(empty_items) == 0
     assert empty_cursor is None
+
+
+def test_resolve_target_user_for_binding(db_session, user_a, user_b) -> None:
+    from fastapi import HTTPException
+
+    from app.services.device_service import resolve_target_user_for_binding
+
+    # 1. Target UUID is None -> returns current user ID
+    assert resolve_target_user_for_binding(db_session, user_a, None) == user_a.id
+
+    # 2. Non-admin user binding for themselves explicitly -> returns user_a.id
+    assert resolve_target_user_for_binding(db_session, user_a, str(user_a.uuid)) == user_a.id
+
+    # 3. Non-admin user attempting to bind for another user -> 403 Forbidden
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_target_user_for_binding(db_session, user_a, str(user_b.uuid))
+    assert exc_info.value.status_code == 403
+
+    # 4. Admin binding for another user -> resolves target user's ID
+    admin = User(google_sub="admin-binding-sub", email="admin-binding@hk.com", role=UserRole.admin)
+    db_session.add(admin)
+    db_session.commit()
+    assert resolve_target_user_for_binding(db_session, admin, str(user_b.uuid)) == user_b.id
+
+    # 5. Admin binding with nonexistent user UUID -> 404 Not Found
+    with pytest.raises(HTTPException) as exc_info_404:
+        resolve_target_user_for_binding(db_session, admin, "00000000-0000-0000-0000-000000000000")
+    assert exc_info_404.value.status_code == 404
+

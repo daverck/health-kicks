@@ -2,12 +2,12 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
 from app.db.database import get_db
-from app.db.models import User, UserRole
+from app.db.models import UserRole
 from app.schemas.device import DeviceCreate, DeviceResponse
 from app.services import device_service
 
@@ -22,26 +22,11 @@ def create_devices_router() -> APIRouter:
         db: Session = Depends(get_db),
     ) -> DeviceResponse:
         """Bind a device to the authenticated user account."""
-        target_user_id = user.id
-        if payload.user_uuid is not None:
-            if user.role != UserRole.admin and str(payload.user_uuid) != str(user.uuid):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Forbidden: cannot bind device for another user",
-                )
-            target_user = None
-            try:
-                t_uuid = UUID(str(payload.user_uuid))
-                target_user = db.query(User).filter(User.uuid == t_uuid).one_or_none()
-            except (ValueError, TypeError):
-                pass
-            if target_user is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Target user not found",
-                )
-            target_user_id = target_user.id
-
+        target_user_id = device_service.resolve_target_user_for_binding(
+            db=db,
+            current_user=user,
+            target_user_uuid=payload.user_uuid,
+        )
         return device_service.bind_device(db=db, user_id=target_user_id, payload=payload)
 
     @router.get("", response_model=list[DeviceResponse])
