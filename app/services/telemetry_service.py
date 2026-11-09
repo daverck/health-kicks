@@ -1,6 +1,7 @@
 """Stateless DynamoDB telemetry data access service."""
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -8,8 +9,11 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings, settings
+from app.db.models import DeviceOwnership, StudioSession, User, UserRole
 from app.schemas.telemetry import (
     ImuReadingResponse,
     StudioDatasetStatsResponse,
@@ -379,3 +383,95 @@ class TelemetryService:
             session_id,
         )
         return len(items_to_update)
+
+    def query_device_telemetry(
+        self,
+        db: Session,
+        user: User,
+        device_id: str,
+        session_id: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        limit: int = 1000,
+    ) -> StudioSessionReadingsResponse | list[ImuReadingResponse]:
+        """Query IMU telemetry with temporal isolation and session ownership checks."""
+        bound_at_utc: datetime | None = None
+        if user.role == UserRole.user:
+            ownership = (
+                db.query(DeviceOwnership.bound_at_utc)
+                .filter(DeviceOwnership.device_id == device_id, DeviceOwnership.user_id == user.id)
+                .first()
+            )
+            if ownership:
+                bound_at_utc = ownership[0]
+
+        if session_id is not None:
+            if user.role == UserRole.user and bound_at_utc is not None:
+                try:
+                    session_uuid = uuid.UUID(session_id)
+                    sess = db.query(StudioSession).filter_by(uuid=session_uuid, device_id=device_id).first()
+                    if sess is not None:
+                        sess_created = sess.created_at
+                        b_cmp = bound_at_utc
+                        if sess_created.tzinfo is not None and b_cmp.tzinfo is None:
+                            b_cmp = b_cmp.replace(tzinfo=sess_created.tzinfo)
+                        elif sess_created.tzinfo is None and b_cmp.tzinfo is not None:
+                            sess_created = sess_created.replace(tzinfo=b_cmp.tzinfo)
+                        if sess_created < b_cmp and sess.user_id != user.id:
+                            raise HTTPException(
+                                status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"Studio session '{session_id}' not found for device '{device_id}'",
+                            )
+                except ValueError:
+                    pass
+
+            result = self.get_session_readings(
+                device_id=device_id,
+                session_id=session_id,
+            )
+            if result is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Studio session '{session_id}' not found for device '{device_id}'",
+                )
+            return result
+
+        if start_time is not None and end_time is not None:
+            if start_time > end_time:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="start_time must be less than or equal to end_time",
+                )
+
+            # Temporal isolation for regular users
+            if user.role == UserRole.user and bound_at_utc is not None:
+                b_cmp = bound_at_utc
+                if start_time.tzinfo is not None and b_cmp.tzinfo is None:
+                    b_cmp = b_cmp.replace(tzinfo=start_time.tzinfo)
+                elif start_time.tzinfo is None and b_cmp.tzinfo is not None:
+                    b_cmp = b_cmp.replace(tzinfo=None)
+
+                end_cmp = end_time
+                if end_time.tzinfo is None and b_cmp.tzinfo is not None:
+                    end_cmp = end_time.replace(tzinfo=b_cmp.tzinfo)
+                elif end_time.tzinfo is not None and b_cmp.tzinfo is None:
+                    end_cmp = end_time.replace(tzinfo=None)
+
+                if end_cmp < b_cmp:
+                    return []
+                start_time = max(start_time, b_cmp)
+
+            start_us = int(start_time.timestamp() * 1_000_000)
+            end_us = int(end_time.timestamp() * 1_000_000)
+            return self.get_timerange_readings(
+                device_id=device_id,
+                start_epoch_us=start_us,
+                end_epoch_us=end_us,
+                limit=limit,
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must provide either session_id or both start_time and end_time",
+        )
+
