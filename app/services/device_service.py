@@ -327,3 +327,98 @@ def unbind_device_admin(db: Session, device_uuid: UUID | str) -> None:
     for o in ownerships:
         db.delete(o)
     db.commit()
+
+
+def resolve_user_by_identifier(db: Session, user_identifier: int | str | None) -> User | None:
+    """Resolve a user by DB id, UUID string, digit string, OAuth sub, or email."""
+    if user_identifier is None:
+        return None
+    if isinstance(user_identifier, int):
+        return db.query(User).filter(User.id == user_identifier).first()
+    if not isinstance(user_identifier, str):
+        return None
+
+    cleaned = user_identifier.strip()
+    try:
+        val_u = UUID(cleaned)
+        user = db.query(User).filter(User.uuid == val_u).first()
+        if user is not None:
+            return user
+    except (ValueError, TypeError, AttributeError):
+        pass
+
+    if cleaned.isdigit():
+        user = db.query(User).filter(User.id == int(cleaned)).first()
+        if user is not None:
+            return user
+
+    return (
+        db.query(User)
+        .filter(
+            (User.google_sub == cleaned)
+            | (User.azure_sub == cleaned)
+            | (User.email == cleaned)
+        )
+        .first()
+    )
+
+
+def update_single_device_presence(
+    db: Session,
+    device_id: str,
+    is_online: bool,
+    timestamp: datetime | None = None,
+) -> Device:
+    """Update connection status and last seen timestamp for a single device."""
+    device = db.query(Device).filter_by(device_id=device_id).one_or_none()
+    if device is None:
+        logger.warning("Device presence update rejected: device '%s' not found", device_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not found",
+        )
+
+    if is_online:
+        device.status = DeviceStatus.online
+        device.last_seen_utc = timestamp or datetime.now(UTC)
+        logger.info("Device '%s' marked online at %s", device.device_id, device.last_seen_utc)
+    else:
+        device.status = DeviceStatus.offline
+        logger.info("Device '%s' marked offline", device.device_id)
+        # Do not overwrite last_seen_utc on disconnect in order to preserve timestamp of last received heartbeat
+
+    db.commit()
+    db.refresh(device)
+    logger.info("Relayed device presence update: device=%s, state=%s", device.device_id, device.status)
+    return device
+
+
+def handle_user_lwt_disconnect(db: Session, user_identifier: int | str | None) -> list[str]:
+    """Mark all devices owned by the identified user as offline upon MQTT LWT disconnect."""
+    user = resolve_user_by_identifier(db, user_identifier)
+    if user is None:
+        logger.warning("User '%s' not found for LWT presence update", user_identifier)
+        db.commit()
+        return []
+
+    ownerships = db.query(DeviceOwnership).filter_by(user_id=user.id).all()
+    device_ids = [o.device_id for o in ownerships]
+    if device_ids:
+        db.query(Device).filter(Device.device_id.in_(device_ids)).update(
+            {Device.status: DeviceStatus.offline},
+            synchronize_session=False,
+        )
+        logger.info(
+            "User '%s' (id=%s) LWT triggered: marked %d device(s) offline: %s",
+            user_identifier,
+            user.id,
+            len(device_ids),
+            device_ids,
+        )
+    else:
+        logger.info("User '%s' (id=%s) has no bound devices to update", user_identifier, user.id)
+
+    db.commit()
+    logger.info("Relayed user LWT presence update: user_id=%s, state=offline", user_identifier)
+    return device_ids
+

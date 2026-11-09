@@ -1,7 +1,6 @@
 """Internal service routes (e.g. AWS IoT Lifecycle event presence and fall alert webhooks)."""
 
 import logging
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -9,10 +8,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import verify_ingest_token
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import Device, DeviceOwnership, DeviceStatus, User
+from app.db.models import DeviceStatus
 from app.schemas.fall_alert import FallAlertIngestPayload, FallAlertIngestResponse
 from app.schemas.internal import DevicePresencePayload, DevicePresenceResponse
 from app.services.aws_iot_service import AWSIoTPublishService
+from app.services.device_service import (
+    handle_user_lwt_disconnect,
+    update_single_device_presence,
+)
 from app.services.email_service import SmtpEmailChannel
 from app.services.fall_alert_service import ingest_fall_alert_event
 
@@ -48,26 +51,12 @@ def create_internal_router(
         is_online = norm_status in ("online", "connected")
 
         if payload.device_id:
-            device = db.query(Device).filter_by(device_id=payload.device_id).one_or_none()
-            if device is None:
-                logger.warning("Device presence update rejected: device '%s' not found", payload.device_id)
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Device not found",
-                )
-
-            if is_online:
-                device.status = DeviceStatus.online
-                device.last_seen_utc = payload.timestamp or datetime.now(UTC)
-                logger.info("Device '%s' marked online at %s", device.device_id, device.last_seen_utc)
-            else:
-                device.status = DeviceStatus.offline
-                logger.info("Device '%s' marked offline", device.device_id)
-                # Do not overwrite last_seen_utc on disconnect in order to preserve timestamp of last received heartbeat
-
-            db.commit()
-            db.refresh(device)
-            logger.info("Relayed device presence update: device=%s, state=%s", device.device_id, device.status)
+            device = update_single_device_presence(
+                db=db,
+                device_id=payload.device_id,
+                is_online=is_online,
+                timestamp=payload.timestamp,
+            )
             return DevicePresenceResponse(
                 status="ok",
                 device_id=device.device_id,
@@ -75,51 +64,7 @@ def create_internal_router(
             )
 
         # LWT user-level bulk disconnect
-        user_db_id: int | None = None
-        if isinstance(payload.user_id, int):
-            user_db_id = payload.user_id
-        elif isinstance(payload.user_id, str):
-            cleaned = payload.user_id.strip()
-            user = None
-            try:
-                import uuid as _uuid
-                val_u = _uuid.UUID(cleaned)
-                user = db.query(User).filter(User.uuid == val_u).first()
-            except (ValueError, TypeError, AttributeError):
-                pass
-            if user is None and cleaned.isdigit():
-                user = db.query(User).filter(User.id == int(cleaned)).first()
-            if user is None:
-                user = db.query(User).filter(
-                    (User.google_sub == cleaned)
-                    | (User.azure_sub == cleaned)
-                    | (User.email == cleaned)
-                ).first()
-            if user:
-                user_db_id = user.id
-
-        if user_db_id is not None:
-            ownerships = db.query(DeviceOwnership).filter_by(user_id=user_db_id).all()
-            device_ids = [o.device_id for o in ownerships]
-            if device_ids:
-                db.query(Device).filter(Device.device_id.in_(device_ids)).update(
-                    {Device.status: DeviceStatus.offline},
-                    synchronize_session=False,
-                )
-                logger.info(
-                    "User '%s' (id=%s) LWT triggered: marked %d device(s) offline: %s",
-                    payload.user_id,
-                    user_db_id,
-                    len(device_ids),
-                    device_ids,
-                )
-            else:
-                logger.info("User '%s' (id=%s) has no bound devices to update", payload.user_id, user_db_id)
-        else:
-            logger.warning("User '%s' not found for LWT presence update", payload.user_id)
-
-        db.commit()
-        logger.info("Relayed user LWT presence update: user_id=%s, state=offline", payload.user_id)
+        handle_user_lwt_disconnect(db=db, user_identifier=payload.user_id)
         return DevicePresenceResponse(
             status="ok",
             device_id=None,
