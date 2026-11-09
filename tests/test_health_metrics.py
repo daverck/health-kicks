@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.database import get_db
+from app.db.database import get_db, resolve_database_pool_metrics
 from app.db.models import Base
 from app.main import app
 
@@ -151,3 +151,14 @@ def test_api_v1_metrics_prometheus_query_param(client: TestClient) -> None:
     text_content = res.text
     assert "healthkicks_uptime_seconds" in text_content
     assert "healthkicks_http_endpoint_requests_total" in text_content
+
+
+def test_resolve_database_pool_metrics(db_session: Session) -> None:
+    """Introspecting database pool metrics returns a dict of pool values or handles mocks cleanly."""
+    metrics = resolve_database_pool_metrics(db_session)
+    if metrics is not None:
+        assert "size" in metrics
+        assert "checked_in" in metrics
+        assert "checked_out" in metrics
+        assert "overflow" in metrics
+        assert isinstance(metrics["size"], int)

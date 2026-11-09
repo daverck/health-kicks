@@ -119,3 +119,21 @@ def get_db() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
+
+
+def resolve_database_pool_metrics(db: Session) -> dict[str, int] | None:
+    """Introspect SQLAlchemy engine pool metrics (size, checked_in, checked_out, overflow)."""
+    try:
+        bind = db.get_bind()
+        engine_obj = getattr(bind, "engine", bind)
+        pool = getattr(engine_obj, "pool", getattr(bind, "pool", None))
+        if pool is not None:
+            return {
+                "size": int(getattr(pool, "size", lambda: 0)()),
+                "checked_in": int(getattr(pool, "checkedin", lambda: 0)()),
+                "checked_out": int(getattr(pool, "checkedout", lambda: 0)()),
+                "overflow": int(getattr(pool, "overflow", lambda: 0)()),
+            }
+    except Exception:
+        pass
+    return None

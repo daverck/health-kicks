@@ -1,6 +1,5 @@
 import time
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -11,7 +10,7 @@ from app.api.deps import CurrentUser
 from app.core.config import settings
 from app.core.metrics import metrics_collector
 from app.core.rate_limit import rate_limit
-from app.db.database import get_db
+from app.db.database import get_db, resolve_database_pool_metrics
 from app.schemas.cloud import (
     ActivityEventPage,
     DatabasePoolStatus,
@@ -127,20 +126,8 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
                 environment=settings.environment,
             )
 
-        pool_status: DatabasePoolStatus | None = None
-        try:
-            bind = db.get_bind()
-            engine = getattr(bind, "engine", bind)
-            pool = getattr(engine, "pool", getattr(bind, "pool", None))
-            if pool is not None:
-                pool_status = DatabasePoolStatus(
-                    size=int(getattr(pool, "size", lambda: 0)()),
-                    checked_in=int(getattr(pool, "checkedin", lambda: 0)()),
-                    checked_out=int(getattr(pool, "checkedout", lambda: 0)()),
-                    overflow=int(getattr(pool, "overflow", lambda: 0)()),
-                )
-        except Exception:
-            pool_status = None
+        pool_metrics = resolve_database_pool_metrics(db)
+        pool_status = DatabasePoolStatus(**pool_metrics) if pool_metrics is not None else None
 
         return HealthResponse(
             status="ok",
@@ -169,20 +156,7 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         db: Session = Depends(get_db),
     ) -> Response:
         """Operational metrics and request latency breakdown."""
-        database_pool: dict[str, Any] | None = None
-        try:
-            bind = db.get_bind()
-            engine = getattr(bind, "engine", bind)
-            pool = getattr(engine, "pool", getattr(bind, "pool", None))
-            if pool is not None:
-                database_pool = {
-                    "size": int(getattr(pool, "size", lambda: 0)()),
-                    "checked_in": int(getattr(pool, "checkedin", lambda: 0)()),
-                    "checked_out": int(getattr(pool, "checkedout", lambda: 0)()),
-                    "overflow": int(getattr(pool, "overflow", lambda: 0)()),
-                }
-        except Exception:
-            pass
+        database_pool = resolve_database_pool_metrics(db)
 
         accept = request.headers.get("accept", "")
         wants_prometheus = (
