@@ -10,10 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
-from app.api.v1.utils import validate_and_normalize_date_range
 from app.core.rate_limit import rate_limiter
 from app.db.database import get_db
-from app.db.models import FallAlert, User, UserRole
+from app.db.models import FallAlert, UserRole
 from app.schemas.fall_alert import (
     AlertContactCreate,
     AlertContactResponse,
@@ -37,10 +36,10 @@ from app.services.fall_alert_service import (
     delete_alert_contact,
     get_alert_and_notification_for_token,
     list_alert_contacts,
+    query_fall_alerts,
     reorder_alert_contacts,
     send_test_email_to_contact,
     to_fall_alert_detail,
-    to_fall_alert_summary,
     update_alert_contact,
     update_sms_notification_status,
 )
@@ -294,49 +293,17 @@ def create_fall_alerts_router(
     ) -> PaginatedFallAlertsResponse:
         """List fall alerts with pagination, state/date filtering, RBAC isolation, and GDPR pseudonymization."""
         raw_end = request.query_params.get("end_date") if request is not None else None
-        norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
-
-        query = db.query(FallAlert)
-
-        if user.role != UserRole.admin:
-            query = query.filter(FallAlert.user_id == user.id)
-        else:
-            filter_pseudonym = pseudonym or (user_id if user_id and not user_id.strip().isdigit() else None)
-            if filter_pseudonym is not None:
-                val = filter_pseudonym.strip()
-                if val:
-                    query = query.join(User, FallAlert.user_id == User.id).filter(
-                        User.pseudonym.ilike(f"%{val}%")
-                    )
-            elif user_id is not None:
-                val = user_id.strip()
-                if val and val.isdigit():
-                    query = query.filter(FallAlert.user_id == int(val))
-
-        if state is not None and isinstance(state, str):
-            raw_states = [s.strip().upper() for s in state.split(",") if s.strip()]
-            if raw_states and not any(s == "ALL" for s in raw_states):
-                query = query.filter(FallAlert.state.in_(raw_states))
-
-        if norm_start is not None:
-            query = query.filter(FallAlert.detected_at_utc >= norm_start)
-        if norm_end is not None:
-            query = query.filter(FallAlert.detected_at_utc <= norm_end)
-
-        total = query.count()
-        alerts = (
-            query.order_by(FallAlert.detected_at_utc.desc(), FallAlert.id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
-
-        items = [to_fall_alert_summary(a, user) for a in alerts]
-        return PaginatedFallAlertsResponse(
-            items=items,
-            total=total,
+        return query_fall_alerts(
+            db=db,
+            user=user,
             page=page,
             page_size=page_size,
+            state=state,
+            start_date=start_date,
+            end_date=end_date,
+            raw_end=raw_end,
+            user_id=user_id,
+            pseudonym=pseudonym,
         )
 
     @router.get(
