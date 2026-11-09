@@ -23,6 +23,7 @@ from app.db.models import (
     UserRole,
 )
 from app.schemas.fall_alert import (
+    FallAlertAckInfoResponse,
     FallAlertAcknowledgedBy,
     FallAlertDetail,
     FallAlertIngestPayload,
@@ -34,7 +35,11 @@ from app.schemas.fall_alert import (
     PaginatedFallAlertsResponse,
 )
 from app.services.aws_iot_service import AWSIoTPublishService
-from app.services.email_service import SmtpEmailChannel
+from app.services.email_service import (
+    FALL_TYPE_LABELS_FR,
+    SmtpEmailChannel,
+    format_paris_datetime,
+)
 from app.services.fall_alert_contacts import (
     create_alert_contact,
     delete_alert_contact,
@@ -86,6 +91,7 @@ __all__ = [
     "reorder_alert_contacts",
     "resolve_user_for_ingest",
     "send_test_email_to_contact",
+    "to_fall_alert_ack_info",
     "to_fall_alert_detail",
     "to_fall_alert_summary",
     "update_alert_contact",
@@ -518,6 +524,48 @@ def to_fall_alert_detail(alert: FallAlert, current_user: User) -> FallAlertDetai
     return FallAlertDetail(
         **summary.model_dump(),
         notifications=notif_items,
+    )
+
+
+def to_fall_alert_ack_info(
+    alert: FallAlert, notif: FallAlertNotification
+) -> FallAlertAckInfoResponse:
+    """Format safe read-only acknowledgment payload for web UI."""
+    patient_name = (
+        (alert.user.name if alert.user and alert.user.name else None)
+        or (alert.user.email if alert.user else None)
+        or f"Patient #{alert.user_id}"
+    )
+    contact_name = f"{notif.contact_first_name} {notif.contact_last_name}".strip()
+    paris_dt = format_paris_datetime(alert.detected_at_utc)
+    fall_label = FALL_TYPE_LABELS_FR.get(alert.event_type, alert.event_type)
+    confidence_pct = int(round(alert.confidence_score * 100))
+    maps_url = (
+        f"https://www.google.com/maps?q={alert.lat:.6f},{alert.lon:.6f}"
+        if alert.lat is not None and alert.lon is not None
+        else None
+    )
+    ack_person = (
+        f"{alert.acknowledged_by_first_name or ''} {alert.acknowledged_by_last_name or ''}".strip()
+        if (alert.acknowledged_by_first_name or alert.acknowledged_by_last_name)
+        else None
+    )
+    return FallAlertAckInfoResponse(
+        alert_id=alert.id,
+        patient_name=patient_name,
+        contact_name=contact_name,
+        detected_at=alert.detected_at_utc,
+        detected_at_paris=paris_dt,
+        event_type=alert.event_type,
+        event_type_label=fall_label,
+        confidence_pct=confidence_pct,
+        state=alert.state,
+        lat=alert.lat,
+        lon=alert.lon,
+        accuracy_m=alert.accuracy_m,
+        maps_url=maps_url,
+        already_acknowledged_by=ack_person,
+        cancel_reason=alert.cancel_reason,
     )
 
 

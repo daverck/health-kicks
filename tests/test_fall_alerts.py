@@ -38,6 +38,7 @@ from app.services.fall_alert_service import (
     generate_ack_token,
     ingest_fall_alert_event,
     process_due_fall_alerts,
+    to_fall_alert_ack_info,
 )
 
 
@@ -1531,4 +1532,45 @@ def test_fall_alert_postgresql_for_update_of_target_compilation(db_session):
     compiled_sql = str(query.statement.compile(dialect=postgresql.dialect()))
     assert "FOR UPDATE OF fall_alerts SKIP LOCKED" in compiled_sql
     assert "FOR UPDATE OF users" not in compiled_sql
+
+
+def test_to_fall_alert_ack_info_unit(db_session, patient_user) -> None:
+    alert = FallAlert(
+        user_id=patient_user.id,
+        event_id="evt-unit-001",
+        device_id="HK-TEST",
+        event_type="fall_forward",
+        confidence_score=0.88,
+        detected_at_utc=datetime.now(UTC),
+        state=FallAlertState.ESCALATING.value,
+        lat=45.75,
+        lon=4.85,
+        accuracy_m=10.0,
+    )
+    alert.user = patient_user
+    db_session.add(alert)
+    db_session.commit()
+    db_session.refresh(alert)
+
+    notif = FallAlertNotification(
+        alert_id=alert.id,
+        contact_id=1,
+        rank=1,
+        contact_first_name="Jean",
+        contact_last_name="Valjean",
+        contact_email="jean@example.com",
+        status=FallAlertNotificationStatus.SENT.value,
+        sent_at_utc=datetime.now(UTC),
+    )
+    db_session.add(notif)
+    db_session.commit()
+    db_session.refresh(notif)
+
+    ack_info = to_fall_alert_ack_info(alert, notif)
+    assert ack_info.alert_id == alert.id
+    assert ack_info.patient_name == patient_user.name
+    assert ack_info.contact_name == "Jean Valjean"
+    assert ack_info.confidence_pct == 88
+    assert "google.com/maps" in ack_info.maps_url
+    assert ack_info.state == FallAlertState.ESCALATING.value
 
