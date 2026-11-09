@@ -451,3 +451,37 @@ def test_device_create_schema_auto_generates_device_id() -> None:
     d2 = DeviceCreate.model_validate({"name": "Shoe without ID"})
     assert d2.device_id is not None
     assert len(d2.device_id) > 10
+
+
+def test_query_devices_service_directly(db_session, user_a, user_b) -> None:
+    from app.services.device_service import query_devices
+
+    # Add devices
+    d1 = Device(device_id="dev-1", name="Dev 1")
+    d2 = Device(device_id="dev-2", name="Dev 2")
+    db_session.add_all([d1, d2])
+    db_session.commit()
+
+    db_session.add(DeviceOwnership(user_id=user_a.id, device_id="dev-1"))
+    db_session.add(DeviceOwnership(user_id=user_b.id, device_id="dev-2"))
+    db_session.commit()
+
+    # User A query
+    items, cursor = query_devices(db=db_session, user=user_a, limit=10)
+    assert len(items) == 1
+    assert items[0].device_id == "dev-1"
+    assert cursor is None
+
+    # Admin query with pagination limit=1
+    admin = User(google_sub="admin-sub", email="admin@hk.com", role=UserRole.admin)
+    db_session.add(admin)
+    db_session.commit()
+
+    admin_items, next_cursor = query_devices(db=db_session, user=admin, limit=1)
+    assert len(admin_items) == 1
+    assert next_cursor is not None
+
+    # Admin query with invalid user_uuid
+    empty_items, empty_cursor = query_devices(db=db_session, user=admin, user_uuid="invalid-uuid")
+    assert len(empty_items) == 0
+    assert empty_cursor is None

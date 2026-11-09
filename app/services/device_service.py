@@ -8,7 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.api.v1.utils import decode_cursor
+from app.api.v1.utils import decode_cursor, encode_cursor
 from app.core.config import settings
 from app.db.models import Device, DeviceOwnership, DeviceStatus, User, UserRole
 from app.schemas.device import DeviceCreate, DeviceResponse
@@ -232,6 +232,51 @@ def list_all_devices(
         )
         for device, bound_at_utc in rows
     ]
+
+
+def query_devices(
+    db: Session,
+    user: User,
+    user_uuid: str | None = None,
+    cursor: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> tuple[list[DeviceResponse], str | None]:
+    """Retrieve devices with RBAC, optional target user resolution, and keyset cursor encoding."""
+    fetch_limit = limit + 1
+    if user.role == UserRole.admin:
+        if user_uuid is not None:
+            target_user = None
+            try:
+                t_uuid = UUID(str(user_uuid))
+                target_user = db.query(User).filter(User.uuid == t_uuid).one_or_none()
+            except (ValueError, TypeError):
+                pass
+            if target_user is None:
+                devices: list[DeviceResponse] = []
+            else:
+                devices = list_user_devices(
+                    db=db, user_id=target_user.id, skip=skip, limit=fetch_limit, cursor=cursor
+                )
+        else:
+            devices = list_all_devices(
+                db=db, skip=skip, limit=fetch_limit, cursor=cursor
+            )
+    else:
+        devices = list_user_devices(
+            db=db, user_id=user.id, skip=skip, limit=fetch_limit, cursor=cursor
+        )
+
+    if len(devices) > limit:
+        items = devices[:limit]
+        last_item = items[-1]
+        last_ts = last_item.bound_at_utc or last_item.created_at
+        next_cursor = encode_cursor(last_ts, last_item.device_id)
+    else:
+        items = devices
+        next_cursor = None
+
+    return items, next_cursor
 
 
 def _resolve_device_by_uuid(db: Session, device_uuid: UUID | str) -> Device:
