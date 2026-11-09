@@ -1,12 +1,21 @@
-"""Unit tests for user_service (SSO JIT provisioning and account linking)."""
+"""Unit tests for user_service (SSO JIT provisioning, listing, and profile updates)."""
+
+import uuid
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base, User, UserRole
-from app.services.user_service import UserProvisioningError, upsert_sso_user
+from app.schemas.user import UserUpdate
+from app.services.user_service import (
+    UserProvisioningError,
+    list_users,
+    update_user_profile,
+    upsert_sso_user,
+)
 
 
 @pytest.fixture()
@@ -75,3 +84,107 @@ def test_upsert_sso_user_links_existing_by_email(db_session):
     assert linked.azure_sub == "az-202"
     assert linked.role == UserRole.admin
 
+
+def test_list_users_returns_serialized_list(db_session):
+    user_a = User(email="a@example.com", name="Alice", role=UserRole.admin)
+    user_b = User(email="b@example.com", name="Bob", role=UserRole.user)
+    db_session.add_all([user_a, user_b])
+    db_session.commit()
+
+    users = list_users(db_session)
+    assert len(users) == 2
+    assert users[0]["email"] == "a@example.com"
+    assert users[1]["email"] == "b@example.com"
+
+
+def test_update_user_profile_self_updates_name(db_session):
+    user = User(email="alice@example.com", name="Alice", role=UserRole.user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    update = UserUpdate(name="Alice Updated")
+    res = update_user_profile(
+        db=db_session,
+        current_user=user,
+        user_uuid=user.uuid,
+        update=update,
+    )
+    assert res["name"] == "Alice Updated"
+    assert res["email"] == "alice@example.com"
+
+
+def test_update_user_profile_non_admin_cannot_update_other(db_session):
+    user_a = User(email="a@example.com", name="Alice", role=UserRole.user)
+    user_b = User(email="b@example.com", name="Bob", role=UserRole.user)
+    db_session.add_all([user_a, user_b])
+    db_session.commit()
+    db_session.refresh(user_a)
+    db_session.refresh(user_b)
+
+    update = UserUpdate(name="Hacked")
+    with pytest.raises(HTTPException) as exc_info:
+        update_user_profile(
+            db=db_session,
+            current_user=user_a,
+            user_uuid=user_b.uuid,
+            update=update,
+        )
+    assert exc_info.value.status_code == 403
+    assert "cannot modify another user" in exc_info.value.detail
+
+
+def test_update_user_profile_non_admin_cannot_change_role_or_active(db_session):
+    user = User(email="alice@example.com", name="Alice", role=UserRole.user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    update = UserUpdate(role=UserRole.admin)
+    with pytest.raises(HTTPException) as exc_info:
+        update_user_profile(
+            db=db_session,
+            current_user=user,
+            user_uuid=user.uuid,
+            update=update,
+        )
+    assert exc_info.value.status_code == 403
+    assert "only administrators" in exc_info.value.detail
+
+
+def test_update_user_profile_admin_can_update_role_and_active(db_session):
+    admin = User(email="admin@example.com", name="Admin", role=UserRole.admin)
+    user = User(email="user@example.com", name="User", role=UserRole.user, is_active=True)
+    db_session.add_all([admin, user])
+    db_session.commit()
+    db_session.refresh(admin)
+    db_session.refresh(user)
+
+    update = UserUpdate(role=UserRole.clinician, is_active=False)
+    res = update_user_profile(
+        db=db_session,
+        current_user=admin,
+        user_uuid=user.uuid,
+        update=update,
+    )
+    assert res["role"] == "clinician"
+    assert res["is_active"] is False
+
+
+def test_update_user_profile_user_not_found(db_session):
+    admin = User(email="admin@example.com", name="Admin", role=UserRole.admin)
+    db_session.add(admin)
+    db_session.commit()
+    db_session.refresh(admin)
+
+    missing_uuid = uuid.uuid4()
+    update = UserUpdate(name="Nonexistent")
+    with pytest.raises(HTTPException) as exc_info:
+        update_user_profile(
+            db=db_session,
+            current_user=admin,
+            user_uuid=missing_uuid,
+            update=update,
+        )
+    assert exc_info.value.status_code == 404
+    assert "User not found" in exc_info.value.detail

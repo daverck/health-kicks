@@ -8,12 +8,15 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Literal
+from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.pseudonymization import get_subject_pseudonym
 from app.db.models import User, UserRole
+from app.schemas.user import UserUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -127,4 +130,72 @@ def upsert_sso_user(
         user.role.value,
     )
     return user
+
+
+def serialize_user(user: User) -> dict:
+    """Serialize a User ORM model to dictionary response."""
+    return {
+        "uuid": str(user.uuid),
+        "pseudonym": user.pseudonym,
+        "email": user.email,
+        "name": user.name,
+        "avatar_url": user.avatar_url,
+        "role": user.role.value,
+        "is_active": user.is_active,
+        "created_at": user.created_at,
+        "last_login_utc": user.last_login_utc,
+    }
+
+
+def list_users(db: Session) -> list[dict]:
+    """List all registered users ordered by ID."""
+    return [serialize_user(user) for user in db.query(User).order_by(User.id).all()]
+
+
+def update_user_profile(
+    db: Session,
+    current_user: User,
+    user_uuid: UUID,
+    update: UserUpdate,
+) -> dict:
+    """Update user profile enforcing authorization constraints.
+
+    Users can only update their own profile; admins can update anyone.
+    Only admins can modify role or active status.
+    """
+    if current_user.role != UserRole.admin and current_user.uuid != user_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: cannot modify another user",
+        )
+
+    target_user = db.query(User).filter(User.uuid == user_uuid).one_or_none()
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    original_email = target_user.email
+
+    if current_user.role != UserRole.admin:
+        if update.role is not None or update.is_active is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: only administrators can modify role or active status",
+            )
+
+    if update.name is not None:
+        target_user.name = update.name
+    if update.avatar_url is not None:
+        target_user.avatar_url = update.avatar_url
+
+    if current_user.role == UserRole.admin:
+        if update.role is not None:
+            target_user.role = update.role
+        if update.is_active is not None:
+            target_user.is_active = update.is_active
+
+    target_user.email = original_email
+    db.commit()
+    db.refresh(target_user)
+    return serialize_user(target_user)
+
 
