@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 from app.api.v1.utils import decode_cursor, encode_cursor
 from app.core.config import settings
 from app.db.models import Device, DeviceOwnership, DeviceStatus, User, UserRole
-from app.schemas.device import DeviceCreate, DeviceResponse
+from app.schemas.device import (
+    DeviceCreate,
+    DevicePresencePayload,
+    DevicePresenceResponse,
+    DeviceResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -456,6 +461,39 @@ def disconnect_user_devices_on_lwt(db: Session, user_identifier: int | str | Non
     db.commit()
     logger.info("Relayed user LWT presence update: user_id=%s, state=offline", user_identifier)
     return device_ids
+
+
+def process_device_presence(
+    db: Session,
+    payload: DevicePresencePayload,
+) -> DevicePresenceResponse:
+    """Process device connection status and last seen timestamp or LWT bulk disconnect."""
+    if not payload.is_valid_state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status '{payload.effective_state}'. Expected 'online', 'offline', 'connected', or 'disconnected'.",
+        )
+
+    if payload.device_id:
+        device = update_single_device_presence(
+            db=db,
+            device_id=payload.device_id,
+            is_online=payload.is_online,
+            timestamp=payload.timestamp,
+        )
+        return DevicePresenceResponse(
+            status="ok",
+            device_id=device.device_id,
+            device_status=device.status,
+        )
+
+    # LWT user-level bulk disconnect
+    disconnect_user_devices_on_lwt(db=db, user_identifier=payload.user_id)
+    return DevicePresenceResponse(
+        status="ok",
+        device_id=None,
+        device_status=DeviceStatus.offline,
+    )
 
 
 # Backwards compatibility alias

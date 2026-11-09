@@ -2,20 +2,16 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import verify_ingest_token
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import DeviceStatus
 from app.schemas.fall_alert import FallAlertIngestPayload, FallAlertIngestResponse
 from app.schemas.internal import DevicePresencePayload, DevicePresenceResponse
 from app.services.aws_iot_service import AWSIoTPublishService
-from app.services.device_service import (
-    disconnect_user_devices_on_lwt,
-    update_single_device_presence,
-)
+from app.services.device_service import process_device_presence
 from app.services.email_service import SmtpEmailChannel
 from app.services.fall_alert_service import ingest_fall_alert_event
 
@@ -41,32 +37,7 @@ def create_internal_router(
         db: Session = Depends(get_db),
     ) -> DevicePresenceResponse:
         """Update device connection status and last seen timestamp from IoT lifecycle events."""
-        if not payload.is_valid_state:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status '{payload.effective_state}'. Expected 'online', 'offline', 'connected', or 'disconnected'.",
-            )
-
-        if payload.device_id:
-            device = update_single_device_presence(
-                db=db,
-                device_id=payload.device_id,
-                is_online=payload.is_online,
-                timestamp=payload.timestamp,
-            )
-            return DevicePresenceResponse(
-                status="ok",
-                device_id=device.device_id,
-                device_status=device.status,
-            )
-
-        # LWT user-level bulk disconnect
-        disconnect_user_devices_on_lwt(db=db, user_identifier=payload.user_id)
-        return DevicePresenceResponse(
-            status="ok",
-            device_id=None,
-            device_status=DeviceStatus.offline,
-        )
+        return process_device_presence(db=db, payload=payload)
 
     @router.post(
         "/fall-alerts",
