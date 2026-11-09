@@ -369,6 +369,14 @@ def unbind_device_admin(db: Session, device_uuid: UUID | str) -> None:
     db.commit()
 
 
+def unbind_device_for_user(db: Session, user: User, device_uuid: UUID | str) -> None:
+    """Dissociate/unbind a device, respecting administrator privileges vs standard user boundaries."""
+    if user.role == UserRole.admin:
+        unbind_device_admin(db=db, device_uuid=device_uuid)
+    else:
+        unbind_device(db=db, user_id=user.id, device_uuid=device_uuid)
+
+
 def resolve_user_by_identifier(db: Session, user_identifier: int | str | None) -> User | None:
     """Resolve a user by DB id, UUID string, digit string, OAuth sub, or email."""
     if user_identifier is None:

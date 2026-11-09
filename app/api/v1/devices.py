@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
 from app.db.database import get_db
-from app.db.models import UserRole
 from app.schemas.device import DeviceCreate, DeviceResponse
 from app.services import device_service
 
@@ -60,9 +59,6 @@ def create_devices_router() -> APIRouter:
         db: Session = Depends(get_db),
     ) -> None:
         """Dissociate/unbind a device by UUID."""
-        if user.role == UserRole.admin:
-            device_service.unbind_device_admin(db=db, device_uuid=device_uuid)
-        else:
-            device_service.unbind_device(db=db, user_id=user.id, device_uuid=device_uuid)
+        device_service.unbind_device_for_user(db=db, user=user, device_uuid=device_uuid)
 
     return router

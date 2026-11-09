@@ -514,3 +514,26 @@ def test_resolve_target_user_for_binding(db_session, user_a, user_b) -> None:
         resolve_target_user_for_binding(db_session, admin, "00000000-0000-0000-0000-000000000000")
     assert exc_info_404.value.status_code == 404
 
+
+def test_unbind_device_for_user_admin_and_standard(db_session, user_a, user_b) -> None:
+    from app.services.device_service import unbind_device_for_user
+
+    device = Device(device_id="shoe-unbind-svc-01", name="Unbind Service Test")
+    db_session.add(device)
+    db_session.commit()
+
+    # Bind device to user A
+    ownership = DeviceOwnership(user_id=user_a.id, device_id="shoe-unbind-svc-01")
+    db_session.add(ownership)
+    db_session.commit()
+
+    # Admin user unbinds
+    admin = User(google_sub="admin-unbind-sub", email="admin-unbind@hk.com", role=UserRole.admin)
+    db_session.add(admin)
+    db_session.commit()
+
+    unbind_device_for_user(db_session, admin, device.uuid)
+
+    assert db_session.query(DeviceOwnership).filter_by(device_id="shoe-unbind-svc-01").count() == 0
+
+
