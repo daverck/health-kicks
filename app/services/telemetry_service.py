@@ -63,36 +63,54 @@ class TelemetryService:
             return dynamodb.Table(self._config.dynamodb_telemetry_table)
         return self._table
 
-    def get_session_readings(
+    def _execute_paginated_fetch(
         self,
-        device_id: str,
-        session_id: str,
-    ) -> StudioSessionReadingsResponse | None:
-        """Query IMU telemetry points for a specific Studio session."""
-        table = self._get_table()
+        fetch_fn: Any,
+        kwargs: dict[str, Any],
+        error_context: str = "query",
+    ) -> list[dict[str, Any]]:
+        """Execute a paginated query or scan against DynamoDB, accumulating all items."""
         items: list[dict[str, Any]] = []
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("device_id").eq(device_id),
-            "FilterExpression": Attr("session_id").eq(session_id),
-        }
+        call_kwargs = dict(kwargs)
 
         while True:
             try:
-                response = table.query(**query_kwargs)
+                response = fetch_fn(**call_kwargs)
             except (BotoCoreError, ClientError) as error:
-                logger.error(
-                    "DynamoDB query failed for device %s session %s: %s",
-                    device_id,
-                    session_id,
-                    error,
-                )
+                logger.error("DynamoDB %s: %s", error_context, error)
                 raise
 
             items.extend(response.get("Items", []))
             last_key = response.get("LastEvaluatedKey")
             if not last_key:
                 break
-            query_kwargs["ExclusiveStartKey"] = last_key
+            call_kwargs["ExclusiveStartKey"] = last_key
+
+        return items
+
+    def _query_all_items(
+        self,
+        query_kwargs: dict[str, Any],
+        error_context: str = "query",
+    ) -> list[dict[str, Any]]:
+        """Execute a paginated table.query against DynamoDB."""
+        table = self._get_table()
+        return self._execute_paginated_fetch(table.query, query_kwargs, error_context)
+
+    def get_session_readings(
+        self,
+        device_id: str,
+        session_id: str,
+    ) -> StudioSessionReadingsResponse | None:
+        """Query IMU telemetry points for a specific Studio session."""
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": Key("device_id").eq(device_id),
+            "FilterExpression": Attr("session_id").eq(session_id),
+        }
+        items = self._query_all_items(
+            query_kwargs,
+            f"query failed for device {device_id} session {session_id}",
+        )
 
         if not items:
             return None
@@ -118,7 +136,6 @@ class TelemetryService:
     def delete_session_readings(self, device_id: str, session_id: str) -> int:
         """Purge all telemetry points associated with a Studio session."""
         table = self._get_table()
-        items_to_delete: list[dict[str, Any]] = []
         query_kwargs: dict[str, Any] = {
             "KeyConditionExpression": Key("device_id").eq(device_id),
             "FilterExpression": Attr("session_id").eq(session_id),
@@ -126,23 +143,10 @@ class TelemetryService:
             "ExpressionAttributeNames": {"#ts": "timestamp"},
         }
 
-        while True:
-            try:
-                response = table.query(**query_kwargs)
-            except (BotoCoreError, ClientError) as error:
-                logger.error(
-                    "DynamoDB query for deletion failed for device %s session %s: %s",
-                    device_id,
-                    session_id,
-                    error,
-                )
-                raise
-
-            items_to_delete.extend(response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        items_to_delete = self._query_all_items(
+            query_kwargs,
+            f"query for deletion failed for device {device_id} session {session_id}",
+        )
 
         if not items_to_delete:
             return 0
@@ -173,7 +177,6 @@ class TelemetryService:
     ) -> int:
         """Keep readings inside the requested interval and return the retained count."""
         table = self._get_table()
-        items: list[dict[str, Any]] = []
         query_kwargs: dict[str, Any] = {
             "KeyConditionExpression": Key("device_id").eq(device_id),
             "FilterExpression": Attr("session_id").eq(session_id),
@@ -181,22 +184,10 @@ class TelemetryService:
             "ExpressionAttributeNames": {"#ts": "timestamp"},
         }
 
-        while True:
-            try:
-                response = table.query(**query_kwargs)
-            except (BotoCoreError, ClientError) as error:
-                logger.error(
-                    "DynamoDB query failed while trimming session %s: %s",
-                    session_id,
-                    error,
-                )
-                raise
-
-            items.extend(response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        items = self._query_all_items(
+            query_kwargs,
+            f"query failed while trimming session {session_id}",
+        )
 
         if not items:
             return 0
@@ -264,7 +255,6 @@ class TelemetryService:
     ) -> StudioDatasetStatsResponse:
         """Aggregate recorded studio sessions by label and compute total sessions."""
         table = self._get_table()
-        items: list[dict[str, Any]] = []
         filter_expr = Attr("session_id").exists() & Attr("label").exists()
         proj_expr = "session_id, #lbl"
         attr_names = {"#lbl": "label"}
@@ -285,22 +275,11 @@ class TelemetryService:
             }
             fetch_fn = table.scan
 
-        while True:
-            try:
-                response = fetch_fn(**query_kwargs)
-            except (BotoCoreError, ClientError) as error:
-                logger.error(
-                    "DynamoDB stats query failed for device %s: %s",
-                    device_id,
-                    error,
-                )
-                raise
-
-            items.extend(response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        items = self._execute_paginated_fetch(
+            fetch_fn,
+            query_kwargs,
+            f"stats query failed for device {device_id}",
+        )
 
         sessions: dict[str, str] = {}
         for item in items:
