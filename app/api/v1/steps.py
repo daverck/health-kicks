@@ -1,10 +1,10 @@
 """FastAPI router for daily activity steps synchronization and history."""
 
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
@@ -20,6 +20,7 @@ from app.services.device_service import verify_device_ownership
 from app.services.steps_service import (
     get_hourly_steps,
     get_steps_history,
+    resolve_steps_date_range,
     sync_daily_steps,
 )
 
@@ -62,25 +63,9 @@ def create_steps_router() -> APIRouter:
     ) -> DailyStepsHistoryResponse:
         """Fetch step counts history grouped by day and activity type."""
         verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
-
-        today = datetime.now(UTC).date()
-
-        if to_date is None:
-            resolved_to_date = today
-        else:
-            resolved_to_date = to_date
-
-        if from_date is None:
-            resolved_from_date = resolved_to_date - timedelta(days=days - 1)
-        else:
-            resolved_from_date = from_date
-
-        if resolved_from_date > resolved_to_date:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="from_date cannot be greater than to_date",
-            )
-
+        resolved_from_date, resolved_to_date = resolve_steps_date_range(
+            from_date=from_date, to_date=to_date, days=days
+        )
         return get_steps_history(
             db=db,
             device_id=device_id,

@@ -1,8 +1,9 @@
 """Business logic and persistence service for daily activity step counting."""
 
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -83,6 +84,34 @@ def sync_daily_steps(db: Session, user_id: int, payload: DailyStepsSyncPayload) 
 
     db.commit()
     return synced_count
+
+
+def resolve_steps_date_range(
+    from_date: date | None,
+    to_date: date | None,
+    days: int = 30,
+) -> tuple[date, date]:
+    """Resolve and validate a date range for steps history.
+
+    Defaults to_date to today UTC if not specified.
+    Defaults from_date to (to_date - timedelta(days=days - 1)) if not specified.
+    Raises HTTPException(422) if from_date > to_date.
+    """
+    today = datetime.now(UTC).date()
+    resolved_to_date = today if to_date is None else to_date
+    resolved_from_date = (
+        resolved_to_date - timedelta(days=days - 1)
+        if from_date is None
+        else from_date
+    )
+
+    if resolved_from_date > resolved_to_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="from_date cannot be greater than to_date",
+        )
+
+    return resolved_from_date, resolved_to_date
 
 
 def get_steps_history(

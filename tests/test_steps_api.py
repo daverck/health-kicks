@@ -380,4 +380,33 @@ def test_sync_and_get_real_hourly_steps(client, auth_headers_regular, db_session
     assert hourly_items[18]["total_steps"] == 0
 
 
+def test_resolve_steps_date_range_helper() -> None:
+    from datetime import UTC, date, datetime, timedelta
+
+    from fastapi import HTTPException
+
+    from app.services.steps_service import resolve_steps_date_range
+
+    d1 = date(2026, 10, 1)
+    d2 = date(2026, 10, 15)
+
+    # 1. Explicit valid dates
+    f, t = resolve_steps_date_range(from_date=d1, to_date=d2)
+    assert f == d1
+    assert t == d2
+
+    # 2. Inverted dates -> HTTPException 422
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_steps_date_range(from_date=d2, to_date=d1)
+    assert exc_info.value.status_code == 422
+    assert "from_date cannot be greater than to_date" in exc_info.value.detail
+
+    # 3. Default to_date to today, from_date to today - (days - 1)
+    today = datetime.now(UTC).date()
+    f_def, t_def = resolve_steps_date_range(from_date=None, to_date=None, days=7)
+    assert t_def == today
+    assert f_def == today - timedelta(days=6)
+
+
+
 
