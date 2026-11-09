@@ -7,9 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import RequireClinicianOrAdmin
 from app.api.v1.utils import validate_and_normalize_date_range
-from app.core.pseudonymization import get_subject_pseudonym
 from app.db.database import get_db
-from app.db.models import StudioSession, User, UserRole
 from app.schemas.studio import (
     PaginatedSessionsResponse,
     StudioAuthorSummary,
@@ -20,9 +18,13 @@ from app.schemas.studio import (
 )
 from app.schemas.telemetry import StudioSessionReadingsResponse
 from app.services.studio_service import (
+    delete_studio_session,
     get_authorized_session,
+    query_studio_authors,
     query_studio_sessions,
     to_session_summary,
+    trim_studio_session,
+    update_studio_session,
 )
 from app.services.telemetry_service import TelemetryService
 
@@ -87,52 +89,7 @@ def create_studio_sessions_router(
         db: Session = Depends(get_db),
     ) -> list[StudioAuthorSummary]:
         """List authors who have recorded studio sessions with GDPR pseudonymization for third-party authors."""
-        if user.role == UserRole.admin:
-            users = (
-                db.query(User.id, User.email, User.name, User.uuid, User.pseudonym)
-                .join(StudioSession, StudioSession.user_id == User.id)
-                .distinct()
-                .order_by(User.id)
-                .all()
-            )
-            authors: list[StudioAuthorSummary] = []
-            for u in users:
-                is_own = (u.id == user.id)
-                pseudo = u.pseudonym or get_subject_pseudonym(str(u.uuid) if u.uuid else u.id)
-                if is_own:
-                    authors.append(
-                        StudioAuthorSummary(
-                            author_uuid=u.uuid,
-                            author_pseudonym=pseudo,
-                            email=u.email,
-                            name=u.name,
-                            subject_pseudonym=pseudo,
-                            is_pseudonymized=False,
-                        )
-                    )
-                else:
-                    authors.append(
-                        StudioAuthorSummary(
-                            author_uuid=u.uuid,
-                            author_pseudonym=pseudo,
-                            email=f"{pseudo.lower()}@pseudonym.healthkicks.local",
-                            name=f"Patient {pseudo}",
-                            subject_pseudonym=pseudo,
-                            is_pseudonymized=True,
-                        )
-                    )
-            return authors
-        own_pseudo = user.pseudonym or get_subject_pseudonym(str(user.uuid) if user.uuid else user.id)
-        return [
-            StudioAuthorSummary(
-                author_uuid=user.uuid,
-                author_pseudonym=own_pseudo,
-                email=user.email,
-                name=user.name,
-                subject_pseudonym=own_pseudo,
-                is_pseudonymized=False,
-            )
-        ]
+        return query_studio_authors(db, user)
 
     @router.get("/{session_id}", response_model=StudioSessionDetail)
     def get_session_detail(
@@ -185,51 +142,8 @@ def create_studio_sessions_router(
     ) -> StudioSessionSummary:
         """Keep a selected time interval from an unvalidated session."""
         session = get_authorized_session(db, session_id, user)
-        if session.is_validated is True:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Impossible d'écourter une session déjà confirmée/validée",
-            )
-        end_offset_sec = payload.end_offset_sec or payload.new_duration_sec
-        if end_offset_sec is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="An end offset is required",
-            )
-        if end_offset_sec > session.duration_sec:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Le point de fin doit être inférieur ou égal à la durée actuelle",
-            )
-        if payload.start_offset_sec == 0 and end_offset_sec >= session.duration_sec:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="L'intervalle sélectionné doit être plus court que la session actuelle",
-            )
-
-        try:
-            retained_count = telemetry_service.trim_session_readings(
-                device_id=session.device_id,
-                session_id=str(session.uuid),
-                start_offset_sec=payload.start_offset_sec,
-                end_offset_sec=end_offset_sec,
-            )
-        except (BotoCoreError, ClientError) as error:
-            logger.error(
-                "Could not trim readings from DynamoDB for session %s: %s",
-                session.uuid,
-                error,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Failed to trim studio session readings from telemetry store",
-            )
-
-        session.duration_sec = end_offset_sec - payload.start_offset_sec
-        session.sample_count = retained_count
-        db.commit()
-        db.refresh(session)
-        return to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
+        updated = trim_studio_session(db, session, payload, telemetry_service)
+        return to_session_summary(updated, is_admin=user.is_admin, current_user_id=user.id)
 
     @router.patch("/{session_id}/confirm", response_model=StudioSessionSummary)
     def confirm_session(
@@ -253,30 +167,8 @@ def create_studio_sessions_router(
     ) -> StudioSessionSummary:
         """Reclassify a studio session's activity label or update validation in PostgreSQL and DynamoDB."""
         session = get_authorized_session(db, session_id, user)
-
-        if payload.label is not None:
-            session.label = payload.label
-        if payload.is_validated is not None:
-            session.is_validated = payload.is_validated
-
-        db.commit()
-        db.refresh(session)
-
-        if payload.label is not None:
-            try:
-                telemetry_service.update_session_label(
-                    device_id=session.device_id,
-                    session_id=str(session.uuid),
-                    new_label=payload.label,
-                )
-            except (BotoCoreError, ClientError) as error:
-                logger.warning(
-                    "Could not propagate label update to DynamoDB for session %s: %s",
-                    session.uuid,
-                    error,
-                )
-
-        return to_session_summary(session, is_admin=user.is_admin, current_user_id=user.id)
+        updated = update_studio_session(db, session, payload, telemetry_service)
+        return to_session_summary(updated, is_admin=user.is_admin, current_user_id=user.id)
 
     @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_session(
@@ -286,21 +178,7 @@ def create_studio_sessions_router(
     ) -> Response:
         """Purge a studio session from PostgreSQL and delete all raw IMU frames in DynamoDB."""
         session = get_authorized_session(db, session_id, user)
-
-        try:
-            telemetry_service.delete_session_readings(
-                device_id=session.device_id,
-                session_id=str(session.uuid),
-            )
-        except (BotoCoreError, ClientError) as error:
-            logger.warning(
-                "Could not purge readings from DynamoDB for session %s: %s",
-                session.uuid,
-                error,
-            )
-
-        db.delete(session)
-        db.commit()
+        delete_studio_session(db, session, telemetry_service)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return router
