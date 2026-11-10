@@ -36,7 +36,7 @@ class Settings:
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:4200/auth/google/callback"
     google_mobile_redirect_uri: str = "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback"
-    jwt_secret: str = "dev-only-insecure-secret"
+    jwt_secret: str = "dev-only-insecure-secret-key-32-chars-min!"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 7
@@ -437,7 +437,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
 
     if str(values.get("environment", "")).lower() in ("prod", "production"):
         jwt_sec = str(values.get("jwt_secret", ""))
-        if jwt_sec == "dev-only-insecure-secret" or len(jwt_sec) < 32:
+        if jwt_sec in ("dev-only-insecure-secret", defaults.jwt_secret) or len(jwt_sec) < 32:
             raise ValueError("Insecure JWT secret configured for production environment")
 
         origins = values.get("public_origins")

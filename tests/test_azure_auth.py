@@ -248,7 +248,14 @@ def test_email_fallback_order(mock_azure_settings, mock_azure_jwks) -> None:
             azure_auth_service.exchange_code_for_azure_user("code-5")
 
 
-def test_verify_azure_id_token_malformed() -> None:
+def test_verify_azure_id_token_unconfigured(mock_azure_settings) -> None:
+    mock_azure_settings(azure_client_id="")
+    with pytest.raises(AzureAuthError, match="Microsoft Azure OAuth credentials are not configured"):
+        azure_auth_service.verify_azure_id_token("any-token")
+
+
+def test_verify_azure_id_token_malformed(mock_azure_settings) -> None:
+    mock_azure_settings(azure_client_id="cid")
     with pytest.raises(AzureAuthError, match="Malformed Azure ID token"):
         azure_auth_service.verify_azure_id_token("invalid.token.payload")
 
