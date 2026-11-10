@@ -408,5 +408,63 @@ def test_resolve_steps_date_range_helper() -> None:
     assert f_def == today - timedelta(days=6)
 
 
+def test_aggregate_daily_steps_summaries_helper() -> None:
+    from datetime import date
+
+    from app.db.models import DailyActivityStep
+    from app.services.steps_service import aggregate_daily_steps_summaries
+
+    d1 = date(2026, 10, 1)
+    d2 = date(2026, 10, 2)
+
+    rows = [
+        DailyActivityStep(date=d1, activity_type="walk", step_count=1200),
+        DailyActivityStep(date=d1, activity_type="run", step_count=800),
+        DailyActivityStep(date=d2, activity_type="stairs", step_count=350),
+    ]
+
+    summaries = aggregate_daily_steps_summaries(rows)
+    assert len(summaries) == 2
+
+    assert summaries[0].date == d1
+    assert summaries[0].total_steps == 2000
+    assert summaries[0].by_activity == {"walk": 1200, "run": 800}
+
+    assert summaries[1].date == d2
+    assert summaries[1].total_steps == 350
+    assert summaries[1].by_activity == {"stairs": 350}
+
+
+def test_build_24h_hourly_step_items_helper() -> None:
+    from app.db.models import HourlyActivityStep
+    from app.services.steps_service import build_24h_hourly_step_items
+
+    records = [
+        HourlyActivityStep(hour=8, activity_type="walk", step_count=500),
+        HourlyActivityStep(hour=8, activity_type="stairs", step_count=150),
+        HourlyActivityStep(hour=14, activity_type="run", step_count=1200),
+        HourlyActivityStep(hour=25, activity_type="invalid", step_count=999),  # Out of range hour ignored
+    ]
+
+    items = build_24h_hourly_step_items(records)
+    assert len(items) == 24
+
+    # Hour 8
+    assert items[8].hour == 8
+    assert items[8].total_steps == 650
+    assert items[8].by_activity == {"walk": 500, "stairs": 150}
+
+    # Hour 14
+    assert items[14].hour == 14
+    assert items[14].total_steps == 1200
+    assert items[14].by_activity == {"run": 1200}
+
+    # Hour 0 (unrecorded default)
+    assert items[0].hour == 0
+    assert items[0].total_steps == 0
+    assert items[0].by_activity == {}
+
+
+
 
 

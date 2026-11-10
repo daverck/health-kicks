@@ -1,6 +1,7 @@
 """Business logic and persistence service for daily activity step counting."""
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -114,6 +115,52 @@ def resolve_steps_date_range(
     return resolved_from_date, resolved_to_date
 
 
+def aggregate_daily_steps_summaries(
+    rows: Sequence[DailyActivityStep],
+) -> list[DailyStepsSummary]:
+    """Group and aggregate daily activity steps by date into DailyStepsSummary objects."""
+    grouped_by_date: dict[date, dict[str, int]] = {}
+    for row in rows:
+        if row.date not in grouped_by_date:
+            grouped_by_date[row.date] = {}
+        grouped_by_date[row.date][row.activity_type] = row.step_count
+
+    history: list[DailyStepsSummary] = []
+    for d, activities in grouped_by_date.items():
+        total = sum(activities.values())
+        history.append(
+            DailyStepsSummary(
+                date=d,
+                total_steps=total,
+                by_activity=activities,
+            )
+        )
+    return history
+
+
+def build_24h_hourly_step_items(
+    records: Sequence[HourlyActivityStep],
+) -> list[HourlyStepItem]:
+    """Construct 24-hour step items (hours 0 to 23), defaulting unrecorded hours to 0 steps."""
+    hourly_data_by_hour: dict[int, dict[str, int]] = {h: {} for h in range(24)}
+    for rec in records:
+        if 0 <= rec.hour <= 23:
+            hourly_data_by_hour[rec.hour][rec.activity_type] = rec.step_count
+
+    items: list[HourlyStepItem] = []
+    for h in range(24):
+        by_act = hourly_data_by_hour[h]
+        tot = sum(by_act.values())
+        items.append(
+            HourlyStepItem(
+                hour=h,
+                total_steps=tot,
+                by_activity=by_act,
+            )
+        )
+    return items
+
+
 def get_steps_history(
     db: Session,
     device_id: str,
@@ -121,7 +168,7 @@ def get_steps_history(
     user_role: UserRole,
     from_date: date,
     to_date: date,
- ) -> DailyStepsHistoryResponse:
+) -> DailyStepsHistoryResponse:
     """Retrieve historical daily step counts aggregated by activity type across a date range.
 
     Enforces authorization: non-admin users (user and clinician) can only query their own data.
@@ -140,24 +187,7 @@ def get_steps_history(
         stmt = stmt.where(DailyActivityStep.user_id == user_id)
 
     rows = db.execute(stmt).scalars().all()
-
-    # Group activities by date
-    grouped_by_date: dict[date, dict[str, int]] = {}
-    for row in rows:
-        if row.date not in grouped_by_date:
-            grouped_by_date[row.date] = {}
-        grouped_by_date[row.date][row.activity_type] = row.step_count
-
-    history: list[DailyStepsSummary] = []
-    for d, activities in grouped_by_date.items():
-        total = sum(activities.values())
-        history.append(
-            DailyStepsSummary(
-                date=d,
-                total_steps=total,
-                by_activity=activities,
-            )
-        )
+    history = aggregate_daily_steps_summaries(rows)
 
     return DailyStepsHistoryResponse(
         device_id=device_id,
@@ -187,23 +217,7 @@ def get_hourly_steps(
         stmt_hourly = stmt_hourly.where(HourlyActivityStep.user_id == user_id)
 
     hourly_records = db.execute(stmt_hourly).scalars().all()
-
-    hourly_data_by_hour: dict[int, dict[str, int]] = {h: {} for h in range(24)}
-    for rec in hourly_records:
-        if 0 <= rec.hour <= 23:
-            hourly_data_by_hour[rec.hour][rec.activity_type] = rec.step_count
-
-    items: list[HourlyStepItem] = []
-    for h in range(24):
-        by_act = hourly_data_by_hour[h]
-        tot = sum(by_act.values())
-        items.append(
-            HourlyStepItem(
-                hour=h,
-                total_steps=tot,
-                by_activity=by_act,
-            )
-        )
+    items = build_24h_hourly_step_items(hourly_records)
 
     return HourlyStepsResponse(
         device_id=device_id,
