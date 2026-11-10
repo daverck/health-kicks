@@ -48,6 +48,50 @@ def mock_azure_settings(monkeypatch):
     return _apply
 
 
+@pytest.fixture(scope="module")
+def rsa_keypair():
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return private_key, private_key.public_key()
+
+
+@pytest.fixture()
+def mock_azure_jwks(rsa_keypair, monkeypatch):
+    import time
+    from typing import Any
+
+    private_key, public_key = rsa_keypair
+    mock_client = MagicMock(spec=jwt.PyJWKClient)
+    mock_key = MagicMock()
+    mock_key.key = public_key
+    mock_client.get_signing_key_from_jwt.return_value = mock_key
+
+    def _create_token(
+        claims: dict[str, Any],
+        headers: dict[str, Any] | None = None,
+        key: Any = private_key,
+        algorithm: str = "RS256",
+    ) -> str:
+        h = {"kid": "az-test-kid"}
+        if headers:
+            h.update(headers)
+        from app.core.config import settings
+
+        tid = settings.azure_tenant_id or "common-tid"
+        default_claims = {
+            "iss": f"https://login.microsoftonline.com/{tid}/v2.0",
+            "aud": settings.azure_client_id,
+            "exp": int(time.time()) + 3600,
+            "tid": tid,
+        }
+        full_claims = {**default_claims, **claims}
+        return jwt.encode(full_claims, key, algorithm=algorithm, headers=h)
+
+    monkeypatch.setattr(azure_auth_service, "get_azure_jwks_client", lambda: mock_client)
+    return _create_token, mock_client
+
+
 @pytest.fixture()
 def auth_client(db_session, mock_azure_settings) -> TestClient:
     mock_azure_settings(
@@ -114,22 +158,19 @@ def test_exchange_code_token_endpoint_failure(mock_azure_settings) -> None:
             azure_auth_service.exchange_code_for_azure_user("bad-code")
 
 
-def test_email_fallback_order(mock_azure_settings) -> None:
+def test_email_fallback_order(mock_azure_settings, mock_azure_jwks) -> None:
     mock_azure_settings(
         azure_client_id="cid",
         azure_client_secret="csec",
+        azure_tenant_id="test-tenant",
     )
+    create_token, _ = mock_azure_jwks
 
-    id_token_payload = {
+    dummy_id_token = create_token({
         "sub": "az-sub-1",
         "email": "token-email@example.com",
         "preferred_username": "token-pref@example.com",
-    }
-    dummy_id_token = jwt.encode(
-        id_token_payload,
-        "test-jwt-secret-key-for-azure-auth-tests-32b!",
-        algorithm="HS256",
-    )
+    })
 
     token_mock = MagicMock()
     token_mock.status_code = 200
@@ -180,11 +221,10 @@ def test_email_fallback_order(mock_azure_settings) -> None:
         assert info["email"] == "token-email@example.com"
 
     # Case 4: Graph profile None, id_token has only preferred_username
-    dummy_id_token_pref = jwt.encode(
-        {"sub": "az-sub-1", "preferred_username": "token-pref@example.com"},
-        "test-jwt-secret-key-for-azure-auth-tests-32b!",
-        algorithm="HS256",
-    )
+    dummy_id_token_pref = create_token({
+        "sub": "az-sub-1",
+        "preferred_username": "token-pref@example.com",
+    })
     token_mock_pref = MagicMock()
     token_mock_pref.status_code = 200
     token_mock_pref.json.return_value = {
@@ -196,11 +236,7 @@ def test_email_fallback_order(mock_azure_settings) -> None:
         assert info["email"] == "token-pref@example.com"
 
     # Case 5: No email found anywhere -> raises AzureAuthError("No valid email found in Microsoft account")
-    dummy_id_token_empty = jwt.encode(
-        {"sub": "az-sub-1"},
-        "test-jwt-secret-key-for-azure-auth-tests-32b!",
-        algorithm="HS256",
-    )
+    dummy_id_token_empty = create_token({"sub": "az-sub-1"})
     token_mock_empty = MagicMock()
     token_mock_empty.status_code = 200
     token_mock_empty.json.return_value = {
@@ -210,6 +246,137 @@ def test_email_fallback_order(mock_azure_settings) -> None:
     with patch("httpx.post", return_value=token_mock_empty), patch("httpx.get", return_value=graph_mock_3):
         with pytest.raises(AzureAuthError, match="No valid email found in Microsoft account"):
             azure_auth_service.exchange_code_for_azure_user("code-5")
+
+
+def test_verify_azure_id_token_malformed() -> None:
+    with pytest.raises(AzureAuthError, match="Malformed Azure ID token"):
+        azure_auth_service.verify_azure_id_token("invalid.token.payload")
+
+
+def test_verify_azure_id_token_unsupported_algorithm(mock_azure_settings) -> None:
+    mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
+    token = jwt.encode(
+        {"sub": "1", "iss": "https://login.microsoftonline.com/tenant-1/v2.0", "aud": "cid", "exp": 9999999999},
+        "symmetric-secret-key-32-chars-long",
+        algorithm="HS256",
+        headers={"kid": "some-kid"},
+    )
+    with pytest.raises(AzureAuthError, match="Unsupported Azure token algorithm: HS256"):
+        azure_auth_service.verify_azure_id_token(token)
+
+
+def test_verify_azure_id_token_missing_kid(mock_azure_settings, rsa_keypair) -> None:
+    mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
+    private_key, _ = rsa_keypair
+    token = jwt.encode(
+        {"sub": "1", "iss": "https://login.microsoftonline.com/tenant-1/v2.0", "aud": "cid", "exp": 9999999999},
+        private_key,
+        algorithm="RS256",
+    )
+    with pytest.raises(AzureAuthError, match="Missing kid header in Azure ID token"):
+        azure_auth_service.verify_azure_id_token(token)
+
+
+def test_verify_azure_id_token_specific_tenant_mismatch(mock_azure_settings, mock_azure_jwks) -> None:
+    mock_azure_settings(azure_client_id="cid", azure_tenant_id="expected-tenant")
+    create_token, _ = mock_azure_jwks
+    token = create_token({"iss": "https://login.microsoftonline.com/wrong-tenant/v2.0"})
+    with pytest.raises(AzureAuthError, match="Unexpected Azure token issuer"):
+        azure_auth_service.verify_azure_id_token(token)
+
+
+def test_verify_azure_id_token_common_missing_or_invalid_tid(mock_azure_settings, mock_azure_jwks) -> None:
+    mock_azure_settings(azure_client_id="cid", azure_tenant_id="common")
+    create_token, _ = mock_azure_jwks
+    token = create_token({"iss": "https://login.microsoftonline.com/tenant-a/v2.0", "tid": "tenant-b"})
+    with pytest.raises(AzureAuthError, match="Invalid Azure token issuer or tenant"):
+        azure_auth_service.verify_azure_id_token(token)
+
+
+def test_verify_azure_id_token_audience_mismatch(mock_azure_settings, mock_azure_jwks) -> None:
+    mock_azure_settings(azure_client_id="expected-cid", azure_tenant_id="tenant-1")
+    create_token, _ = mock_azure_jwks
+    token = create_token({"aud": "wrong-client-id"})
+    with pytest.raises(AzureAuthError, match="Azure token audience mismatch"):
+        azure_auth_service.verify_azure_id_token(token)
+
+
+def test_verify_azure_id_token_expired(mock_azure_settings, mock_azure_jwks) -> None:
+    import time
+    mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
+    create_token, _ = mock_azure_jwks
+    token = create_token({"exp": int(time.time()) - 30})
+    with pytest.raises(AzureAuthError, match="Azure token expired"):
+        azure_auth_service.verify_azure_id_token(token)
+
+
+def test_verify_azure_id_token_signing_key_fetch_error(mock_azure_settings, mock_azure_jwks) -> None:
+    mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
+    create_token, mock_client = mock_azure_jwks
+    mock_client.get_signing_key_from_jwt.side_effect = jwt.PyJWKClientError("Key ID not found in JWKS")
+    token = create_token({"sub": "user-123"})
+    with pytest.raises(AzureAuthError, match="No matching Azure signing key"):
+        azure_auth_service.verify_azure_id_token(token)
+
+
+def test_verify_azure_id_token_signature_tampered(mock_azure_settings, mock_azure_jwks, rsa_keypair) -> None:
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
+    create_token, _ = mock_azure_jwks
+    attacker_private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    tampered_token = create_token({"sub": "forged-user"}, key=attacker_private_key)
+    with pytest.raises(AzureAuthError, match="Azure ID token signature check failed"):
+        azure_auth_service.verify_azure_id_token(tampered_token)
+
+
+def test_verify_azure_id_token_success(mock_azure_settings, mock_azure_jwks) -> None:
+    mock_azure_settings(azure_client_id="test-client-id", azure_tenant_id="my-tenant-uuid")
+    create_token, _ = mock_azure_jwks
+    token = create_token({
+        "sub": "az-valid-user-123",
+        "email": "doctor@healthkicks.org",
+        "name": "Dr. Validated",
+    })
+    verified = azure_auth_service.verify_azure_id_token(token)
+    assert verified["sub"] == "az-valid-user-123"
+    assert verified["email"] == "doctor@healthkicks.org"
+    assert verified["name"] == "Dr. Validated"
+    assert verified["aud"] == "test-client-id"
+
+
+def test_exchange_code_for_azure_user_invalid_id_token_fails(mock_azure_settings) -> None:
+    mock_azure_settings(azure_client_id="cid", azure_client_secret="csec")
+    token_mock = MagicMock()
+    token_mock.status_code = 200
+    token_mock.json.return_value = {"access_token": "mock-access", "id_token": "tampered-token"}
+    with patch("httpx.post", return_value=token_mock):
+        with pytest.raises(AzureAuthError, match="Malformed Azure ID token"):
+            azure_auth_service.exchange_code_for_azure_user("code-xyz")
+
+
+def test_exchange_code_for_azure_user_without_id_token_uses_graph(mock_azure_settings) -> None:
+    mock_azure_settings(azure_client_id="cid", azure_client_secret="csec")
+    token_mock = MagicMock()
+    token_mock.status_code = 200
+    token_mock.json.return_value = {"access_token": "mock-access"}
+    graph_mock = MagicMock()
+    graph_mock.status_code = 200
+    graph_mock.json.return_value = {"mail": "graph-only@healthkicks.org", "id": "graph-sub-1"}
+    with patch("httpx.post", return_value=token_mock), patch("httpx.get", return_value=graph_mock):
+        user_info = azure_auth_service.exchange_code_for_azure_user("code-xyz")
+        assert user_info["email"] == "graph-only@healthkicks.org"
+        assert user_info["azure_sub"] == "graph-sub-1"
+
+
+def test_clear_azure_jwks_cache_and_get_client(mock_azure_settings) -> None:
+    mock_azure_settings(azure_tenant_id="tenant-cached")
+    azure_auth_service.clear_azure_jwks_cache()
+    client1 = azure_auth_service.get_azure_jwks_client()
+    client2 = azure_auth_service.get_azure_jwks_client()
+    assert client1 is client2
+    assert client1.uri == "https://login.microsoftonline.com/tenant-cached/discovery/v2.0/keys"
+    azure_auth_service.clear_azure_jwks_cache()
+    assert len(azure_auth_service._azure_jwks_clients) == 0
 
 
 def test_get_or_create_azure_user_new(db_session) -> None:

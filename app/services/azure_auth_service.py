@@ -1,6 +1,7 @@
 """Microsoft Entra ID (Azure AD) SSO (OAuth2/OIDC) and Graph services."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -14,9 +15,98 @@ from app.services.user_service import UserProvisioningError, upsert_sso_user
 
 logger = logging.getLogger(__name__)
 
+AZURE_JWKS_CACHE_LIFESPAN = 3600  # 1 hour in-memory JWKS caching
+AZURE_CLOCK_SKEW_LEEWAY_SECONDS = 10  # 10s tolerance for clock drift
+
+_azure_jwks_clients: dict[str, jwt.PyJWKClient] = {}
+
 
 class AzureAuthError(Exception):
     """Raised when Microsoft Entra ID authentication fails."""
+
+
+def get_azure_jwks_client() -> jwt.PyJWKClient:
+    """Retrieve or initialize the cached PyJWKClient for Azure AD."""
+    tenant_id = settings.azure_tenant_id or "common"
+    jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
+    client = _azure_jwks_clients.get(jwks_uri)
+    if client is None:
+        client = jwt.PyJWKClient(
+            jwks_uri,
+            cache_jwk_set=True,
+            lifespan=AZURE_JWKS_CACHE_LIFESPAN,
+            timeout=10.0,
+        )
+        _azure_jwks_clients[jwks_uri] = client
+    return client
+
+
+def clear_azure_jwks_cache() -> None:
+    """Clear cached JWKS clients (primarily for testing)."""
+    _azure_jwks_clients.clear()
+
+
+def verify_azure_id_token(
+    id_token: str,
+    jwks_client: jwt.PyJWKClient | None = None,
+) -> dict[str, Any]:
+    """Verify cryptographic signature, issuer, audience, and expiration of an Azure ID token."""
+    if not settings.azure_client_id:
+        raise AzureAuthError("Microsoft Azure OAuth credentials are not configured")
+
+    try:
+        header = jwt.get_unverified_header(id_token)
+        unverified_claims = jwt.decode(id_token, options={"verify_signature": False})
+    except jwt.PyJWTError as error:
+        raise AzureAuthError(f"Malformed Azure ID token: {error}") from error
+
+    alg = header.get("alg")
+    if alg != "RS256":
+        raise AzureAuthError(f"Unsupported Azure token algorithm: {alg}")
+
+    kid = header.get("kid")
+    if not kid:
+        raise AzureAuthError("Missing kid header in Azure ID token")
+
+    iss = unverified_claims.get("iss", "")
+    tenant_id = settings.azure_tenant_id or "common"
+    if tenant_id not in ("common", "organizations", "consumers"):
+        expected_iss = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+        if iss != expected_iss:
+            raise AzureAuthError(f"Unexpected Azure token issuer: {iss}")
+    else:
+        tid = unverified_claims.get("tid")
+        if not tid or iss != f"https://login.microsoftonline.com/{tid}/v2.0":
+            raise AzureAuthError(f"Invalid Azure token issuer or tenant: {iss}")
+
+    if unverified_claims.get("aud") != settings.azure_client_id:
+        raise AzureAuthError("Azure token audience mismatch")
+
+    now = datetime.now(UTC).timestamp()
+    exp = unverified_claims.get("exp")
+    if not exp or now > (float(exp) + AZURE_CLOCK_SKEW_LEEWAY_SECONDS):
+        raise AzureAuthError("Azure token expired")
+
+    client = jwks_client or get_azure_jwks_client()
+    try:
+        signing_key = client.get_signing_key_from_jwt(id_token)
+    except Exception as error:
+        logger.error("Failed to retrieve Azure signing key: %s", error)
+        raise AzureAuthError(f"No matching Azure signing key: {error}") from error
+
+    try:
+        verified_claims = jwt.decode(
+            id_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=settings.azure_client_id,
+            leeway=AZURE_CLOCK_SKEW_LEEWAY_SECONDS,
+        )
+    except Exception as error:
+        logger.error("Azure ID token signature verification failed: %s", error)
+        raise AzureAuthError(f"Azure ID token signature check failed: {error}") from error
+
+    return dict(verified_claims)
 
 
 def azure_authorization_url(
@@ -45,7 +135,10 @@ def azure_authorization_url(
 
 
 def exchange_code_for_azure_user(
-    code: str, is_mobile: bool = False, redirect_uri: str | None = None
+    code: str,
+    is_mobile: bool = False,
+    redirect_uri: str | None = None,
+    jwks_client: jwt.PyJWKClient | None = None,
 ) -> dict[str, Any]:
     """Exchange the authorization code for tokens and retrieve the Microsoft user profile."""
     if not settings.azure_client_id or not settings.azure_client_secret:
@@ -84,20 +177,7 @@ def exchange_code_for_azure_user(
 
     id_token_claims: dict[str, Any] = {}
     if id_token:
-        try:
-            # Decode JWT token - note: signature verification requires jwks_client configuration
-            # For now, we use verify_signature=False but this should be addressed in production
-            # TODO: Implement proper JWT signature verification using Azure AD JWKS endpoint
-            id_token_claims = jwt.decode(
-                id_token,
-                options={"verify_signature": False},  # SECURITY: Should be True in production
-                # For production: use jwks_client to fetch Azure AD signing keys
-                # algorithms=["RS256"],
-                # audience=settings.azure_client_id,
-                # issuer=f"https://login.microsoftonline.com/{settings.azure_tenant_id or 'common'}/v2.0"
-            )
-        except jwt.PyJWTError as error:
-            logger.warning("Could not decode Azure ID token: %s", error)
+        id_token_claims = verify_azure_id_token(id_token, jwks_client=jwks_client)
 
     profile: dict[str, Any] = {}
     if access_token:
@@ -171,6 +251,7 @@ def get_or_create_azure_user(session: Session, user_info: dict[str, Any]) -> Use
         )
     except UserProvisioningError as error:
         raise AzureAuthError(str(error)) from error
+
 
 
 
