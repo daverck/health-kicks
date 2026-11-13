@@ -3,6 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -190,6 +191,37 @@ def ingest_raw_telemetry(
         created_at=datetime.now(UTC),
     )
     session.add(studio_session)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = session.query(StudioSession).filter_by(uuid=sess_uuid).first()
+        if existing is not None:
+            existing.sample_count = sample_count
+            if payload.get("label"):
+                existing.label = str(payload["label"])
+            if "is_hitl" in payload:
+                existing.is_hitl = bool(payload["is_hitl"])
+            if duration_sec is not None:
+                existing.duration_sec = duration_sec
+            session.commit()
+            session.refresh(existing)
+            return existing
+        raise
     session.refresh(studio_session)
     return studio_session
+
+
+def prune_processed_messages(session: Session, max_retained: int = 50_000) -> int:
+    """Prune old ProcessedMessage ledger entries beyond max_retained to bound table growth."""
+    max_id = session.query(func.max(ProcessedMessage.id)).scalar()
+    if max_id is None or int(max_id) <= max_retained:
+        return 0
+    cutoff_id = int(max_id) - max_retained
+    deleted = (
+        session.query(ProcessedMessage)
+        .filter(ProcessedMessage.id <= cutoff_id)
+        .delete(synchronize_session=False)
+    )
+    session.commit()
+    return int(deleted or 0)

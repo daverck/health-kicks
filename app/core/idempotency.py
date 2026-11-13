@@ -33,6 +33,7 @@ IDEMPOTENT_PATH_PREFIXES = (
     "/api/v1/fall-alerts",
     "/api/v1/users/me/alert-contacts",
     "/api/v1/studio/sessions",
+    "/api/v1/steps",
     "/api/v1/ingest/telemetry/raw",
     "/api/v1/ingest/event/telemetry/raw",
     "/api/v1/ingest/event",

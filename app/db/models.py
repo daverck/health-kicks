@@ -229,7 +229,7 @@ class DailyActivityStep(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    user: Mapped["User"] = relationship("User", lazy="joined")
+    user: Mapped["User"] = relationship("User", lazy="select")
 
 
 class HourlyActivityStep(Base):
@@ -259,7 +259,7 @@ class HourlyActivityStep(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    user: Mapped["User"] = relationship("User", lazy="joined")
+    user: Mapped["User"] = relationship("User", lazy="select")
 
 
 # --- Fall Alerting & Emergency Contacts (Step 5) ---

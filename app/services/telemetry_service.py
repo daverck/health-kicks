@@ -27,6 +27,24 @@ READING_PROJECTION_EXPRESSION = "device_id, #ts, ax, ay, az, gx, gy, gz, session
 READING_EXPRESSION_ATTR_NAMES = {"#ts": "timestamp", "#lbl": "label"}
 KEY_PROJECTION_EXPRESSION = "device_id, #ts"
 KEY_EXPRESSION_ATTR_NAMES = {"#ts": "timestamp"}
+DEFAULT_SESSION_BOUNDS_MARGIN_SEC = 300.0
+
+
+def compute_session_epoch_bounds(
+    session: StudioSession | None,
+    margin_sec: float = DEFAULT_SESSION_BOUNDS_MARGIN_SEC,
+) -> tuple[int | None, int | None]:
+    """Compute microsecond epoch timestamp bounds [start_epoch_us, end_epoch_us] from StudioSession metadata."""
+    if session is None or getattr(session, "created_at", None) is None:
+        return None, None
+    created_at = session.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    duration_sec = max(0.0, float(getattr(session, "duration_sec", 5.0) or 5.0))
+    created_ts_sec = created_at.timestamp()
+    start_us = int((created_ts_sec - duration_sec - margin_sec) * 1_000_000)
+    end_us = int((created_ts_sec + duration_sec + margin_sec) * 1_000_000)
+    return max(0, start_us), end_us
 
 
 def _decimal_to_float(value: Any) -> float:

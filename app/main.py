@@ -50,6 +50,7 @@ from app.core.metrics import metrics_collector
 from app.db.database import SessionLocal, create_tables, engine
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.fall_alert_service import process_due_fall_alerts
+from app.services.ingestion_service import prune_processed_messages
 
 setup_logging()
 
@@ -69,10 +70,17 @@ def run_migrations() -> None:
         command.upgrade(alembic_cfg, "head")
 
 
+_worker_tick_counter = 0
+
+
 def _run_fall_alert_worker_tick() -> None:
-    """Execute one synchronous escalation worker cycle in a dedicated DB session."""
+    """Execute one synchronous escalation worker cycle and periodic ledger pruning in a dedicated DB session."""
+    global _worker_tick_counter
+    _worker_tick_counter += 1
     with SessionLocal() as session:
         process_due_fall_alerts(db=session, iot_publisher=publisher)
+        if _worker_tick_counter % 100 == 0:
+            prune_processed_messages(session=session)
 
 
 async def _fall_alert_escalation_worker() -> None:

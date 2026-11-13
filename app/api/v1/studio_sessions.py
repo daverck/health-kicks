@@ -26,7 +26,7 @@ from app.services.studio_service import (
     trim_studio_session,
     update_studio_session,
 )
-from app.services.telemetry_service import TelemetryService
+from app.services.telemetry_service import TelemetryService, compute_session_epoch_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +110,13 @@ def create_studio_sessions_router(
     ) -> StudioSessionReadingsResponse:
         """Fetch raw IMU readings for an authorized studio session from DynamoDB."""
         session = get_authorized_session(db, session_id, user)
+        start_us, end_us = compute_session_epoch_bounds(session)
         try:
             readings = telemetry_service.get_session_readings(
                 device_id=session.device_id,
                 session_id=str(session.uuid),
+                start_epoch_us=start_us,
+                end_epoch_us=end_us,
             )
         except (BotoCoreError, ClientError) as error:
             logger.error("DynamoDB error querying readings for session %s: %s", session.uuid, error)

@@ -29,11 +29,13 @@ from app.db.models import (
     Device,
     DeviceOwnership,
     DeviceStatus,
+    ProcessedMessage,
     StudioSession,
     User,
     UserRole,
 )
 from app.main import app
+from app.services.ingestion_service import prune_processed_messages
 
 
 class FakeDynamoIdempotencyTable:
@@ -109,6 +111,7 @@ def test_is_idempotency_target_matches_fall_alerts_and_studio_routes() -> None:
     assert is_idempotency_target("PATCH", "/api/v1/studio/sessions/123e4567/trim") is True
     assert is_idempotency_target("POST", "/api/v1/devices/HK-001/commands/studio/start") is True
     assert is_idempotency_target("POST", "/api/v1/ingest/telemetry/raw") is True
+    assert is_idempotency_target("POST", "/api/v1/steps/sync") is True
 
     # Read or non-targeted methods must not be intercepted
     assert is_idempotency_target("GET", "/api/v1/fall-alerts") is False
@@ -351,3 +354,16 @@ def test_invalid_idempotency_key_and_in_progress_conflict(db_session: Session) -
     )
     assert retry_valid_resp.status_code == 201
     assert retry_valid_resp.headers["X-Idempotent-Replayed"] == "false"
+
+
+def test_prune_processed_messages_bounds_table_size(db_session: Session) -> None:
+    """Verify prune_processed_messages deletes oldest entries beyond max_retained."""
+    for i in range(10):
+        db_session.add(ProcessedMessage(msg_id=f"msg-{i}"))
+    db_session.commit()
+
+    deleted = prune_processed_messages(db_session, max_retained=4)
+    assert deleted == 6
+    remaining = db_session.query(ProcessedMessage).order_by(ProcessedMessage.id.asc()).all()
+    assert [r.msg_id for r in remaining] == ["msg-6", "msg-7", "msg-8", "msg-9"]
+

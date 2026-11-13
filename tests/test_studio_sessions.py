@@ -16,7 +16,7 @@ from app.db.database import get_db
 from app.db.models import Base, StudioSession, User, UserRole
 from app.schemas.telemetry import ImuReadingResponse, StudioSessionReadingsResponse
 from app.services import token_service
-from app.services.telemetry_service import TelemetryService
+from app.services.telemetry_service import TelemetryService, compute_session_epoch_bounds
 
 
 @pytest.fixture()
@@ -394,9 +394,12 @@ def test_get_session_readings_success(client, user_a, mock_telemetry_service, db
     assert res.status_code == 200
     assert res.json()["session_id"] == str(sess_id)
     assert res.json()["sample_count"] == 2
+    start_us, end_us = compute_session_epoch_bounds(s)
     mock_telemetry_service.get_session_readings.assert_called_once_with(
         device_id="HK-1",
         session_id=str(sess_id),
+        start_epoch_us=start_us,
+        end_epoch_us=end_us,
     )
 
 
@@ -453,10 +456,13 @@ def test_patch_session_label_success(client, user_a, mock_telemetry_service, db_
     assert s.label == "stumble_recover"
 
     # Verify DynamoDB update call
+    start_us, end_us = compute_session_epoch_bounds(s)
     mock_telemetry_service.update_session_label.assert_called_once_with(
         device_id="HK-1",
         session_id=str(sess_id),
         new_label="stumble_recover",
+        start_epoch_us=start_us,
+        end_epoch_us=end_us,
     )
 
 
@@ -484,6 +490,8 @@ def test_delete_session_success(client, user_a, mock_telemetry_service, db_sessi
     s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
     db_session.add(s)
     db_session.commit()
+    db_session.refresh(s)
+    start_us, end_us = compute_session_epoch_bounds(s)
 
     res = client.delete(
         f"/api/v1/studio/sessions/{sess_id}",
@@ -498,6 +506,8 @@ def test_delete_session_success(client, user_a, mock_telemetry_service, db_sessi
     mock_telemetry_service.delete_session_readings.assert_called_once_with(
         device_id="HK-1",
         session_id=str(sess_id),
+        start_epoch_us=start_us,
+        end_epoch_us=end_us,
     )
 
 
@@ -729,6 +739,8 @@ def test_trim_session_updates_duration_and_sample_count(
     )
     db_session.add(session)
     db_session.commit()
+    db_session.refresh(session)
+    start_us, end_us = compute_session_epoch_bounds(session)
     mock_telemetry_service.trim_session_readings.return_value = 100
 
     response = client.patch(
@@ -745,6 +757,8 @@ def test_trim_session_updates_duration_and_sample_count(
         session_id=str(sess_id),
         start_offset_sec=1.0,
         end_offset_sec=3.0,
+        start_epoch_us=start_us,
+        end_epoch_us=end_us,
     )
     db_session.refresh(session)
     assert session.duration_sec == 2.0

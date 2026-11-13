@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import DailyActivityStep, HourlyActivityStep, UserRole
@@ -20,30 +21,50 @@ from app.schemas.steps import (
 logger = logging.getLogger(__name__)
 
 
-def sync_daily_steps(db: Session, user_id: int, payload: DailyStepsSyncPayload) -> int:
-    """Upsert step count records per hour and activity type for a specific device and date.
+def _apply_daily_steps_upsert_pass(
+    db: Session,
+    user_id: int,
+    payload: DailyStepsSyncPayload,
+    now_utc: datetime,
+) -> int:
+    """Prefetch existing hourly/daily rows in 2 queries and apply upserts in memory."""
+    existing_hourly_rows = (
+        db.execute(
+            select(HourlyActivityStep).where(
+                HourlyActivityStep.device_id == payload.device_id,
+                HourlyActivityStep.date == payload.date,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    hourly_map: dict[tuple[int, str], HourlyActivityStep] = {
+        (row.hour, row.activity_type): row for row in existing_hourly_rows
+    }
 
-    Also aggregates daily totals in DailyActivityStep for fast daily history lookups.
-    Idempotent operation: updates existing records or inserts new ones.
-    """
+    existing_daily_rows = (
+        db.execute(
+            select(DailyActivityStep).where(
+                DailyActivityStep.device_id == payload.device_id,
+                DailyActivityStep.date == payload.date,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    daily_map: dict[str, DailyActivityStep] = {
+        row.activity_type: row for row in existing_daily_rows
+    }
+
     synced_count = 0
-    now_utc = datetime.now(UTC)
-
-    # 1. Upsert hourly records
     daily_totals: dict[str, int] = {}
     for hourly_item in payload.hourly_steps:
         daily_totals[hourly_item.activity_type] = (
             daily_totals.get(hourly_item.activity_type, 0) + hourly_item.step_count
         )
-        h_stmt = select(HourlyActivityStep).where(
-            HourlyActivityStep.device_id == payload.device_id,
-            HourlyActivityStep.date == payload.date,
-            HourlyActivityStep.hour == hourly_item.hour,
-            HourlyActivityStep.activity_type == hourly_item.activity_type,
-        )
-        existing_h = db.execute(h_stmt).scalar_one_or_none()
-
-        if existing_h:
+        key = (hourly_item.hour, hourly_item.activity_type)
+        existing_h = hourly_map.get(key)
+        if existing_h is not None:
             existing_h.step_count = hourly_item.step_count
             existing_h.user_id = user_id
             existing_h.updated_at = now_utc
@@ -58,20 +79,15 @@ def sync_daily_steps(db: Session, user_id: int, payload: DailyStepsSyncPayload) 
                 updated_at=now_utc,
             )
             db.add(new_h)
+            hourly_map[key] = new_h
         synced_count += 1
 
-    # 2. Upsert aggregated daily records for daily history & calendar heatmap
     for activity_type, step_count in daily_totals.items():
-        stmt = select(DailyActivityStep).where(
-            DailyActivityStep.device_id == payload.device_id,
-            DailyActivityStep.date == payload.date,
-            DailyActivityStep.activity_type == activity_type,
-        )
-        existing = db.execute(stmt).scalar_one_or_none()
-        if existing:
-            existing.step_count = step_count
-            existing.user_id = user_id
-            existing.updated_at = now_utc
+        existing_d = daily_map.get(activity_type)
+        if existing_d is not None:
+            existing_d.step_count = step_count
+            existing_d.user_id = user_id
+            existing_d.updated_at = now_utc
         else:
             new_record = DailyActivityStep(
                 user_id=user_id,
@@ -82,8 +98,25 @@ def sync_daily_steps(db: Session, user_id: int, payload: DailyStepsSyncPayload) 
                 updated_at=now_utc,
             )
             db.add(new_record)
+            daily_map[activity_type] = new_record
 
-    db.commit()
+    return synced_count
+
+
+def sync_daily_steps(db: Session, user_id: int, payload: DailyStepsSyncPayload) -> int:
+    """Upsert step count records per hour and activity type for a specific device and date.
+
+    Uses batch prefetching (2 SELECT queries total) and an IntegrityError retry pass
+    to guarantee lock-free concurrency safety under simultaneous mobile syncs.
+    """
+    now_utc = datetime.now(UTC)
+    synced_count = _apply_daily_steps_upsert_pass(db, user_id, payload, now_utc)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        synced_count = _apply_daily_steps_upsert_pass(db, user_id, payload, now_utc)
+        db.commit()
     return synced_count
 
 

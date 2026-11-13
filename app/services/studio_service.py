@@ -29,7 +29,7 @@ from app.schemas.telemetry import (
     StudioClassSummaryItem,
     StudioDatasetStatsResponse,
 )
-from app.services.telemetry_service import TelemetryService
+from app.services.telemetry_service import TelemetryService, compute_session_epoch_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -638,12 +638,15 @@ def trim_studio_session(
             detail="L'intervalle sélectionné doit être plus court que la session actuelle",
         )
 
+    start_us, end_us = compute_session_epoch_bounds(session)
     try:
         retained_count = telemetry_service.trim_session_readings(
             device_id=session.device_id,
             session_id=str(session.uuid),
             start_offset_sec=payload.start_offset_sec,
             end_offset_sec=end_offset_sec,
+            start_epoch_us=start_us,
+            end_epoch_us=end_us,
         )
     except (BotoCoreError, ClientError) as error:
         logger.error(
@@ -679,11 +682,14 @@ def update_studio_session(
     db.refresh(session)
 
     if payload.label is not None:
+        start_us, end_us = compute_session_epoch_bounds(session)
         try:
             telemetry_service.update_session_label(
                 device_id=session.device_id,
                 session_id=str(session.uuid),
                 new_label=payload.label,
+                start_epoch_us=start_us,
+                end_epoch_us=end_us,
             )
         except (BotoCoreError, ClientError) as error:
             logger.warning(
@@ -701,10 +707,13 @@ def delete_studio_session(
     telemetry_service: TelemetryService,
 ) -> None:
     """Purge a studio session from PostgreSQL and delete all raw IMU frames in DynamoDB."""
+    start_us, end_us = compute_session_epoch_bounds(session)
     try:
         telemetry_service.delete_session_readings(
             device_id=session.device_id,
             session_id=str(session.uuid),
+            start_epoch_us=start_us,
+            end_epoch_us=end_us,
         )
     except (BotoCoreError, ClientError) as error:
         logger.warning(
