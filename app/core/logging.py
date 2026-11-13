@@ -15,8 +15,14 @@ from app.core.correlation import CorrelationIdFilter, get_correlation_id
 TEXT_LOG_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] [%(correlation_id)s] %(message)s"
 
 _BEARER_RE = re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9\-._~+/]+=*")
+_JSON_SENSITIVE_KV_RE = re.compile(
+    r"""(?i)(["']?(?:access_token|refresh_token|id_token|google_client_secret|azure_client_secret|client_secret|jwt_secret|smtp_password|ingest_token|pseudonymization_pepper|fall_alert_ack_secret|aws_secret_access_key|x-ingest-token|password|passwd|pwd|secret|token)["']?\s*[:=]\s*)(["'])([^"']+)(\2)"""
+)
 _SENSITIVE_KV_RE = re.compile(
-    r"(?i)\b(access_token|refresh_token|id_token|client_secret|password|secret|token)\s*([=:])\s*([^\s&\"',;]+)"
+    r"(?i)\b(access_token|refresh_token|id_token|google_client_secret|azure_client_secret|client_secret|jwt_secret|smtp_password|ingest_token|pseudonymization_pepper|fall_alert_ack_secret|aws_secret_access_key|x-ingest-token|password|passwd|pwd|secret|token)\s*([=:])\s*([^\s&\"',;}\]]+)"
+)
+_EMAIL_PII_RE = re.compile(
+    r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
 )
 
 EXTRA_CONTEXT_FIELDS = (
@@ -29,16 +35,31 @@ EXTRA_CONTEXT_FIELDS = (
 
 
 def redact_sensitive_text(text: str) -> str:
-    """Scrub bearer tokens and sensitive key-value credentials from log strings."""
+    """Scrub bearer tokens, OAuth/client secrets, passwords, and personal email PII from log strings."""
     if not text:
         return text
     redacted = _BEARER_RE.sub(r"\1 [REDACTED]", text)
+    redacted = _JSON_SENSITIVE_KV_RE.sub(r"\1\2[REDACTED]\4", redacted)
     redacted = _SENSITIVE_KV_RE.sub(r"\1\2[REDACTED]", redacted)
+    redacted = _EMAIL_PII_RE.sub("[REDACTED_EMAIL]", redacted)
     return redacted
 
 
+def _redact_value(value: Any) -> Any:
+    """Recursively scrub sensitive strings inside dicts, lists, or scalar log attributes."""
+    if isinstance(value, str):
+        return redact_sensitive_text(value)
+    if isinstance(value, dict):
+        return {k: _redact_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item) for item in value)
+    return value
+
+
 class SensitiveDataRedactionFilter(logging.Filter):
-    """Logging filter that redacts credentials and bearer tokens from log messages."""
+    """Logging filter that redacts credentials, bearer tokens, and personal email PII from log records."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
@@ -48,6 +69,16 @@ class SensitiveDataRedactionFilter(logging.Filter):
         except Exception:
             if isinstance(record.msg, str):
                 record.msg = redact_sensitive_text(record.msg)
+
+        http_ctx = getattr(record, "http", None)
+        if isinstance(http_ctx, dict):
+            record.http = _redact_value(http_ctx)
+
+        for field_name in EXTRA_CONTEXT_FIELDS:
+            val = getattr(record, field_name, None)
+            if isinstance(val, str):
+                setattr(record, field_name, redact_sensitive_text(val))
+
         return True
 
 
@@ -73,17 +104,28 @@ class StructuredJsonFormatter(logging.Formatter):
 
         http_ctx = getattr(record, "http", None)
         if isinstance(http_ctx, dict):
-            payload["http"] = http_ctx
+            payload["http"] = _redact_value(http_ctx)
 
         for field_name in EXTRA_CONTEXT_FIELDS:
             val = getattr(record, field_name, None)
             if val is not None:
-                payload[field_name] = val
+                payload[field_name] = _redact_value(val)
 
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
+            payload["exception"] = redact_sensitive_text(self.formatException(record.exc_info))
 
         return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+class RedactingTextFormatter(logging.Formatter):
+    """Standard text formatter that also scrubs sensitive credentials and PII from tracebacks."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        formatted = super().format(record)
+        return redact_sensitive_text(formatted)
+
+    def formatException(self, ei: Any) -> str:
+        return redact_sensitive_text(super().formatException(ei))
 
 
 def resolve_log_format(settings_obj: Settings = settings) -> str:
@@ -101,20 +143,25 @@ def setup_logging(settings_obj: Settings = settings) -> None:
     log_level = getattr(logging, log_level_name, logging.INFO)
     effective_format = resolve_log_format(settings_obj)
 
+    redaction_filter = SensitiveDataRedactionFilter()
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(CorrelationIdFilter())
-    handler.addFilter(SensitiveDataRedactionFilter())
+    handler.addFilter(redaction_filter)
 
     if effective_format == "json":
         handler.setFormatter(StructuredJsonFormatter())
     else:
-        handler.setFormatter(logging.Formatter(TEXT_LOG_FORMAT))
+        handler.setFormatter(RedactingTextFormatter(TEXT_LOG_FORMAT))
 
     logging.basicConfig(
         level=log_level,
         handlers=[handler],
         force=True,
     )
+
+    root_logger = logging.getLogger()
+    if not any(isinstance(f, SensitiveDataRedactionFilter) for f in root_logger.filters):
+        root_logger.addFilter(redaction_filter)
 
     for logger_name in (
         "uvicorn",
@@ -126,3 +173,5 @@ def setup_logging(settings_obj: Settings = settings) -> None:
     ):
         logger = logging.getLogger(logger_name)
         logger.setLevel(log_level)
+        if not any(isinstance(f, SensitiveDataRedactionFilter) for f in logger.filters):
+            logger.addFilter(redaction_filter)

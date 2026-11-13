@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.core.correlation import correlation_id_ctx
 from app.core.logging import (
+    TEXT_LOG_FORMAT,
+    RedactingTextFormatter,
     SensitiveDataRedactionFilter,
     StructuredJsonFormatter,
     redact_sensitive_text,
@@ -38,12 +40,14 @@ def test_resolve_log_format_auto_and_explicit() -> None:
     assert resolve_log_format(explicit_text) == "text"
 
 
-def test_redact_sensitive_text_scrubs_tokens_and_secrets() -> None:
-    """Verify bearer tokens and sensitive key-value credentials are scrubbed."""
+def test_redact_sensitive_text_scrubs_tokens_secrets_and_personal_emails() -> None:
+    """Verify bearer tokens, OAuth/Entra/Google secrets, passwords, and personal emails are scrubbed."""
     raw = (
         "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig "
         "access_token=secret123 refresh_token:ref456 password=my_pass "
-        "client_secret=supersecret token=abc-999"
+        "client_secret=supersecret google_client_secret=GOCSPX-9999 "
+        'azure_client_secret="entra-secret-abc" {"smtp_password": "smtp-val-777"} '
+        "token=abc-999 user_email=alice.martin+test@gmail.com contact=bob@healthkicks.org"
     )
     redacted = redact_sensitive_text(raw)
     assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in redacted
@@ -51,29 +55,69 @@ def test_redact_sensitive_text_scrubs_tokens_and_secrets() -> None:
     assert "ref456" not in redacted
     assert "my_pass" not in redacted
     assert "supersecret" not in redacted
+    assert "GOCSPX-9999" not in redacted
+    assert "entra-secret-abc" not in redacted
+    assert "smtp-val-777" not in redacted
     assert "abc-999" not in redacted
+    assert "alice.martin+test@gmail.com" not in redacted
+    assert "bob@healthkicks.org" not in redacted
+
     assert "Bearer [REDACTED]" in redacted
     assert "access_token=[REDACTED]" in redacted
     assert "refresh_token:[REDACTED]" in redacted
     assert "password=[REDACTED]" in redacted
     assert "client_secret=[REDACTED]" in redacted
+    assert "google_client_secret=[REDACTED]" in redacted
+    assert 'azure_client_secret="[REDACTED]"' in redacted
+    assert '"smtp_password": "[REDACTED]"' in redacted
     assert "token=[REDACTED]" in redacted
+    assert redacted.count("[REDACTED_EMAIL]") == 2
 
 
 def test_sensitive_data_redaction_filter_mutates_record() -> None:
-    """Verify SensitiveDataRedactionFilter scrubs formatted log messages."""
+    """Verify SensitiveDataRedactionFilter scrubs formatted log messages and PII emails."""
     record = logging.LogRecord(
         name="healthkicks.auth",
         level=logging.INFO,
         pathname=__file__,
         lineno=10,
-        msg="Failed login with Bearer secret.jwt.token and password=%s",
+        msg="Failed login for patient@example.com with Bearer secret.jwt.token and password=%s",
         args=("hunter2",),
         exc_info=None,
     )
     redaction_filter = SensitiveDataRedactionFilter()
     assert redaction_filter.filter(record) is True
-    assert record.getMessage() == "Failed login with Bearer [REDACTED] and password=[REDACTED]"
+    assert (
+        record.getMessage()
+        == "Failed login for [REDACTED_EMAIL] with Bearer [REDACTED] and password=[REDACTED]"
+    )
+
+
+def test_redacting_text_formatter_scrubs_exception_tracebacks() -> None:
+    """Verify RedactingTextFormatter scrubs secrets and personal emails inside exception tracebacks."""
+    formatter = RedactingTextFormatter(TEXT_LOG_FORMAT)
+    try:
+        raise RuntimeError(
+            "OAuth exchange failed for user.name@domain.fr with azure_client_secret=top-secret-entra"
+        )
+    except RuntimeError:
+        exc_info = sys.exc_info()
+
+    record = logging.LogRecord(
+        name="healthkicks.auth",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=25,
+        msg="Unhandled auth exception for user.name@domain.fr",
+        args=(),
+        exc_info=exc_info,
+    )
+    record.correlation_id = "corr-999"
+    formatted = formatter.format(record)
+    assert "user.name@domain.fr" not in formatted
+    assert "top-secret-entra" not in formatted
+    assert "[REDACTED_EMAIL]" in formatted
+    assert "azure_client_secret=[REDACTED]" in formatted
 
 
 def test_structured_json_formatter_outputs_single_line_json() -> None:
