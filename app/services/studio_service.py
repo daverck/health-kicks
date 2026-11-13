@@ -144,7 +144,7 @@ def query_studio_sessions(
     if duration_sec_max is not None:
         query = query.filter(StudioSession.duration_sec <= duration_sec_max)
 
-    total = query.count()
+    total = query.with_entities(func.count(StudioSession.uuid)).scalar() or 0
     next_cursor: str | None = None
 
     if cursor is not None:

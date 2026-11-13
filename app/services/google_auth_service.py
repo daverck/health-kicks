@@ -7,6 +7,7 @@ auto-provisioned on first sign-in (JIT).
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -26,6 +27,17 @@ GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs"
 GOOGLE_ISSUERS = {"https://accounts.google.com", "accounts.google.com"}
+GOOGLE_JWKS_CACHE_TTL_SEC = 3600
+
+_cached_google_jwks: dict[str, Any] | None = None
+_cached_google_jwks_expires_at: float = 0.0
+
+
+def clear_google_jwks_cache() -> None:
+    """Clear in-memory cached Google JWKS certificates."""
+    global _cached_google_jwks, _cached_google_jwks_expires_at
+    _cached_google_jwks = None
+    _cached_google_jwks_expires_at = 0.0
 
 
 class GoogleAuthError(Exception):
@@ -130,10 +142,18 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
 
 
 def _google_jwks() -> dict[str, Any]:
+    global _cached_google_jwks, _cached_google_jwks_expires_at
+    now = time.monotonic()
+    if _cached_google_jwks is not None and now < _cached_google_jwks_expires_at:
+        return _cached_google_jwks
     try:
         response = httpx.get(GOOGLE_JWKS_URI, timeout=10.0)
         response.raise_for_status()
-        return response.json()
+        jwks_data = response.json()
+        if isinstance(jwks_data, dict) and jwks_data.get("keys"):
+            _cached_google_jwks = jwks_data
+            _cached_google_jwks_expires_at = now + GOOGLE_JWKS_CACHE_TTL_SEC
+        return jwks_data
     except httpx.HTTPError as error:
         logger.error("Failed to retrieve Google JWKS certs: %s", error)
         raise GoogleAuthError(f"Failed to retrieve Google signing keys: {error}") from error

@@ -56,6 +56,7 @@ def _connect_with_iam(settings_obj: Settings = settings):
                 keepalives_interval=10,
                 keepalives_count=5,
                 connect_timeout=30,
+                options="-c statement_timeout=15000",
             )
         except psycopg2.OperationalError:
             if attempt == max_retries:
@@ -92,6 +93,7 @@ def build_engine(settings_obj: Settings = settings) -> Engine:
             "keepalives_idle": 30,
             "keepalives_interval": 10,
             "keepalives_count": 5,
+            "options": "-c statement_timeout=15000",
         }
         if is_postgres
         else {"check_same_thread": False}

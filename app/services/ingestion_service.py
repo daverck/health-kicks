@@ -141,7 +141,7 @@ def ingest_raw_telemetry(
 
     studio_session = session.query(StudioSession).filter_by(uuid=sess_uuid).first()
     if studio_session is not None:
-        session_user = session.query(User).filter_by(id=studio_session.user_id).first()
+        session_user = studio_session.user or session.query(User).filter_by(id=studio_session.user_id).first()
         is_admin = session_user is not None and session_user.role == UserRole.admin
 
         if not is_admin:
