@@ -63,6 +63,7 @@ class Settings:
     database_pool_pre_ping: bool = True
     # Logging
     log_level: str = "INFO"
+    log_format: str = "auto"
     # S3 Firmware distribution
     s3_firmware_bucket: str = "healthkicks-firmware-releases"
     s3_firmware_key: str = "firmware/esp32s3/latest/firmware.bin"
@@ -209,6 +210,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "log_level": yaml_values.get(
             "log_level",
             _nested_value(yaml_values, "logging", "level", defaults.log_level),
+        ),
+        "log_format": yaml_values.get(
+            "log_format",
+            _nested_value(yaml_values, "logging", "format", defaults.log_format),
         ),
         # S3 Firmware distribution
         "s3_firmware_bucket": yaml_values.get(
@@ -379,6 +384,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         ),
         # Logging
         "log_level": (("HEALTHKICKS_LOG_LEVEL", "LOG_LEVEL"), str),
+        "log_format": (("HEALTHKICKS_LOG_FORMAT", "LOG_FORMAT"), str),
         # S3 Firmware distribution
         "s3_firmware_bucket": (("HEALTHKICKS_S3_FIRMWARE_BUCKET", "S3_FIRMWARE_BUCKET"), str),
         "s3_firmware_key": (("HEALTHKICKS_S3_FIRMWARE_KEY", "S3_FIRMWARE_KEY"), str),

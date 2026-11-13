@@ -44,6 +44,7 @@ from app.services.fall_alert_service import process_due_fall_alerts
 setup_logging()
 
 logger = logging.getLogger("healthkicks.app")
+access_logger = logging.getLogger("healthkicks.access")
 publisher = AWSIoTPublishService()
 
 
@@ -123,40 +124,16 @@ app = FastAPI(
 )
 
 
-@app.middleware("http")
-async def correlation_id_middleware(request: Request, call_next: Any) -> Response:
-    raw_tp = request.headers.get(TRACEPARENT_HEADER.lower())
-    parsed_tp = parse_traceparent(raw_tp)
-    if parsed_tp:
-        trace_id, _, _ = parsed_tp
-        cid = trace_id
-        tp = generate_traceparent(trace_id=trace_id)
-    else:
-        raw_cid = request.headers.get(CORRELATION_HEADER.lower()) or request.headers.get(REQUEST_ID_HEADER.lower())
-        cid = sanitize_correlation_id(raw_cid)
-        trace_id_hex = cid if (len(cid) == 32 and all(c in "0123456789abcdefABCDEF" for c in cid)) else None
-        tp = generate_traceparent(trace_id=trace_id_hex)
-
-    token = correlation_id_ctx.set(cid)
-    try:
-        response = await call_next(request)
-        response.headers[CORRELATION_HEADER] = cid
-        response.headers[TRACEPARENT_HEADER] = tp
-        return response
-    finally:
-        correlation_id_ctx.reset(token)
-
-
-@app.middleware("http")
-async def unhandled_exception_middleware(request: Request, call_next: Any) -> Response:
-    try:
-        return await call_next(request)
-    except Exception as exc:
-        logger.exception(f"Unhandled Exception on {request.method} {request.url}: {exc}")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Internal Server Error"},
-        )
+def _resolve_client_ip(request: Request) -> str:
+    """Resolve client IP address from X-Forwarded-For or direct socket connection."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        first_hop = forwarded.split(",")[0].strip()
+        if first_hop:
+            return first_hop
+    if request.client and request.client.host:
+        return str(request.client.host)
+    return "-"
 
 
 @app.middleware("http")
@@ -180,12 +157,79 @@ async def security_headers_middleware(request: Request, call_next: Any) -> Respo
 
 
 @app.middleware("http")
-async def metrics_middleware(request: Request, call_next: Any) -> Response:
+async def unhandled_exception_middleware(request: Request, call_next: Any) -> Response:
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.exception(f"Unhandled Exception on {request.method} {request.url}: {exc}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal Server Error"},
+        )
+
+
+@app.middleware("http")
+async def metrics_and_access_log_middleware(request: Request, call_next: Any) -> Response:
     start_time = time.monotonic()
     response = await call_next(request)
     duration_ms = round((time.monotonic() - start_time) * 1000, 2)
-    metrics_collector.record_request(request.method, request.url.path, response.status_code, duration_ms)
+    path = request.url.path
+    status_code = response.status_code
+
+    metrics_collector.record_request(request.method, path, status_code, duration_ms)
+
+    client_ip = _resolve_client_ip(request)
+    if path in ("/health", "/metrics") and status_code < 400:
+        log_level = logging.DEBUG
+    elif status_code >= 500:
+        log_level = logging.ERROR
+    elif status_code >= 400:
+        log_level = logging.WARNING
+    else:
+        log_level = logging.INFO
+
+    http_meta = {
+        "method": request.method,
+        "path": path,
+        "status_code": status_code,
+        "duration_ms": duration_ms,
+        "client_ip": client_ip,
+    }
+    access_logger.log(
+        log_level,
+        "%s %s %d %.2fms client=%s",
+        request.method,
+        path,
+        status_code,
+        duration_ms,
+        client_ip,
+        extra={"http": http_meta},
+    )
     return response
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next: Any) -> Response:
+    raw_tp = request.headers.get(TRACEPARENT_HEADER.lower())
+    parsed_tp = parse_traceparent(raw_tp)
+    if parsed_tp:
+        trace_id, _, _ = parsed_tp
+        cid = trace_id
+        tp = generate_traceparent(trace_id=trace_id)
+    else:
+        raw_cid = request.headers.get(CORRELATION_HEADER.lower()) or request.headers.get(REQUEST_ID_HEADER.lower())
+        cid = sanitize_correlation_id(raw_cid)
+        trace_id_hex = cid if (len(cid) == 32 and all(c in "0123456789abcdefABCDEF" for c in cid)) else None
+        tp = generate_traceparent(trace_id=trace_id_hex)
+
+    token = correlation_id_ctx.set(cid)
+    try:
+        response = await call_next(request)
+        response.headers[CORRELATION_HEADER] = cid
+        response.headers[TRACEPARENT_HEADER] = tp
+        return response
+    finally:
+        correlation_id_ctx.reset(token)
 
 
 is_prod = str(settings.environment).lower() in ("prod", "production")
