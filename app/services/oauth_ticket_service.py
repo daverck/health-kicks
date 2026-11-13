@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings, settings
@@ -38,7 +39,16 @@ class OAuthTicketStore:
         if self._table is not None:
             return self._table
         try:
-            dynamodb = boto3.resource("dynamodb", region_name=self._config.aws_region)
+            boto_cfg = BotoConfig(
+                connect_timeout=2,
+                read_timeout=2,
+                retries={"max_attempts": 1, "mode": "standard"},
+            )
+            dynamodb = boto3.resource(
+                "dynamodb",
+                region_name=self._config.aws_region,
+                config=boto_cfg,
+            )
             self._table = dynamodb.Table(self._config.dynamodb_oauth_tickets_table)
             return self._table
         except Exception as exc:

@@ -7,12 +7,15 @@ from collections import defaultdict
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, Request, status
 
 from app.core.config import Settings, settings
 
 logger = logging.getLogger(__name__)
+
+MAX_IN_MEMORY_RATE_LIMIT_KEYS = 1024
 
 
 class SlidingWindowRateLimiter:
@@ -31,6 +34,14 @@ class SlidingWindowRateLimiter:
         cutoff = now - window_seconds
 
         with self._lock:
+            if len(self._records) > MAX_IN_MEMORY_RATE_LIMIT_KEYS:
+                stale_keys = [
+                    k for k, ts_list in self._records.items()
+                    if not ts_list or ts_list[-1] <= cutoff
+                ]
+                for k in stale_keys:
+                    self._records.pop(k, None)
+
             timestamps = self._records[key]
             # Prune old timestamps
             valid = [t for t in timestamps if t > cutoff]
@@ -72,7 +83,15 @@ class DynamoDbRateLimiter:
         if self._table is not None:
             return self._table
         try:
-            kwargs: dict[str, Any] = {"region_name": self._config.aws_region}
+            boto_cfg = BotoConfig(
+                connect_timeout=2,
+                read_timeout=2,
+                retries={"max_attempts": 1, "mode": "standard"},
+            )
+            kwargs: dict[str, Any] = {
+                "region_name": self._config.aws_region,
+                "config": boto_cfg,
+            }
             if getattr(self._config, "dynamodb_endpoint_url", None):
                 kwargs["endpoint_url"] = self._config.dynamodb_endpoint_url
             if getattr(self._config, "aws_access_key_id", None) and getattr(self._config, "aws_secret_access_key", None):

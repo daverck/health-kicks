@@ -475,28 +475,32 @@ class TelemetryService:
                 bound_at_utc = ownership[0]
 
         if session_id is not None:
-            if user.role == UserRole.user and bound_at_utc is not None:
-                try:
-                    session_uuid = uuid.UUID(session_id)
-                    sess = db.query(StudioSession).filter_by(uuid=session_uuid, device_id=device_id).first()
-                    if sess is not None:
-                        sess_created = sess.created_at
-                        b_cmp = bound_at_utc
-                        if sess_created.tzinfo is not None and b_cmp.tzinfo is None:
-                            b_cmp = b_cmp.replace(tzinfo=sess_created.tzinfo)
-                        elif sess_created.tzinfo is None and b_cmp.tzinfo is not None:
-                            sess_created = sess_created.replace(tzinfo=b_cmp.tzinfo)
-                        if sess_created < b_cmp and sess.user_id != user.id:
-                            raise HTTPException(
-                                status_code=status.HTTP_404_NOT_FOUND,
-                                detail=f"Studio session '{session_id}' not found for device '{device_id}'",
-                            )
-                except ValueError:
-                    pass
+            sess: StudioSession | None = None
+            try:
+                session_uuid = uuid.UUID(session_id)
+                sess = db.query(StudioSession).filter_by(uuid=session_uuid, device_id=device_id).first()
+            except ValueError:
+                sess = None
 
+            if user.role == UserRole.user and bound_at_utc is not None and sess is not None:
+                sess_created = sess.created_at
+                b_cmp = bound_at_utc
+                if sess_created.tzinfo is not None and b_cmp.tzinfo is None:
+                    b_cmp = b_cmp.replace(tzinfo=sess_created.tzinfo)
+                elif sess_created.tzinfo is None and b_cmp.tzinfo is not None:
+                    sess_created = sess_created.replace(tzinfo=b_cmp.tzinfo)
+                if sess_created < b_cmp and sess.user_id != user.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Studio session '{session_id}' not found for device '{device_id}'",
+                    )
+
+            start_epoch_us, end_epoch_us = compute_session_epoch_bounds(sess)
             result = self.get_session_readings(
                 device_id=device_id,
                 session_id=session_id,
+                start_epoch_us=start_epoch_us,
+                end_epoch_us=end_epoch_us,
             )
             if result is None:
                 raise HTTPException(
