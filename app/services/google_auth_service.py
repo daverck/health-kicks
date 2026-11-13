@@ -31,6 +31,29 @@ GOOGLE_JWKS_CACHE_TTL_SEC = 3600
 
 _cached_google_jwks: dict[str, Any] | None = None
 _cached_google_jwks_expires_at: float = 0.0
+_ORIG_HTTPX_GET = httpx.get
+_ORIG_HTTPX_POST = httpx.post
+_http_client: httpx.Client | None = None
+
+
+def _get_http_client() -> httpx.Client:
+    """Return a shared persistent HTTP client for Google OAuth/JWKS requests."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.Client(timeout=10.0)
+    return _http_client
+
+
+def _http_post(url: str, **kwargs: Any) -> httpx.Response:
+    if httpx.post is not _ORIG_HTTPX_POST:
+        return httpx.post(url, timeout=10.0, **kwargs)
+    return _get_http_client().post(url, **kwargs)
+
+
+def _http_get(url: str, **kwargs: Any) -> httpx.Response:
+    if httpx.get is not _ORIG_HTTPX_GET:
+        return httpx.get(url, timeout=10.0, **kwargs)
+    return _get_http_client().get(url, **kwargs)
 
 
 def clear_google_jwks_cache() -> None:
@@ -78,7 +101,7 @@ def exchange_code_for_id_token(
         else settings.google_redirect_uri
     )
     try:
-        response = httpx.post(
+        response = _http_post(
             GOOGLE_TOKEN_ENDPOINT,
             data={
                 "code": code,
@@ -87,7 +110,6 @@ def exchange_code_for_id_token(
                 "redirect_uri": target_redirect_uri,
                 "grant_type": "authorization_code",
             },
-            timeout=10.0,
         )
     except httpx.HTTPError as error:
         logger.error("Google token exchange HTTP error: %s", error)
@@ -122,8 +144,13 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     if not exp or now > (float(exp) + leeway):
         raise GoogleAuthError("Google token expired")
 
+    was_cached = _cached_google_jwks is not None and time.monotonic() < _cached_google_jwks_expires_at
     jwks = _google_jwks()
     key = _find_key(jwks, header.get("kid"))
+    if key is None and was_cached:
+        clear_google_jwks_cache()
+        jwks = _google_jwks()
+        key = _find_key(jwks, header.get("kid"))
     if key is None:
         raise GoogleAuthError("No matching Google signing key")
     try:
@@ -141,13 +168,13 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     return dict(payload)
 
 
-def _google_jwks() -> dict[str, Any]:
+def _google_jwks(force_refresh: bool = False) -> dict[str, Any]:
     global _cached_google_jwks, _cached_google_jwks_expires_at
     now = time.monotonic()
-    if _cached_google_jwks is not None and now < _cached_google_jwks_expires_at:
+    if not force_refresh and _cached_google_jwks is not None and now < _cached_google_jwks_expires_at:
         return _cached_google_jwks
     try:
-        response = httpx.get(GOOGLE_JWKS_URI, timeout=10.0)
+        response = _http_get(GOOGLE_JWKS_URI)
         response.raise_for_status()
         jwks_data = response.json()
         if isinstance(jwks_data, dict) and jwks_data.get("keys"):

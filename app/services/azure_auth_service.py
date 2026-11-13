@@ -19,6 +19,29 @@ AZURE_JWKS_CACHE_LIFESPAN = 3600  # 1 hour in-memory JWKS caching
 AZURE_CLOCK_SKEW_LEEWAY_SECONDS = 10  # 10s tolerance for clock drift
 
 _azure_jwks_clients: dict[str, jwt.PyJWKClient] = {}
+_ORIG_HTTPX_GET = httpx.get
+_ORIG_HTTPX_POST = httpx.post
+_http_client: httpx.Client | None = None
+
+
+def _get_http_client() -> httpx.Client:
+    """Return a shared persistent HTTP client for Microsoft Entra ID / Graph requests."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.Client(timeout=10.0)
+    return _http_client
+
+
+def _http_post(url: str, **kwargs: Any) -> httpx.Response:
+    if httpx.post is not _ORIG_HTTPX_POST:
+        return httpx.post(url, timeout=10.0, **kwargs)
+    return _get_http_client().post(url, **kwargs)
+
+
+def _http_get(url: str, **kwargs: Any) -> httpx.Response:
+    if httpx.get is not _ORIG_HTTPX_GET:
+        return httpx.get(url, timeout=10.0, **kwargs)
+    return _get_http_client().get(url, **kwargs)
 
 
 class AzureAuthError(Exception):
@@ -152,7 +175,7 @@ def exchange_code_for_azure_user(
     )
 
     try:
-        response = httpx.post(
+        response = _http_post(
             token_endpoint,
             data={
                 "client_id": settings.azure_client_id,
@@ -161,7 +184,6 @@ def exchange_code_for_azure_user(
                 "grant_type": "authorization_code",
                 "redirect_uri": target_redirect_uri,
             },
-            timeout=10.0,
         )
     except httpx.HTTPError as error:
         logger.error("Azure token exchange HTTP error: %s", error)
@@ -182,10 +204,9 @@ def exchange_code_for_azure_user(
     profile: dict[str, Any] = {}
     if access_token:
         try:
-            graph_res = httpx.get(
+            graph_res = _http_get(
                 "https://graph.microsoft.com/v1.0/me",
                 headers={"Authorization": f"Bearer {access_token}"},
-                timeout=10.0,
             )
             if graph_res.status_code == 200:
                 profile = graph_res.json()

@@ -357,6 +357,51 @@ def test_verify_google_id_token_no_matching_key(mock_google_settings) -> None:
             google_auth_service.verify_google_id_token(token)
 
 
+def test_verify_google_id_token_refreshes_cached_jwks_on_key_rotation(mock_google_settings) -> None:
+    """When a cached JWKS does not contain the token's kid, it refreshes the cache once."""
+    import json
+    import time
+    from unittest.mock import MagicMock, patch
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from jwt.algorithms import RSAAlgorithm
+
+    mock_google_settings(google_client_id="expected-client-id")
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk_dict = json.loads(RSAAlgorithm.to_jwk(private_key.public_key()))
+    jwk_dict["kid"] = "rotated-kid-2"
+    jwk_dict["alg"] = "RS256"
+    jwk_dict["use"] = "sig"
+
+    # Prime the cache with an older key ID
+    google_auth_service._cached_google_jwks = {"keys": [{"kid": "old-kid-1"}]}
+    google_auth_service._cached_google_jwks_expires_at = time.monotonic() + 3600
+
+    token = jwt.encode(
+        {
+            "iss": "https://accounts.google.com",
+            "aud": "expected-client-id",
+            "sub": "rotated-user-1",
+            "email": "rotated@healthkicks.org",
+            "exp": int(time.time()) + 3600,
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "rotated-kid-2"},
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.return_value = {"keys": [jwk_dict]}
+
+    with patch("httpx.get", return_value=mock_resp) as mock_get:
+        claims = google_auth_service.verify_google_id_token(token)
+        assert claims["sub"] == "rotated-user-1"
+        assert mock_get.call_count == 1
+    google_auth_service.clear_google_jwks_cache()
+
+
 def test_exchange_code_for_id_token_network_error(mock_google_settings) -> None:
     mock_google_settings(
         google_client_id="g-client-id",
