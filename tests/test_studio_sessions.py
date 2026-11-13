@@ -1166,3 +1166,57 @@ def test_query_studio_sessions_direct_service_call(db_session, user_a):
     assert resp_val.items[0].label == "walk"
 
 
+def test_patch_session_label_dynamodb_failure_returns_502_and_preserves_db_label(
+    client, user_a, mock_telemetry_service, db_session
+) -> None:
+    """When DynamoDB label propagation fails, return 502 Bad Gateway and do not commit the new label in PostgreSQL."""
+    from botocore.exceptions import ClientError
+
+    sess_id = uuid.uuid4()
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    db_session.add(s)
+    db_session.commit()
+
+    mock_telemetry_service.update_session_label.side_effect = ClientError(
+        {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
+        "UpdateItem",
+    )
+
+    res = client.patch(
+        f"/api/v1/studio/sessions/{sess_id}",
+        headers=_auth_headers(user_a),
+        json={"label": "run"},
+    )
+    assert res.status_code == 502
+    assert "Failed to propagate studio session label update" in res.json()["detail"]
+
+    db_session.refresh(s)
+    assert s.label == "walk"
+
+
+def test_delete_session_dynamodb_failure_returns_502_and_preserves_db_session(
+    client, user_a, mock_telemetry_service, db_session
+) -> None:
+    """When DynamoDB frame deletion fails, return 502 Bad Gateway and keep the StudioSession row in PostgreSQL."""
+    from botocore.exceptions import ClientError
+
+    sess_id = uuid.uuid4()
+    s = StudioSession(uuid=sess_id, user_id=user_a.id, device_id="HK-1", label="walk")
+    db_session.add(s)
+    db_session.commit()
+
+    mock_telemetry_service.delete_session_readings.side_effect = ClientError(
+        {"Error": {"Code": "InternalServerError", "Message": "DynamoDB outage"}},
+        "BatchWriteItem",
+    )
+
+    res = client.delete(
+        f"/api/v1/studio/sessions/{sess_id}",
+        headers=_auth_headers(user_a),
+    )
+    assert res.status_code == 502
+    assert "Failed to purge studio session readings" in res.json()["detail"]
+    assert db_session.query(StudioSession).filter_by(uuid=sess_id).one_or_none() is not None
+
+
+

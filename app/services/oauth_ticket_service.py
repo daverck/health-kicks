@@ -15,6 +15,7 @@ from app.core.config import Settings, settings
 logger = logging.getLogger(__name__)
 
 TICKET_TTL_SECONDS = 60
+DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC = 30.0
 
 
 class OAuthTicketStore:
@@ -31,7 +32,17 @@ class OAuthTicketStore:
         self._ttl_seconds = ttl_seconds
         self._memory_lock = threading.Lock()
         self._memory_store: dict[str, dict[str, Any]] = {}
-        self._dynamo_unavailable = False
+        self._dynamo_retry_after: float = 0.0
+
+    @property
+    def _dynamo_unavailable(self) -> bool:
+        return time.monotonic() < self._dynamo_retry_after
+
+    @_dynamo_unavailable.setter
+    def _dynamo_unavailable(self, value: bool) -> None:
+        self._dynamo_retry_after = (
+            time.monotonic() + DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC if value else 0.0
+        )
 
     def _get_table(self) -> Any | None:
         if self._dynamo_unavailable:
@@ -87,6 +98,7 @@ class OAuthTicketStore:
                 return ticket
             except (BotoCoreError, ClientError, Exception) as exc:
                 logger.debug("Failed to store OAuth ticket in DynamoDB, falling back to memory: %s", exc)
+                self._dynamo_unavailable = True
 
         with self._memory_lock:
             # Prune expired keys
@@ -132,6 +144,7 @@ class OAuthTicketStore:
                     }
             except (BotoCoreError, ClientError, Exception) as exc:
                 logger.debug("Failed to consume ticket from DynamoDB, checking memory store: %s", exc)
+                self._dynamo_unavailable = True
 
         with self._memory_lock:
             entry = self._memory_store.pop(ticket, None)

@@ -367,3 +367,20 @@ def test_prune_processed_messages_bounds_table_size(db_session: Session) -> None
     remaining = db_session.query(ProcessedMessage).order_by(ProcessedMessage.id.asc()).all()
     assert [r.msg_id for r in remaining] == ["msg-6", "msg-7", "msg-8", "msg-9"]
 
+
+def test_dynamo_circuit_breaker_recovers_after_cooldown() -> None:
+    """Verify DynamoDB circuit breaker trips on transient errors and automatically recovers after cooldown."""
+    fake_table = FakeDynamoIdempotencyTable()
+    store = DynamoDbIdempotencyStore(table=fake_table)
+
+    assert store._dynamo_unavailable is False
+    store._dynamo_unavailable = True
+    assert store._dynamo_unavailable is True
+    assert store._get_table() is None
+
+    # Simulate cooldown expiration
+    store._dynamo_retry_after = 0.0
+    assert store._dynamo_unavailable is False
+    assert store._get_table() is fake_table
+
+

@@ -25,6 +25,7 @@ IDEMPOTENT_REPLAYED_HEADER = "X-Idempotent-Replayed"
 MAX_IDEMPOTENCY_KEY_LEN = 128
 IN_PROGRESS_LOCK_TTL_SECONDS = 60
 MAX_IN_MEMORY_IDEMPOTENCY_KEYS = 1024
+DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC = 30.0
 
 _VALID_KEY_RE = re.compile(r"^[\x21-\x7E][\x20-\x7E]{0,127}$")
 _STUDIO_START_PATH_RE = re.compile(r"^/api/v1/devices/[^/]+/commands/studio/start/?$")
@@ -206,7 +207,20 @@ class DynamoDbIdempotencyStore:
         self._table = table
         self._config = config
         self._fallback = fallback_store or InMemoryIdempotencyStore()
-        self._dynamo_unavailable = False
+        self._dynamo_retry_after: float = 0.0
+
+    @property
+    def _dynamo_unavailable(self) -> bool:
+        return time.monotonic() < self._dynamo_retry_after
+
+    @_dynamo_unavailable.setter
+    def _dynamo_unavailable(self, value: bool) -> None:
+        self._dynamo_retry_after = (
+            time.monotonic() + DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC if value else 0.0
+        )
+
+    def _mark_dynamo_unavailable(self) -> None:
+        self._dynamo_retry_after = time.monotonic() + DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC
 
     def _get_table(self) -> Any | None:
         if self._dynamo_unavailable:

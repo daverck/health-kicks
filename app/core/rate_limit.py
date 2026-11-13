@@ -16,6 +16,7 @@ from app.core.config import Settings, settings
 logger = logging.getLogger(__name__)
 
 MAX_IN_MEMORY_RATE_LIMIT_KEYS = 1024
+DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC = 30.0
 
 
 class SlidingWindowRateLimiter:
@@ -75,7 +76,17 @@ class DynamoDbRateLimiter:
         self._table = table
         self._config = config
         self._fallback = fallback_limiter or SlidingWindowRateLimiter()
-        self._dynamo_unavailable = False
+        self._dynamo_retry_after: float = 0.0
+
+    @property
+    def _dynamo_unavailable(self) -> bool:
+        return time.monotonic() < self._dynamo_retry_after
+
+    @_dynamo_unavailable.setter
+    def _dynamo_unavailable(self, value: bool) -> None:
+        self._dynamo_retry_after = (
+            time.monotonic() + DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC if value else 0.0
+        )
 
     def _get_table(self) -> Any | None:
         if self._dynamo_unavailable:
@@ -139,6 +150,7 @@ class DynamoDbRateLimiter:
             return True, 0
         except (BotoCoreError, ClientError, Exception) as exc:
             logger.debug("DynamoDB rate limit update failed, using in-memory fallback: %s", exc)
+            self._dynamo_unavailable = True
             return self._fallback.is_allowed(key, max_requests, window_seconds)
 
     def reset(self) -> None:

@@ -674,14 +674,6 @@ def update_studio_session(
 ) -> StudioSession:
     """Update session activity label and validation status, propagating label change to DynamoDB."""
     if payload.label is not None:
-        session.label = payload.label
-    if payload.is_validated is not None:
-        session.is_validated = payload.is_validated
-
-    db.commit()
-    db.refresh(session)
-
-    if payload.label is not None:
         start_us, end_us = compute_session_epoch_bounds(session)
         try:
             telemetry_service.update_session_label(
@@ -692,12 +684,21 @@ def update_studio_session(
                 end_epoch_us=end_us,
             )
         except (BotoCoreError, ClientError) as error:
-            logger.warning(
+            logger.error(
                 "Could not propagate label update to DynamoDB for session %s: %s",
                 session.uuid,
                 error,
             )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to propagate studio session label update to telemetry store",
+            )
+        session.label = payload.label
+    if payload.is_validated is not None:
+        session.is_validated = payload.is_validated
 
+    db.commit()
+    db.refresh(session)
     return session
 
 
@@ -716,10 +717,14 @@ def delete_studio_session(
             end_epoch_us=end_us,
         )
     except (BotoCoreError, ClientError) as error:
-        logger.warning(
+        logger.error(
             "Could not purge readings from DynamoDB for session %s: %s",
             session.uuid,
             error,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to purge studio session readings from telemetry store",
         )
 
     db.delete(session)
