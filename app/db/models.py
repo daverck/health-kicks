@@ -181,7 +181,14 @@ class StudioSession(Base):
     """Recorded IMU data capture session for ML dataset curation."""
 
     __tablename__ = "studio_sessions"
-    __table_args__ = (Index("ix_studio_sessions_created_at", "created_at"),)
+    __table_args__ = (
+        Index("ix_studio_sessions_created_at", "created_at"),
+        Index("ix_studio_sessions_created_at_uuid", "created_at", "uuid"),
+        Index("ix_studio_sessions_validated_created_at", "is_validated", "created_at"),
+        Index("ix_studio_sessions_user_id_created_at", "user_id", "created_at"),
+        Index("ix_studio_sessions_label_created_at", "label", "created_at"),
+        Index("ix_studio_sessions_device_id_created_at", "device_id", "created_at"),
+    )
 
     uuid: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
@@ -343,6 +350,9 @@ class FallAlert(Base):
     __table_args__ = (
         Index("ix_fall_alerts_state_next_action", "state", "next_action_at_utc"),
         Index("ix_fall_alerts_user_detected", "user_id", "detected_at_utc"),
+        Index("ix_fall_alerts_detected_at_id", "detected_at_utc", "id"),
+        Index("ix_fall_alerts_state_detected_at", "state", "detected_at_utc"),
+        Index("ix_fall_alerts_user_state_id", "user_id", "state", "id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -405,6 +415,9 @@ class FallAlertNotification(Base):
     """Audit trail of each notification (email or SMS) dispatched during fall alert escalation."""
 
     __tablename__ = "fall_alert_notifications"
+    __table_args__ = (
+        Index("ix_fall_alert_notifications_alert_rank", "alert_id", "rank", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     alert_id: Mapped[int] = mapped_column(

@@ -105,3 +105,44 @@ def test_programmatic_migrations_with_shared_connection(alembic_cfg: Config) -> 
 
     test_engine.dispose()
 
+
+def test_composite_query_indexes_created_and_downgraded(alembic_cfg: Config) -> None:
+    db_url = alembic_cfg.get_main_option("sqlalchemy.url")
+    engine = sa.create_engine(db_url)
+
+    command.upgrade(alembic_cfg, "head")
+
+    with engine.connect() as conn:
+        insp = sa.inspect(conn)
+        studio_indices = {idx["name"] for idx in insp.get_indexes("studio_sessions")}
+        assert "ix_studio_sessions_created_at_uuid" in studio_indices
+        assert "ix_studio_sessions_validated_created_at" in studio_indices
+        assert "ix_studio_sessions_user_id_created_at" in studio_indices
+        assert "ix_studio_sessions_label_created_at" in studio_indices
+        assert "ix_studio_sessions_device_id_created_at" in studio_indices
+
+        fall_indices = {idx["name"] for idx in insp.get_indexes("fall_alerts")}
+        assert "ix_fall_alerts_detected_at_id" in fall_indices
+        assert "ix_fall_alerts_state_detected_at" in fall_indices
+        assert "ix_fall_alerts_user_state_id" in fall_indices
+
+        notif_indices = {idx["name"] for idx in insp.get_indexes("fall_alert_notifications")}
+        assert "ix_fall_alert_notifications_alert_rank" in notif_indices
+
+    command.downgrade(alembic_cfg, "20261027_0009")
+
+    with engine.connect() as conn:
+        insp = sa.inspect(conn)
+        studio_indices = {idx["name"] for idx in insp.get_indexes("studio_sessions")}
+        assert "ix_studio_sessions_created_at_uuid" not in studio_indices
+        assert "ix_studio_sessions_validated_created_at" not in studio_indices
+
+        fall_indices = {idx["name"] for idx in insp.get_indexes("fall_alerts")}
+        assert "ix_fall_alerts_detected_at_id" not in fall_indices
+
+        notif_indices = {idx["name"] for idx in insp.get_indexes("fall_alert_notifications")}
+        assert "ix_fall_alert_notifications_alert_rank" not in notif_indices
+
+    engine.dispose()
+
+
