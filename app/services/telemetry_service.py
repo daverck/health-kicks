@@ -23,6 +23,12 @@ from app.schemas.telemetry import (
 logger = logging.getLogger(__name__)
 
 
+READING_PROJECTION_EXPRESSION = "device_id, #ts, ax, ay, az, gx, gy, gz, session_id, #lbl"
+READING_EXPRESSION_ATTR_NAMES = {"#ts": "timestamp", "#lbl": "label"}
+KEY_PROJECTION_EXPRESSION = "device_id, #ts"
+KEY_EXPRESSION_ATTR_NAMES = {"#ts": "timestamp"}
+
+
 def _decimal_to_float(value: Any) -> float:
     if isinstance(value, Decimal):
         return float(value)
@@ -97,19 +103,57 @@ class TelemetryService:
         table = self._get_table()
         return self._execute_paginated_fetch(table.query, query_kwargs, error_context)
 
+    def _query_session_items(
+        self,
+        device_id: str,
+        session_id: str,
+        *,
+        projection_expression: str,
+        expression_attr_names: dict[str, str],
+        error_context: str,
+        start_epoch_us: int | None = None,
+        end_epoch_us: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query session items with optional sort-key timestamp bounds and automatic partition fallback."""
+        base_kwargs: dict[str, Any] = {
+            "FilterExpression": Attr("session_id").eq(session_id),
+            "ProjectionExpression": projection_expression,
+            "ExpressionAttributeNames": dict(expression_attr_names),
+        }
+
+        if start_epoch_us is not None and end_epoch_us is not None and start_epoch_us <= end_epoch_us:
+            bounded_kwargs = {
+                **base_kwargs,
+                "KeyConditionExpression": Key("device_id").eq(device_id)
+                & Key("timestamp").between(start_epoch_us, end_epoch_us),
+            }
+            items = self._query_all_items(bounded_kwargs, error_context)
+            if items:
+                return items
+
+        unbounded_kwargs = {
+            **base_kwargs,
+            "KeyConditionExpression": Key("device_id").eq(device_id),
+        }
+        return self._query_all_items(unbounded_kwargs, error_context)
+
     def get_session_readings(
         self,
         device_id: str,
         session_id: str,
+        *,
+        start_epoch_us: int | None = None,
+        end_epoch_us: int | None = None,
     ) -> StudioSessionReadingsResponse | None:
         """Query IMU telemetry points for a specific Studio session."""
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("device_id").eq(device_id),
-            "FilterExpression": Attr("session_id").eq(session_id),
-        }
-        items = self._query_all_items(
-            query_kwargs,
-            f"query failed for device {device_id} session {session_id}",
+        items = self._query_session_items(
+            device_id=device_id,
+            session_id=session_id,
+            projection_expression=READING_PROJECTION_EXPRESSION,
+            expression_attr_names=READING_EXPRESSION_ATTR_NAMES,
+            error_context=f"query failed for device {device_id} session {session_id}",
+            start_epoch_us=start_epoch_us,
+            end_epoch_us=end_epoch_us,
         )
 
         if not items:
@@ -133,19 +177,24 @@ class TelemetryService:
             readings=readings,
         )
 
-    def delete_session_readings(self, device_id: str, session_id: str) -> int:
+    def delete_session_readings(
+        self,
+        device_id: str,
+        session_id: str,
+        *,
+        start_epoch_us: int | None = None,
+        end_epoch_us: int | None = None,
+    ) -> int:
         """Purge all telemetry points associated with a Studio session."""
         table = self._get_table()
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("device_id").eq(device_id),
-            "FilterExpression": Attr("session_id").eq(session_id),
-            "ProjectionExpression": "device_id, #ts",
-            "ExpressionAttributeNames": {"#ts": "timestamp"},
-        }
-
-        items_to_delete = self._query_all_items(
-            query_kwargs,
-            f"query for deletion failed for device {device_id} session {session_id}",
+        items_to_delete = self._query_session_items(
+            device_id=device_id,
+            session_id=session_id,
+            projection_expression=KEY_PROJECTION_EXPRESSION,
+            expression_attr_names=KEY_EXPRESSION_ATTR_NAMES,
+            error_context=f"query for deletion failed for device {device_id} session {session_id}",
+            start_epoch_us=start_epoch_us,
+            end_epoch_us=end_epoch_us,
         )
 
         if not items_to_delete:
@@ -174,19 +223,20 @@ class TelemetryService:
         session_id: str,
         start_offset_sec: float,
         end_offset_sec: float,
+        *,
+        start_epoch_us: int | None = None,
+        end_epoch_us: int | None = None,
     ) -> int:
         """Keep readings inside the requested interval and return the retained count."""
         table = self._get_table()
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("device_id").eq(device_id),
-            "FilterExpression": Attr("session_id").eq(session_id),
-            "ProjectionExpression": "device_id, #ts",
-            "ExpressionAttributeNames": {"#ts": "timestamp"},
-        }
-
-        items = self._query_all_items(
-            query_kwargs,
-            f"query failed while trimming session {session_id}",
+        items = self._query_session_items(
+            device_id=device_id,
+            session_id=session_id,
+            projection_expression=KEY_PROJECTION_EXPRESSION,
+            expression_attr_names=KEY_EXPRESSION_ATTR_NAMES,
+            error_context=f"query failed while trimming session {session_id}",
+            start_epoch_us=start_epoch_us,
+            end_epoch_us=end_epoch_us,
         )
 
         if not items:
@@ -230,22 +280,36 @@ class TelemetryService:
         end_epoch_us: int,
         limit: int = 1000,
     ) -> list[ImuReadingResponse]:
-        """Query IMU telemetry points for a device between two timestamps."""
+        """Query IMU telemetry points for a device between two timestamps with multi-page limit handling."""
         table = self._get_table()
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("device_id").eq(device_id)
-            & Key("timestamp").between(start_epoch_us, end_epoch_us),
-            "Limit": limit,
-            "ScanIndexForward": True,
-        }
+        items: list[dict[str, Any]] = []
+        last_key: dict[str, Any] | None = None
 
-        try:
-            response = table.query(**query_kwargs)
-        except (BotoCoreError, ClientError) as error:
-            logger.error("DynamoDB timerange query failed for device %s: %s", device_id, error)
-            raise
+        while len(items) < limit:
+            remaining = limit - len(items)
+            query_kwargs: dict[str, Any] = {
+                "KeyConditionExpression": Key("device_id").eq(device_id)
+                & Key("timestamp").between(start_epoch_us, end_epoch_us),
+                "ProjectionExpression": READING_PROJECTION_EXPRESSION,
+                "ExpressionAttributeNames": dict(READING_EXPRESSION_ATTR_NAMES),
+                "Limit": remaining,
+                "ScanIndexForward": True,
+            }
+            if last_key is not None:
+                query_kwargs["ExclusiveStartKey"] = last_key
 
-        items = response.get("Items", [])
+            try:
+                response = table.query(**query_kwargs)
+            except (BotoCoreError, ClientError) as error:
+                logger.error("DynamoDB timerange query failed for device %s: %s", device_id, error)
+                raise
+
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+
+        items = items[:limit]
         items.sort(key=lambda x: int(x["timestamp"]))
         return [_item_to_reading(item) for item in items]
 
@@ -303,56 +367,52 @@ class TelemetryService:
         device_id: str,
         session_id: str,
         new_label: str,
+        *,
+        start_epoch_us: int | None = None,
+        end_epoch_us: int | None = None,
     ) -> int:
-        """Update the label of all readings belonging to a Studio session in DynamoDB."""
+        """Update the label of all readings belonging to a Studio session in DynamoDB using batch_writer."""
         table = self._get_table()
-        items_to_update: list[dict[str, Any]] = []
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("device_id").eq(device_id),
-            "FilterExpression": Attr("session_id").eq(session_id),
-            "ProjectionExpression": "device_id, #ts",
-            "ExpressionAttributeNames": {"#ts": "timestamp"},
-        }
-
-        while True:
-            try:
-                response = table.query(**query_kwargs)
-            except (BotoCoreError, ClientError) as error:
-                logger.error(
-                    "DynamoDB query failed while updating session %s label: %s",
-                    session_id,
-                    error,
-                )
-                raise
-
-            items_to_update.extend(response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        items_to_update = self._query_session_items(
+            device_id=device_id,
+            session_id=session_id,
+            projection_expression=READING_PROJECTION_EXPRESSION,
+            expression_attr_names=READING_EXPRESSION_ATTR_NAMES,
+            error_context=f"query failed while updating session {session_id} label",
+            start_epoch_us=start_epoch_us,
+            end_epoch_us=end_epoch_us,
+        )
 
         if not items_to_update:
             return 0
 
-        for item in items_to_update:
-            try:
-                table.update_item(
-                    Key={
-                        "device_id": item["device_id"],
-                        "timestamp": item["timestamp"],
-                    },
-                    UpdateExpression="SET #lbl = :new_label",
-                    ExpressionAttributeNames={"#lbl": "label"},
-                    ExpressionAttributeValues={":new_label": new_label},
-                )
-            except (BotoCoreError, ClientError) as error:
-                logger.error(
-                    "DynamoDB update_item failed for device %s ts %s: %s",
-                    item["device_id"],
-                    item["timestamp"],
-                    error,
-                )
-                raise
+        has_full_attributes = all("ax" in item or "session_id" in item for item in items_to_update)
+        try:
+            if has_full_attributes:
+                with table.batch_writer() as batch:
+                    for item in items_to_update:
+                        updated_item = dict(item)
+                        updated_item["label"] = new_label
+                        batch.put_item(Item=updated_item)
+            else:
+                for item in items_to_update:
+                    table.update_item(
+                        Key={
+                            "device_id": item["device_id"],
+                            "timestamp": item["timestamp"],
+                        },
+                        UpdateExpression="SET #lbl = :new_label",
+                        ExpressionAttributeNames={"#lbl": "label"},
+                        ExpressionAttributeValues={":new_label": new_label},
+                    )
+        except (BotoCoreError, ClientError) as error:
+            logger.error(
+                "DynamoDB label update failed for device %s session %s: %s",
+                device_id,
+                session_id,
+                error,
+            )
+            raise
 
         logger.info(
             "Updated label to '%s' for %d readings of device %s session %s",

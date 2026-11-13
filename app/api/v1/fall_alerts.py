@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import CurrentUser
 from app.core.rate_limit import rate_limiter
@@ -280,12 +280,22 @@ def create_fall_alerts_router(
         raw = alert_identifier.strip()
         try:
             parsed_uuid = uuid.UUID(raw)
-            alert = db.query(FallAlert).filter(FallAlert.uuid == parsed_uuid).one_or_none()
+            alert = (
+                db.query(FallAlert)
+                .options(selectinload(FallAlert.notifications))
+                .filter(FallAlert.uuid == parsed_uuid)
+                .one_or_none()
+            )
         except ValueError:
             pass
 
         if alert is None and raw.isdigit():
-            alert = db.query(FallAlert).filter(FallAlert.id == int(raw)).one_or_none()
+            alert = (
+                db.query(FallAlert)
+                .options(selectinload(FallAlert.notifications))
+                .filter(FallAlert.id == int(raw))
+                .one_or_none()
+            )
 
         if alert is None:
             raise HTTPException(

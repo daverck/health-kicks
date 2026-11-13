@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.core.config import Settings, get_settings
@@ -629,7 +629,8 @@ def query_fall_alerts(
 
     total = query.count()
     alerts = (
-        query.order_by(FallAlert.detected_at_utc.desc(), FallAlert.id.desc())
+        query.options(selectinload(FallAlert.notifications))
+        .order_by(FallAlert.detected_at_utc.desc(), FallAlert.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

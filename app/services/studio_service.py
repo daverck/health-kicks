@@ -291,29 +291,25 @@ def compute_studio_stats(
     if device_id is not None:
         query = query.filter(StudioSession.device_id == device_id)
 
-    total_sessions = query.count()
-    total_duration = (
-        query.with_entities(func.coalesce(func.sum(StudioSession.duration_sec), 0.0)).scalar()
-        or 0.0
-    )
-    total_samples = (
-        query.with_entities(func.coalesce(func.sum(StudioSession.sample_count), 0)).scalar()
-        or 0
-    )
-
     label_rows = (
         query.with_entities(
             StudioSession.label,
             func.count(StudioSession.uuid).label("total"),
             func.coalesce(func.sum(case((StudioSession.is_validated.is_(True), 1), else_=0)), 0).label("validated"),
             func.coalesce(func.sum(case((StudioSession.is_validated.is_(False), 1), else_=0)), 0).label("pending"),
+            func.coalesce(func.sum(StudioSession.duration_sec), 0.0).label("duration_sum"),
+            func.coalesce(func.sum(StudioSession.sample_count), 0).label("sample_sum"),
         )
         .group_by(StudioSession.label)
         .all()
     )
-    by_label = {str(lbl): int(total) for lbl, total, _val, _pend in label_rows}
-    by_label_validated = {str(lbl): int(val) for lbl, _tot, val, _pend in label_rows}
-    by_label_pending = {str(lbl): int(pend) for lbl, _tot, _val, pend in label_rows}
+    total_sessions = sum(int(tot) for _lbl, tot, _val, _pend, _dur, _smp in label_rows)
+    total_duration = sum(float(dur or 0.0) for _lbl, _tot, _val, _pend, dur, _smp in label_rows)
+    total_samples = sum(int(smp or 0) for _lbl, _tot, _val, _pend, _dur, smp in label_rows)
+
+    by_label = {str(lbl): int(total) for lbl, total, _val, _pend, _dur, _smp in label_rows}
+    by_label_validated = {str(lbl): int(val) for lbl, _tot, val, _pend, _dur, _smp in label_rows}
+    by_label_pending = {str(lbl): int(pend) for lbl, _tot, _val, pend, _dur, _smp in label_rows}
 
     return StudioDatasetStatsResponse(
         device_id=device_id,
@@ -332,7 +328,12 @@ def compute_class_detail_stats(
     label: str,
 ) -> StudioClassDetailStatsResponse:
     clean_label = str(label).strip()
-    query = db.query(StudioSession).filter(StudioSession.label == clean_label)
+    query = db.query(
+        StudioSession.label,
+        StudioSession.is_validated,
+        StudioSession.duration_sec,
+        StudioSession.created_at,
+    ).filter(StudioSession.label == clean_label)
 
     if not user.is_admin:
         query = query.filter(StudioSession.user_id == user.id)
@@ -432,7 +433,12 @@ def compute_classes_summary(
 
     from app.core.edge_ai import edge_ai_labels_sorted
 
-    query = db.query(StudioSession)
+    query = db.query(
+        StudioSession.label,
+        StudioSession.is_validated,
+        StudioSession.duration_sec,
+        StudioSession.created_at,
+    )
     if not user.is_admin:
         query = query.filter(StudioSession.user_id == user.id)
 
@@ -459,7 +465,7 @@ def compute_classes_summary(
     except Exception:
         pass
 
-    sessions_by_label: dict[str, list[StudioSession]] = {}
+    sessions_by_label: dict[str, list[Any]] = {}
     daily_map: dict[str, dict[str, int]] = {}
     for s in sessions:
         lbl = (s.label or "unknown").strip()

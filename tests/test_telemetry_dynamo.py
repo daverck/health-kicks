@@ -428,3 +428,113 @@ def test_api_get_telemetry_temporal_isolation(db_session, telemetry_service, moc
             end_epoch_us=int(datetime(2023, 11, 14, 22, 13, 30, tzinfo=UTC).timestamp() * 1_000_000),
             limit=1000,
         )
+
+
+def test_get_session_readings_bounded_sort_key_and_fallback(telemetry_service, mock_table) -> None:
+    """Verify bounded sort-key query is used first and falls back to partition query if empty."""
+    sample_item = {
+        "device_id": "HK-1",
+        "timestamp": 1700000000000000,
+        "ax": Decimal("0.1"),
+        "ay": Decimal("0.2"),
+        "az": Decimal("9.8"),
+        "gx": Decimal("0.0"),
+        "gy": Decimal("0.0"),
+        "gz": Decimal("0.0"),
+        "session_id": "sess-bounded",
+        "label": "walk",
+    }
+    # First call (bounded) returns empty -> falls back to second call (unbounded)
+    mock_table.query.side_effect = [{"Items": []}, {"Items": [sample_item]}]
+
+    res = telemetry_service.get_session_readings(
+        "HK-1",
+        "sess-bounded",
+        start_epoch_us=1600000000000000,
+        end_epoch_us=1600000005000000,
+    )
+    assert res is not None
+    assert res.sample_count == 1
+    assert mock_table.query.call_count == 2
+
+
+def test_get_timerange_readings_multipage_limit(telemetry_service, mock_table) -> None:
+    """Verify get_timerange_readings paginates via LastEvaluatedKey until limit is reached."""
+    page1 = {
+        "Items": [
+            {
+                "device_id": "HK-1",
+                "timestamp": 1000,
+                "ax": Decimal("0.1"),
+                "ay": Decimal("0.2"),
+                "az": Decimal("9.8"),
+                "gx": Decimal("0.0"),
+                "gy": Decimal("0.0"),
+                "gz": Decimal("0.0"),
+            }
+        ],
+        "LastEvaluatedKey": {"device_id": "HK-1", "timestamp": 1000},
+    }
+    page2 = {
+        "Items": [
+            {
+                "device_id": "HK-1",
+                "timestamp": 2000,
+                "ax": Decimal("0.2"),
+                "ay": Decimal("0.3"),
+                "az": Decimal("9.7"),
+                "gx": Decimal("0.0"),
+                "gy": Decimal("0.0"),
+                "gz": Decimal("0.0"),
+            }
+        ],
+        "LastEvaluatedKey": {"device_id": "HK-1", "timestamp": 2000},
+    }
+    mock_table.query.side_effect = [page1, page2]
+
+    readings = telemetry_service.get_timerange_readings("HK-1", 500, 5000, limit=2)
+    assert len(readings) == 2
+    assert mock_table.query.call_count == 2
+    assert mock_table.query.call_args_list[0][1]["Limit"] == 2
+    assert mock_table.query.call_args_list[1][1]["Limit"] == 1
+
+
+def test_update_session_label_uses_batch_writer(telemetry_service, mock_table) -> None:
+    """Verify update_session_label uses batch_writer().put_item when full items are returned."""
+    mock_table.query.return_value = {
+        "Items": [
+            {
+                "device_id": "HK-1",
+                "timestamp": 1000,
+                "ax": Decimal("0.1"),
+                "ay": Decimal("0.2"),
+                "az": Decimal("9.8"),
+                "gx": Decimal("0.0"),
+                "gy": Decimal("0.0"),
+                "gz": Decimal("0.0"),
+                "session_id": "sess-lbl",
+                "label": "walk",
+            },
+            {
+                "device_id": "HK-1",
+                "timestamp": 2000,
+                "ax": Decimal("0.2"),
+                "ay": Decimal("0.3"),
+                "az": Decimal("9.7"),
+                "gx": Decimal("0.0"),
+                "gy": Decimal("0.0"),
+                "gz": Decimal("0.0"),
+                "session_id": "sess-lbl",
+                "label": "walk",
+            },
+        ]
+    }
+    batch_mock = MagicMock()
+    mock_table.batch_writer.return_value.__enter__.return_value = batch_mock
+
+    updated = telemetry_service.update_session_label("HK-1", "sess-lbl", "run")
+    assert updated == 2
+    assert batch_mock.put_item.call_count == 2
+    assert batch_mock.put_item.call_args_list[0][1]["Item"]["label"] == "run"
+    mock_table.update_item.assert_not_called()
+
