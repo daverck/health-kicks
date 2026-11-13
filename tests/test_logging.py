@@ -184,8 +184,36 @@ def test_setup_logging_attaches_json_formatter_when_configured() -> None:
         setup_logging(Settings(environment="dev", log_format="text", log_level="INFO"))
 
 
+def test_setup_logging_attaches_rotating_file_handler(tmp_path) -> None:
+    """Verify setup_logging attaches a RotatingFileHandler when log_file is configured."""
+    log_path = tmp_path / "logs" / "healthkicks.log"
+    file_settings = Settings(
+        environment="prod",
+        log_format="json",
+        log_level="INFO",
+        log_file=str(log_path),
+        log_max_bytes=4096,
+        log_backup_count=3,
+    )
+    setup_logging(file_settings)
+    try:
+        test_logger = logging.getLogger("healthkicks.file_test")
+        test_logger.info("Persisted log for user@example.com with token=secret999")
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+            if hasattr(handler, "close") and handler is not logging.getLogger().handlers[0]:
+                handler.close()
+
+        assert log_path.exists()
+        content = log_path.read_text(encoding="utf-8").strip()
+        parsed = json.loads(content.splitlines()[-1])
+        assert parsed["message"] == "Persisted log for [REDACTED_EMAIL] with token=[REDACTED]"
+    finally:
+        setup_logging(Settings(environment="dev", log_format="text", log_level="INFO"))
+
+
 def test_http_access_log_middleware_emits_structured_metadata(caplog) -> None:
-    """Verify HTTP requests emit structured access logs with correlation ID and client IP."""
+    """Verify HTTP requests emit structured access logs and healthcheck routes use DEBUG level."""
     client = TestClient(app)
 
     with caplog.at_level(logging.DEBUG, logger="healthkicks.access"):
@@ -209,7 +237,7 @@ def test_http_access_log_middleware_emits_structured_metadata(caplog) -> None:
     root_records = [r for r in access_records if getattr(r, "http", {}).get("path") == "/"]
     assert len(root_records) >= 1
     rec = root_records[-1]
-    assert rec.levelno == logging.INFO
+    assert rec.levelno == logging.DEBUG
     assert rec.http["method"] == "GET"
     assert rec.http["path"] == "/"
     assert rec.http["status_code"] == 200

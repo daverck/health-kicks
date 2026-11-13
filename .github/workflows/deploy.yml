@@ -107,15 +107,25 @@ jobs:
               attempt=$((attempt + 1))
             done
 
+            # Ensure persistent host log directory exists and is writable by non-root container UID 10001
+            mkdir -p /home/ubuntu/logs
+            chmod 777 /home/ubuntu/logs || true
+
             # Stop and remove previous container if exists
             docker stop healthkicks-backend || true
             docker rm healthkicks-backend || true
 
-            # Restart container with IAM variables
+            # Restart container with IAM variables, bounded Docker log rotation (5x20m = 100MB max),
+            # and rotated host log file persistence (/home/ubuntu/logs/healthkicks.log)
             docker run -d \
               --name healthkicks-backend \
               --restart unless-stopped \
+              --log-driver json-file \
+              --log-opt max-size=20m \
+              --log-opt max-file=5 \
               -p 8000:8000 \
+              -v /home/ubuntu/logs:/app/logs \
+              -e HEALTHKICKS_LOG_FILE=/app/logs/healthkicks.log \
               --env-file /home/ubuntu/.env \
               "$IMAGE_URI"
 

@@ -43,6 +43,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   postgres:
     image: postgres:16
@@ -62,6 +67,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 volumes:
   postgres_data:

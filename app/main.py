@@ -283,7 +283,7 @@ async def metrics_and_access_log_middleware(request: Request, call_next: Any) ->
     metrics_collector.record_request(request.method, path, status_code, duration_ms)
 
     client_ip = _resolve_client_ip(request)
-    if path in ("/health", "/metrics") and status_code < 400:
+    if path in ("/", "/health", "/metrics") and status_code < 400:
         log_level = logging.DEBUG
     elif status_code >= 500:
         log_level = logging.ERROR

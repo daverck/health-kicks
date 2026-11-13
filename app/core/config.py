@@ -66,6 +66,9 @@ class Settings:
     # Logging
     log_level: str = "INFO"
     log_format: str = "auto"
+    log_file: str = ""
+    log_max_bytes: int = 20_971_520
+    log_backup_count: int = 5
     # S3 Firmware distribution
     s3_firmware_bucket: str = "healthkicks-firmware-releases"
     s3_firmware_key: str = "firmware/esp32s3/latest/firmware.bin"
@@ -226,6 +229,22 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "log_format": yaml_values.get(
             "log_format",
             _nested_value(yaml_values, "logging", "format", defaults.log_format),
+        ),
+        "log_file": yaml_values.get(
+            "log_file",
+            _nested_value(yaml_values, "logging", "file", defaults.log_file),
+        ),
+        "log_max_bytes": int(
+            yaml_values.get(
+                "log_max_bytes",
+                _nested_value(yaml_values, "logging", "max_bytes", defaults.log_max_bytes),
+            )
+        ),
+        "log_backup_count": int(
+            yaml_values.get(
+                "log_backup_count",
+                _nested_value(yaml_values, "logging", "backup_count", defaults.log_backup_count),
+            )
         ),
         # S3 Firmware distribution
         "s3_firmware_bucket": yaml_values.get(
@@ -405,6 +424,9 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         # Logging
         "log_level": (("HEALTHKICKS_LOG_LEVEL", "LOG_LEVEL"), str),
         "log_format": (("HEALTHKICKS_LOG_FORMAT", "LOG_FORMAT"), str),
+        "log_file": (("HEALTHKICKS_LOG_FILE", "LOG_FILE"), str),
+        "log_max_bytes": (("HEALTHKICKS_LOG_MAX_BYTES", "LOG_MAX_BYTES"), int),
+        "log_backup_count": (("HEALTHKICKS_LOG_BACKUP_COUNT", "LOG_BACKUP_COUNT"), int),
         # S3 Firmware distribution
         "s3_firmware_bucket": (("HEALTHKICKS_S3_FIRMWARE_BUCKET", "S3_FIRMWARE_BUCKET"), str),
         "s3_firmware_key": (("HEALTHKICKS_S3_FIRMWARE_KEY", "S3_FIRMWARE_KEY"), str),

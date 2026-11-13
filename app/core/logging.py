@@ -7,6 +7,8 @@ import logging
 import re
 import sys
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings, settings
@@ -19,7 +21,7 @@ _JSON_SENSITIVE_KV_RE = re.compile(
     r"""(?i)(["']?(?:access_token|refresh_token|id_token|google_client_secret|azure_client_secret|client_secret|jwt_secret|smtp_password|ingest_token|pseudonymization_pepper|fall_alert_ack_secret|aws_secret_access_key|x-ingest-token|password|passwd|pwd|secret|token)["']?\s*[:=]\s*)(["'])([^"']+)(\2)"""
 )
 _SENSITIVE_KV_RE = re.compile(
-    r"(?i)\b(access_token|refresh_token|id_token|google_client_secret|azure_client_secret|client_secret|jwt_secret|smtp_password|ingest_token|pseudonymization_pepper|fall_alert_ack_secret|aws_secret_access_key|x-ingest-token|password|passwd|pwd|secret|token)\s*([=:])\s*([^\s&\"',;}\]]+)"
+    r"(?i)\b(access_token|refresh_token|id_token|google_client_secret|azure_client_secret|client_secret|jwt_secret|smtp_password|ingest_token|pseudonymization_pepper|fall_alert_ack_secret|aws_secret_access_key|x-ingest-token|password|passwd|pwd|secret|token)\s*([=:])\s*(?!\[REDACTED\])([^\s&\"',;}\]]+)"
 )
 _EMAIL_PII_RE = re.compile(
     r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
@@ -144,18 +146,43 @@ def setup_logging(settings_obj: Settings = settings) -> None:
     effective_format = resolve_log_format(settings_obj)
 
     redaction_filter = SensitiveDataRedactionFilter()
-    handler = logging.StreamHandler(sys.stdout)
-    handler.addFilter(CorrelationIdFilter())
-    handler.addFilter(redaction_filter)
+    correlation_filter = CorrelationIdFilter()
+    formatter: logging.Formatter = (
+        StructuredJsonFormatter()
+        if effective_format == "json"
+        else RedactingTextFormatter(TEXT_LOG_FORMAT)
+    )
 
-    if effective_format == "json":
-        handler.setFormatter(StructuredJsonFormatter())
-    else:
-        handler.setFormatter(RedactingTextFormatter(TEXT_LOG_FORMAT))
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.addFilter(correlation_filter)
+    stream_handler.addFilter(redaction_filter)
+    stream_handler.setFormatter(formatter)
+
+    handlers: list[logging.Handler] = [stream_handler]
+
+    log_file = str(getattr(settings_obj, "log_file", "") or "").strip()
+    if log_file:
+        max_bytes = max(1024, int(getattr(settings_obj, "log_max_bytes", 20_971_520) or 20_971_520))
+        backup_count = max(1, int(getattr(settings_obj, "log_backup_count", 5) or 5))
+        try:
+            log_path = Path(log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                filename=log_path,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8",
+            )
+            file_handler.addFilter(correlation_filter)
+            file_handler.addFilter(redaction_filter)
+            file_handler.setFormatter(formatter)
+            handlers.append(file_handler)
+        except OSError as exc:
+            sys.stderr.write(f"Warning: could not initialize rotating log file '{log_file}': {exc}\n")
 
     logging.basicConfig(
         level=log_level,
-        handlers=[handler],
+        handlers=handlers,
         force=True,
     )
 

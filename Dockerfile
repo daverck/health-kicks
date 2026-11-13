@@ -29,9 +29,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Create dedicated non-root system user and group (UID/GID 10001)
+# Create dedicated non-root system user and group (UID/GID 10001) and writable log directory
 RUN addgroup --system --gid 10001 appgroup && \
-    adduser --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin appuser
+    adduser --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin appuser && \
+    mkdir -p /app/logs && chown -R appuser:appgroup /app/logs
 
 # Copy virtual environment from builder stage (no uv, no compiler, no pip in runtime)
 COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
@@ -55,4 +56,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:' + str(__import__('os').environ.get('PORT', 8000)) + '/')" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --no-access-log"]
