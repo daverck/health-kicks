@@ -51,10 +51,12 @@ class Settings:
     azure_mobile_redirect_uri: str = "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
     # Frontend application URL for OAuth redirects
     frontend_url: str = "https://healthkicks.duckdns.org"
-    # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting)
+    # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting, Idempotency)
     dynamodb_telemetry_table: str = "healthkicks_telemetry"
     dynamodb_oauth_tickets_table: str = "healthkicks_oauth_tickets"
     dynamodb_rate_limits_table: str = "healthkicks_rate_limits"
+    dynamodb_idempotency_table: str = "healthkicks_rate_limits"
+    idempotency_ttl_seconds: int = 86400
     dynamodb_endpoint_url: str | None = None
     # Database pool resilience & configuration
     database_pool_size: int = 5
@@ -188,6 +190,16 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "dynamodb_rate_limits_table": yaml_values.get(
             "dynamodb_rate_limits_table",
             _nested_value(yaml_values, "aws", "rate_limits_table", defaults.dynamodb_rate_limits_table),
+        ),
+        "dynamodb_idempotency_table": yaml_values.get(
+            "dynamodb_idempotency_table",
+            _nested_value(yaml_values, "aws", "idempotency_table", defaults.dynamodb_idempotency_table),
+        ),
+        "idempotency_ttl_seconds": int(
+            yaml_values.get(
+                "idempotency_ttl_seconds",
+                _nested_value(yaml_values, "idempotency", "ttl_seconds", defaults.idempotency_ttl_seconds),
+            )
         ),
         "dynamodb_endpoint_url": yaml_values.get(
             "dynamodb_endpoint_url",
@@ -369,6 +381,14 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "dynamodb_rate_limits_table": (
             ("HEALTHKICKS_DYNAMODB_RATE_LIMITS_TABLE", "DYNAMODB_RATE_LIMITS_TABLE"),
             str,
+        ),
+        "dynamodb_idempotency_table": (
+            ("HEALTHKICKS_DYNAMODB_IDEMPOTENCY_TABLE", "DYNAMODB_IDEMPOTENCY_TABLE"),
+            str,
+        ),
+        "idempotency_ttl_seconds": (
+            ("HEALTHKICKS_IDEMPOTENCY_TTL_SECONDS", "IDEMPOTENCY_TTL_SECONDS"),
+            int,
         ),
         "dynamodb_endpoint_url": (
             ("HEALTHKICKS_DYNAMODB_ENDPOINT_URL", "DYNAMODB_ENDPOINT_URL"),

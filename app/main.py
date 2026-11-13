@@ -35,6 +35,16 @@ from app.core.correlation import (
     parse_traceparent,
     sanitize_correlation_id,
 )
+from app.core.idempotency import (
+    IDEMPOTENCY_HEADER,
+    IDEMPOTENT_REPLAYED_HEADER,
+    IdempotencyOutcome,
+    compute_payload_hash,
+    compute_request_scope,
+    idempotency_store,
+    is_idempotency_target,
+    is_valid_idempotency_key,
+)
 from app.core.logging import setup_logging
 from app.core.metrics import metrics_collector
 from app.db.database import SessionLocal, create_tables, engine
@@ -134,6 +144,92 @@ def _resolve_client_ip(request: Request) -> str:
     if request.client and request.client.host:
         return str(request.client.host)
     return "-"
+
+
+@app.middleware("http")
+async def idempotency_middleware(request: Request, call_next: Any) -> Response:
+    if not is_idempotency_target(request.method, request.url.path):
+        return await call_next(request)
+
+    raw_key = request.headers.get(IDEMPOTENCY_HEADER.lower())
+    if raw_key is None or raw_key == "":
+        return await call_next(request)
+
+    if not is_valid_idempotency_key(raw_key):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "detail": "Invalid Idempotency-Key header: must be 1 to 128 printable ASCII characters"
+            },
+        )
+
+    clean_key = raw_key.strip()
+    body_bytes = await request.body()
+    request_hash = compute_payload_hash(body_bytes)
+    scope_key = compute_request_scope(request, clean_key)
+
+    resolution = idempotency_store.acquire_or_get(scope_key, request_hash)
+    if resolution.outcome == IdempotencyOutcome.MISMATCH:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "detail": "Idempotency-Key cannot be reused with a different request payload"
+            },
+        )
+    if resolution.outcome == IdempotencyOutcome.IN_PROGRESS:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "A request with this Idempotency-Key is currently being processed"
+            },
+        )
+    if resolution.outcome == IdempotencyOutcome.REPLAY and resolution.cached_response is not None:
+        cached = resolution.cached_response
+        return Response(
+            content=cached.body.encode("utf-8"),
+            status_code=cached.status_code,
+            media_type=cached.content_type,
+            headers={
+                IDEMPOTENCY_HEADER: clean_key,
+                IDEMPOTENT_REPLAYED_HEADER: "true",
+            },
+        )
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        idempotency_store.release(scope_key)
+        raise
+
+    body_chunks = [chunk async for chunk in response.body_iterator]
+    resp_bytes = b"".join(body_chunks)
+    content_type = response.headers.get("content-type", "application/json")
+
+    if 200 <= response.status_code < 300:
+        idempotency_store.complete(
+            scope_key=scope_key,
+            request_hash=request_hash,
+            status_code=response.status_code,
+            response_body=resp_bytes.decode("utf-8", errors="replace"),
+            content_type=content_type,
+        )
+    else:
+        idempotency_store.release(scope_key)
+
+    forwarded_headers = {
+        k: v
+        for k, v in response.headers.items()
+        if k.lower() not in ("content-length", "content-type")
+    }
+    forwarded_headers[IDEMPOTENCY_HEADER] = clean_key
+    forwarded_headers[IDEMPOTENT_REPLAYED_HEADER] = "false"
+
+    return Response(
+        content=resp_bytes,
+        status_code=response.status_code,
+        media_type=content_type,
+        headers=forwarded_headers,
+    )
 
 
 @app.middleware("http")
