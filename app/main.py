@@ -280,8 +280,12 @@ async def metrics_and_access_log_middleware(request: Request, call_next: Any) ->
     duration_ms = round((time.monotonic() - start_time) * 1000, 2)
     path = request.url.path
     status_code = response.status_code
+    matched_route = request.scope.get("route")
+    metric_path = getattr(matched_route, "path", None) or (
+        "/<unmatched>" if status_code == 404 else path
+    )
 
-    metrics_collector.record_request(request.method, path, status_code, duration_ms)
+    metrics_collector.record_request(request.method, metric_path, status_code, duration_ms)
 
     client_ip = _resolve_client_ip(request)
     if path in ("/", "/health", "/metrics") and status_code < 400:

@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from typing import Any
 
 DEFAULT_LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+MAX_TRACKED_ROUTES = 512
+
+_UUID_SEGMENT_RE = re.compile(
+    r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?=/|$)"
+)
+_NUMERIC_SEGMENT_RE = re.compile(r"/\d+(?=/|$)")
+
+
+def normalize_route_path(path: str) -> str:
+    """Normalize dynamic UUID and numeric path segments to bound metric label cardinality."""
+    if not path:
+        return "/"
+    normalized = _UUID_SEGMENT_RE.sub("/{id}", path)
+    return _NUMERIC_SEGMENT_RE.sub("/{id}", normalized)
+
+
 class MetricsCollector:
     """Thread-safe in-memory operational metrics collector."""
 
@@ -25,7 +42,8 @@ class MetricsCollector:
 
     def record_request(self, method: str, path: str, status_code: int, duration_ms: float) -> None:
         """Record telemetry for a single HTTP transaction."""
-        key = f"{method} {path}"
+        norm_path = normalize_route_path(path)
+        key = f"{method} {norm_path}"
         dur_sec = duration_ms / 1000.0
         with self._lock:
             self._total_requests += 1
@@ -44,6 +62,8 @@ class MetricsCollector:
                 if dur_sec <= b:
                     self._bucket_counts[b] += 1
 
+            if key not in self._routes and len(self._routes) >= MAX_TRACKED_ROUTES:
+                key = f"{method} /<other>"
             self._routes[key] = self._routes.get(key, 0) + 1
 
     def get_uptime_seconds(self) -> float:

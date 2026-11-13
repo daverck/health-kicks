@@ -310,7 +310,12 @@ def query_devices(
     if len(devices) > limit:
         items = devices[:limit]
         last_item = items[-1]
-        last_ts = last_item.bound_at_utc or last_item.created_at
+        is_global_admin_listing = user.role == UserRole.admin and user_uuid is None
+        last_ts = (
+            last_item.created_at
+            if is_global_admin_listing
+            else (last_item.bound_at_utc or last_item.created_at)
+        )
         next_cursor = encode_cursor(last_ts, last_item.device_id)
     else:
         items = devices

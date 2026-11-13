@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import Request
 
@@ -23,6 +24,7 @@ IDEMPOTENCY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "X-Idempotent-Replayed"
 MAX_IDEMPOTENCY_KEY_LEN = 128
 IN_PROGRESS_LOCK_TTL_SECONDS = 60
+MAX_IN_MEMORY_IDEMPOTENCY_KEYS = 1024
 
 _VALID_KEY_RE = re.compile(r"^[\x21-\x7E][\x20-\x7E]{0,127}$")
 _STUDIO_START_PATH_RE = re.compile(r"^/api/v1/devices/[^/]+/commands/studio/start/?$")
@@ -124,6 +126,9 @@ class InMemoryIdempotencyStore:
         expired_keys = [k for k, rec in self._records.items() if rec.expires_at <= now]
         for k in expired_keys:
             del self._records[k]
+        if len(self._records) >= MAX_IN_MEMORY_IDEMPOTENCY_KEYS:
+            oldest_key = min(self._records, key=lambda k: self._records[k].expires_at)
+            del self._records[oldest_key]
 
     def acquire_or_get(
         self,
@@ -209,7 +214,15 @@ class DynamoDbIdempotencyStore:
         if self._table is not None:
             return self._table
         try:
-            kwargs: dict[str, Any] = {"region_name": self._config.aws_region}
+            boto_cfg = BotoConfig(
+                connect_timeout=2,
+                read_timeout=2,
+                retries={"max_attempts": 1, "mode": "standard"},
+            )
+            kwargs: dict[str, Any] = {
+                "region_name": self._config.aws_region,
+                "config": boto_cfg,
+            }
             if getattr(self._config, "dynamodb_endpoint_url", None):
                 kwargs["endpoint_url"] = self._config.dynamodb_endpoint_url
             if getattr(self._config, "aws_access_key_id", None) and getattr(
