@@ -83,7 +83,7 @@ class SmtpEmailChannel:
     def config(self) -> Settings:
         return self._config or get_settings()
 
-    def _create_smtp(self, host: str, port: int, timeout: float = 10.0) -> smtplib.SMTP:
+    def _create_smtp(self, host: str, port: int, timeout: float = 5.0) -> smtplib.SMTP:
         if self._smtp_factory is not None:
             return self._smtp_factory(host, port, timeout)
         return smtplib.SMTP(host, port, timeout=timeout)
@@ -94,7 +94,7 @@ class SmtpEmailChannel:
         last_exc: Exception | None = None
         for attempt in range(1, max(1, max_attempts) + 1):
             try:
-                with self._create_smtp(cfg.smtp_host, cfg.smtp_port, 10.0) as server:
+                with self._create_smtp(cfg.smtp_host, cfg.smtp_port, 5.0) as server:
                     server.ehlo()
                     server.starttls()
                     server.ehlo()

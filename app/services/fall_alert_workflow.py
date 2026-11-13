@@ -78,8 +78,11 @@ def start_or_advance_escalation(
         alert.state = FallAlertState.ESCALATING.value
         alert.escalation_started_at_utc = now_utc
         alert.current_contact_rank = 0
+        alert.next_action_at_utc = now_utc + timedelta(
+            seconds=cfg.fall_alert_escalation_step_sec
+        )
         alert.updated_at_utc = now_utc
-        db.flush()
+        db.commit()
 
     if alert.state != FallAlertState.ESCALATING.value:
         return

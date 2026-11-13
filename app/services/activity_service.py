@@ -29,9 +29,79 @@ def resolve_target_device_ids(device_id: str, user: User, db: Session) -> list[s
             return [d.device_id for d in db.query(Device.device_id).all()]
         return [o.device_id for o in db.query(DeviceOwnership.device_id).filter_by(user_id=user.id).all()]
 
+    if user.role == UserRole.admin:
+        return raw_devs
+
+    if len(raw_devs) == 1:
+        verify_device_ownership(db=db, user=user, device_id=raw_devs[0], allow_clinician=False)
+        return raw_devs
+
+    owned_devs = {
+        row.device_id
+        for row in db.query(DeviceOwnership.device_id)
+        .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(raw_devs))
+        .all()
+    }
     for dev_id in raw_devs:
-        verify_device_ownership(db=db, user=user, device_id=dev_id, allow_clinician=False)
+        if dev_id not in owned_devs:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: device not bound to user",
+            )
     return raw_devs
+
+
+def _resolve_authorized_devices_with_temporal_filter(
+    db: Session,
+    user: User,
+    device_id: str,
+    device_id_col: Any,
+    timestamp_col: Any,
+) -> tuple[list[str], bool, Any | None]:
+    """Resolve authorized device IDs and temporal isolation filter in a single ownership query."""
+    raw_devs = [d.strip() for d in device_id.split(",") if d.strip()]
+    wants_all = not raw_devs or any(d.lower() == "all" for d in raw_devs)
+
+    if user.role == UserRole.admin:
+        if wants_all:
+            target_ids = [d.device_id for d in db.query(Device.device_id).all()]
+        else:
+            target_ids = raw_devs
+        return target_ids, bool(target_ids), None
+
+    ownership_query = db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc).filter(
+        DeviceOwnership.user_id == user.id
+    )
+    if not wants_all:
+        ownership_query = ownership_query.filter(DeviceOwnership.device_id.in_(raw_devs))
+
+    ownerships = ownership_query.all()
+    owned_map = {row.device_id: row.bound_at_utc for row in ownerships}
+
+    if not wants_all:
+        for dev_id in raw_devs:
+            if dev_id not in owned_map:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: device not bound to user",
+                )
+        target_ids = raw_devs
+    else:
+        target_ids = [row.device_id for row in ownerships]
+
+    if not target_ids:
+        return [], False, None
+
+    bound_conds = []
+    for dev_id in target_ids:
+        bound_at = owned_map.get(dev_id)
+        if bound_at is not None:
+            bound_conds.append(and_(device_id_col == dev_id, timestamp_col >= bound_at))
+        else:
+            bound_conds.append(device_id_col == dev_id)
+
+    filter_clause = or_(*bound_conds) if bound_conds else None
+    return target_ids, True, filter_clause
 
 
 def resolve_temporal_isolation_conditions(
@@ -84,24 +154,19 @@ def query_activity_events(
     page_size: int = 50,
 ) -> tuple[ActivityEventPage, str | None]:
     """Query activity events with device filtering, temporal isolation, type/date filtering and keyset pagination."""
-    target_device_ids = resolve_target_device_ids(device_id=device_id, user=user, db=db)
-    if not target_device_ids:
+    target_device_ids, has_access, temporal_filter = _resolve_authorized_devices_with_temporal_filter(
+        db=db,
+        user=user,
+        device_id=device_id,
+        device_id_col=ActivityEvent.device_id,
+        timestamp_col=ActivityEvent.timestamp_utc,
+    )
+    if not target_device_ids or not has_access:
         return ActivityEventPage(items=[], page=page, page_size=page_size, total=0), None
 
     norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
     query = db.query(ActivityEvent).filter(ActivityEvent.device_id.in_(target_device_ids))
-
-    # Temporal isolation for non-admin users: cannot view historical data from before device binding
-    has_access, temporal_filter = resolve_temporal_isolation_conditions(
-        db=db,
-        user=user,
-        target_device_ids=target_device_ids,
-        device_id_col=ActivityEvent.device_id,
-        timestamp_col=ActivityEvent.timestamp_utc,
-    )
-    if not has_access:
-        return ActivityEventPage(items=[], page=page, page_size=page_size, total=0), None
     if temporal_filter is not None:
         query = query.filter(temporal_filter)
 
@@ -195,24 +260,19 @@ def query_haptic_logs(
     page_size: int = 50,
 ) -> tuple[HapticLogPage, str | None]:
     """Query haptic command history with device filtering, temporal isolation, and keyset pagination."""
-    target_device_ids = resolve_target_device_ids(device_id=device_id, user=user, db=db)
-    if not target_device_ids:
+    target_device_ids, has_access, temporal_filter = _resolve_authorized_devices_with_temporal_filter(
+        db=db,
+        user=user,
+        device_id=device_id,
+        device_id_col=HapticLog.device_id,
+        timestamp_col=HapticLog.triggered_at_utc,
+    )
+    if not target_device_ids or not has_access:
         return HapticLogPage(items=[], page=page, page_size=page_size, total=0), None
 
     norm_start, norm_end = validate_and_normalize_date_range(start_date, end_date, raw_end)
 
     query = db.query(HapticLog).filter(HapticLog.device_id.in_(target_device_ids))
-
-    # Temporal isolation for non-admin users: cannot view historical haptics from before device binding
-    has_access, temporal_filter = resolve_temporal_isolation_conditions(
-        db=db,
-        user=user,
-        target_device_ids=target_device_ids,
-        device_id_col=HapticLog.device_id,
-        timestamp_col=HapticLog.triggered_at_utc,
-    )
-    if not has_access:
-        return HapticLogPage(items=[], page=page, page_size=page_size, total=0), None
     if temporal_filter is not None:
         query = query.filter(temporal_filter)
 

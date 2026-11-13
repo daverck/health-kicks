@@ -111,8 +111,14 @@ jobs:
             mkdir -p /home/ubuntu/logs
             chmod 777 /home/ubuntu/logs || true
 
+            # Preserve the currently running image tag for automatic rollback if the new container fails healthcheck
+            PREV_IMAGE=$(docker inspect --format='{{.Config.Image}}' healthkicks-backend 2>/dev/null || true)
+            if [ -n "$PREV_IMAGE" ]; then
+              docker tag "$PREV_IMAGE" healthkicks-backend:rollback || true
+            fi
+
             # Stop and remove previous container if exists
-            docker stop healthkicks-backend || true
+            docker stop --time 15 healthkicks-backend || true
             docker rm healthkicks-backend || true
 
             # Restart container with IAM variables, bounded Docker log rotation (5x20m = 100MB max),
@@ -128,6 +134,41 @@ jobs:
               -e HEALTHKICKS_LOG_FILE=/app/logs/healthkicks.log \
               --env-file /home/ubuntu/.env \
               "$IMAGE_URI"
+
+            # Poll liveness probe for up to 30 seconds; auto-rollback if startup or migration fails
+            healthy=0
+            for i in $(seq 1 15); do
+              if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+                healthy=1
+                echo "New container passed /health check on attempt ${i}."
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$healthy" -ne 1 ]; then
+              echo "ERROR: New container failed health check within 30s. Dumping container logs:"
+              docker logs --tail 50 healthkicks-backend || true
+              docker stop healthkicks-backend || true
+              docker rm healthkicks-backend || true
+              if docker image inspect healthkicks-backend:rollback >/dev/null 2>&1; then
+                echo "Rolling back to previous working image (healthkicks-backend:rollback)..."
+                docker run -d \
+                  --name healthkicks-backend \
+                  --restart unless-stopped \
+                  --log-driver json-file \
+                  --log-opt max-size=20m \
+                  --log-opt max-file=5 \
+                  -p 8000:8000 \
+                  -v /home/ubuntu/logs:/app/logs \
+                  -e HEALTHKICKS_LOG_FILE=/app/logs/healthkicks.log \
+                  --env-file /home/ubuntu/.env \
+                  healthkicks-backend:rollback
+              fi
+              exit 1
+            fi
+
+            docker rmi healthkicks-backend:rollback 2>/dev/null || true
 
             # Cleanup replaced old image to keep disk space clean
             docker image prune -a -f

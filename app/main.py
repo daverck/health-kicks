@@ -11,6 +11,7 @@ from typing import Any
 from alembic.config import Config
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from alembic import command
@@ -348,6 +349,7 @@ cors_origins = list(settings.public_origins) if settings.public_origins else [
 ]
 cors_origin_regex = None if is_prod else r"^https?://(localhost|127\.0\.0\.1)(:[00-9]+)?$"
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,

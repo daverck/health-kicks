@@ -8,6 +8,7 @@ from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -83,8 +84,19 @@ class TelemetryService:
 
     def _get_table(self) -> Any:
         if self._table is None:
-            dynamodb = boto3.resource("dynamodb", region_name=self._config.aws_region)
-            return dynamodb.Table(self._config.dynamodb_telemetry_table)
+            boto_cfg = BotoConfig(
+                connect_timeout=3,
+                read_timeout=5,
+                retries={"max_attempts": 2, "mode": "standard"},
+            )
+            kwargs: dict[str, Any] = {
+                "region_name": self._config.aws_region,
+                "config": boto_cfg,
+            }
+            if getattr(self._config, "dynamodb_endpoint_url", None):
+                kwargs["endpoint_url"] = self._config.dynamodb_endpoint_url
+            dynamodb = boto3.resource("dynamodb", **kwargs)
+            self._table = dynamodb.Table(self._config.dynamodb_telemetry_table)
         return self._table
 
     def _execute_paginated_fetch(

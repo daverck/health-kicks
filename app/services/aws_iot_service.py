@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings, settings
@@ -24,10 +25,18 @@ class AWSIoTPublishService:
     def _client_for_publish(self) -> Any:
         if self._client is None:
             endpoint_url = f"https://{self._config.aws_iot_endpoint}" if self._config.aws_iot_endpoint else None
-            client_kwargs: dict[str, Any] = {"region_name": self._config.aws_region}
+            boto_cfg = BotoConfig(
+                connect_timeout=3,
+                read_timeout=5,
+                retries={"max_attempts": 2, "mode": "standard"},
+            )
+            client_kwargs: dict[str, Any] = {
+                "region_name": self._config.aws_region,
+                "config": boto_cfg,
+            }
             if endpoint_url:
                 client_kwargs["endpoint_url"] = endpoint_url
-            return boto3.client("iot-data", **client_kwargs)
+            self._client = boto3.client("iot-data", **client_kwargs)
         return self._client
 
     def publish_haptic(self, device_id: str, command: HapticTrigger) -> bool:

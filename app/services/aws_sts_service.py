@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
 
@@ -23,7 +24,16 @@ class AWSSTSService:
 
     def _get_client(self) -> Any:
         if self._client is None:
-            return boto3.client("sts", region_name=self._config.aws_region)
+            boto_cfg = BotoConfig(
+                connect_timeout=3,
+                read_timeout=5,
+                retries={"max_attempts": 2, "mode": "standard"},
+            )
+            self._client = boto3.client(
+                "sts",
+                region_name=self._config.aws_region,
+                config=boto_cfg,
+            )
         return self._client
 
     def build_session_policy(self, user_id: str | int, device_ids: list[str]) -> str:

@@ -59,7 +59,8 @@ def send_contact_email_notification(
         sent_at_utc=now_utc,
     )
     db.add(email_notif)
-    db.flush()
+    db.commit()
+    db.refresh(email_notif)
 
     email_ack_url = build_ack_url(alert.id, email_notif.id, config=cfg)
     email_sent = False
@@ -94,7 +95,7 @@ def send_contact_email_notification(
         email_notif.status = FallAlertNotificationStatus.FAILED.value
         email_notif.sent_at_utc = now_utc
         email_notif.error_message = str(exc)[:512]
-        db.flush()
+        db.commit()
 
     return email_notif, email_sent
 

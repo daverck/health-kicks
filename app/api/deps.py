@@ -91,8 +91,14 @@ def verify_ingest_token(
 RequireIngestToken = Annotated[None, Depends(verify_ingest_token)]
 
 
-def get_sts_service():
-    """Dependency provider for AWSSTSService."""
-    from app.services.aws_sts_service import AWSSTSService
+_default_sts_service = None
 
-    return AWSSTSService()
+
+def get_sts_service():
+    """Dependency provider for AWSSTSService reusing the pooled STS client."""
+    global _default_sts_service
+    if _default_sts_service is None:
+        from app.services.aws_sts_service import AWSSTSService
+
+        _default_sts_service = AWSSTSService()
+    return _default_sts_service
