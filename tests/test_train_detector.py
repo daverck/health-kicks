@@ -96,17 +96,17 @@ def test_compute_window_features_keys_and_values():
         "gx_std",
         "gy_std",
         "gz_std",
-        "acc_energy",
-        "gyro_energy",
+        "az_delta_end_start",
+        "orientation_shift_deg",
         "ax_mean",
         "ay_mean",
         "az_mean",
-        "ay_delta_end_start",
+        "az_half_diff",
         "acc_energy_half_diff",
-        "gz_mean",
+        "gy_p2p",
         "acc_mag_std_tail",
         "gyro_mag_mean_tail",
-        "acc_jerk_max",
+        "airborne_samples_count",
         "gyro_mag_max_to_mean",
         "ay_p2p_first_half",
         "ay_p2p_second_half",
@@ -121,7 +121,11 @@ def test_compute_window_features_keys_and_values():
     assert feats["acc_mag_mean"] == pytest.approx(9.8, rel=1e-3)
     assert feats["acc_mag_std"] == pytest.approx(0.0, abs=1e-5)
     assert feats["acc_mag_peak_to_peak"] == pytest.approx(0.0, abs=1e-5)
-    assert feats["acc_energy"] == pytest.approx(9.8**2, rel=1e-3)
+    assert feats["orientation_shift_deg"] == pytest.approx(0.0, abs=1e-5)
+    assert feats["airborne_samples_count"] == 0.0
+    assert feats["gy_p2p"] == pytest.approx(0.0, abs=1e-5)
+    assert feats["az_delta_end_start"] == pytest.approx(0.0, abs=1e-5)
+    assert feats["az_half_diff"] == pytest.approx(0.0, abs=1e-5)
     assert feats["gyro_mag_mean"] == pytest.approx(0.0, abs=1e-5)
 
 

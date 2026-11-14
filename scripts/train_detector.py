@@ -103,6 +103,32 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
 
     n_samples = max(len(acc_mag), 1)
 
+    # 3D spatial orientation shift between start and end quarters of the window (in degrees)
+    q_len = max(n_samples // 4, 1)
+    v_start = np.array([np.mean(ax[:q_len]), np.mean(ay[:q_len]), np.mean(az[:q_len])])
+    v_end = np.array([np.mean(ax[-q_len:]), np.mean(ay[-q_len:]), np.mean(az[-q_len:])])
+    norm_s = float(np.linalg.norm(v_start))
+    norm_e = float(np.linalg.norm(v_end))
+    if norm_s > 1e-4 and norm_e > 1e-4:
+        cos_theta = float(np.clip(np.dot(v_start, v_end) / (norm_s * norm_e), -1.0, 1.0))
+        orientation_shift_deg = float(np.degrees(np.arccos(cos_theta)))
+    else:
+        orientation_shift_deg = 0.0
+
+    # Airborne phase: consecutive samples below free-fall threshold (< 0.40 g or equivalent in m/s^2)
+    is_m_s2 = float(np.median(acc_mag)) > 5.0
+    free_fall_thresh = 0.40 * 9.81 if is_m_s2 else 0.40
+    airborne_mask = acc_mag < free_fall_thresh
+    max_airborne = 0
+    cur_airborne = 0
+    for is_air in airborne_mask:
+        if is_air:
+            cur_airborne += 1
+            if cur_airborne > max_airborne:
+                max_airborne = cur_airborne
+        else:
+            cur_airborne = 0
+
     features: dict[str, float] = {
         # Acceleration - Magnitude (Fall signature: weightlessness trough + impact peak)
         "acc_mag_max": float(np.max(acc_mag)),
@@ -121,29 +147,30 @@ def compute_window_features(df_window: pd.DataFrame) -> dict[str, float]:
         "gx_std": float(np.std(gx)),
         "gy_std": float(np.std(gy)),
         "gz_std": float(np.std(gz)),
-        # Approximate kinetic / dynamic energy
-        "acc_energy": float(np.sum(acc_mag**2) / n_samples),
-        "gyro_energy": float(np.sum(gyro_mag**2) / n_samples),
+        # Vertical acceleration delta (end minus start) - separates fall recovery / rising from fall impact / lying down
+        "az_delta_end_start": float(az[-1] - az[0]),
+        # 3D spatial orientation shift angle between start and end quarters of the window (in degrees)
+        "orientation_shift_deg": orientation_shift_deg,
         # Individual axis means (static posture discrimination: idle vs lying_supine vs lying_prone)
         "ax_mean": float(np.mean(ax)),
         "ay_mean": float(np.mean(ay)),
         "az_mean": float(np.mean(az)),
         # Temporal directionality features (breaks sit_down vs stand_up symmetry)
-        # 1) Vertical / Longitudinal acceleration slope (end minus start)
-        "ay_delta_end_start": float(ay[-1] - ay[0]),
-        # 2) Energy distribution ratio: first half vs second half
+        # Vertical acceleration half-window difference: first half mean minus second half mean
+        "az_half_diff": float(np.mean(az[: n_samples // 2]) - np.mean(az[n_samples // 2 :])),
+        # Approximate kinetic / dynamic energy distribution ratio: first half vs second half
         "acc_energy_half_diff": float(
             (np.sum(acc_mag[: n_samples // 2] ** 2) - np.sum(acc_mag[n_samples // 2 :] ** 2)) / n_samples
         ),
-        # 3) Longitudinal angular rate direction (pitch integration proxy)
-        "gz_mean": float(np.mean(gz)),
-        # 4) Multi-scale short tail features (second half: settles into stillness vs ongoing locomotion)
+        # Sagittal angular velocity peak-to-peak (foot swing in pitch plane during gait / jump)
+        "gy_p2p": float(np.ptp(gy)) if n_samples > 1 else 0.0,
+        # Multi-scale short tail features (second half: settles into stillness vs ongoing locomotion)
         "acc_mag_std_tail": float(np.std(acc_mag[n_samples // 2 :])) if n_samples > 1 else 0.0,
         "gyro_mag_mean_tail": float(np.mean(gyro_mag[n_samples // 2 :])) if n_samples > 0 else 0.0,
-        # 5) Dynamic transition & Jerk features (discriminates sudden violent falls from gentle lie_down / lying)
-        "acc_jerk_max": float(np.max(np.abs(np.diff(acc_mag)))) if n_samples > 1 else 0.0,
+        # Ballistic / Flight phase: max consecutive airborne samples where acc_mag is near zero-g (< 0.40 g)
+        "airborne_samples_count": float(max_airborne),
         "gyro_mag_max_to_mean": float(np.max(gyro_mag) / (np.mean(gyro_mag) + 1e-4)),
-        # 6) Temporal half-window asymmetry (breaks sit_down vs stand_up symmetry)
+        # Temporal half-window asymmetry (breaks sit_down vs stand_up symmetry)
         "ay_p2p_first_half": float(np.ptp(ay[: n_samples // 2])) if n_samples > 1 else 0.0,
         "ay_p2p_second_half": float(np.ptp(ay[n_samples // 2 :])) if n_samples > 1 else 0.0,
     }
@@ -592,6 +619,7 @@ def sync_sessions_cache(
     force_refresh: bool = False,
     synthetic: bool = False,
     batch_size: int = 8,
+    offline: bool = False,
 ) -> list[dict[str, Any]]:
     """Synchronizes local .npz cache with PostgreSQL and DynamoDB incrementally."""
     if synthetic:
@@ -624,6 +652,13 @@ def sync_sessions_cache(
                 len(cached_sessions),
                 cache_dir,
             )
+
+    if offline:
+        if cached_sessions:
+            logger.info("Offline mode: using %d sessions from local cache.", len(cached_sessions))
+            return list(cached_sessions.values())
+        logger.error("Offline mode enabled but no cached sessions found in %s", cache_dir)
+        return []
 
     db_sessions = []
     try:
@@ -1179,6 +1214,11 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Maximum number of most recent recording sessions to keep per class (default: None, keep all).",
     )
     parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Use local .npz session cache without querying remote PostgreSQL / DynamoDB.",
+    )
+    parser.add_argument(
         "--min-date",
         "--since-date",
         type=str,
@@ -1203,6 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"* Window size          : {args.window_size:.1f} s (step: {args.window_step:.1f} s)")
     print(f"* Batch concurrency    : {args.batch_size} concurrent sessions")
     print(f"* Force refresh        : {'YES' if args.force_refresh else 'NO'}")
+    print(f"* Offline cache only   : {'YES' if args.offline else 'NO'}")
     print(f"* Synthetic data       : {'YES' if args.synthetic else 'NO'}")
     print(f"* Min sessions / class : {min_sessions}")
     print(f"* Max sessions / class : {args.max_sessions_per_class if args.max_sessions_per_class else 'ALL (unlimited)'}")
@@ -1216,6 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
         force_refresh=args.force_refresh,
         synthetic=args.synthetic,
         batch_size=args.batch_size,
+        offline=args.offline,
     )
 
     if not sessions_data:

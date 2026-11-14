@@ -161,6 +161,11 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Use synthetic dataset (no AWS or PostgreSQL credentials required).",
     )
     parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Use local .npz session cache without querying remote PostgreSQL / DynamoDB.",
+    )
+    parser.add_argument(
         "--force-refresh",
         action="store_true",
         help="Force re-download and re-parsing of raw telemetry sessions.",
@@ -280,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             force_refresh=args.force_refresh,
             synthetic=args.synthetic,
             batch_size=8,
+            offline=args.offline,
         )
 
         if not sessions_data:
