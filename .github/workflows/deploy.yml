@@ -118,7 +118,7 @@ jobs:
             fi
 
             # Stop and remove previous container if exists
-            docker stop --time 15 healthkicks-backend || true
+            docker stop --timeout 15 healthkicks-backend || true
             docker rm healthkicks-backend || true
 
             # Restart container with IAM variables, bounded Docker log rotation (5x20m = 100MB max),
@@ -135,21 +135,30 @@ jobs:
               --env-file /home/ubuntu/.env \
               "$IMAGE_URI"
 
-            # Poll liveness probe for up to 30 seconds; auto-rollback if startup or migration fails
+            # Poll liveness probe for up to 90 seconds (accommodates Aurora resume and Alembic migrations); auto-rollback on failure
             healthy=0
-            for i in $(seq 1 15); do
+            max_attempts=30
+            for i in $(seq 1 "$max_attempts"); do
               if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
                 healthy=1
-                echo "New container passed /health check on attempt ${i}."
+                echo "New container passed /health check on attempt ${i}/${max_attempts}."
                 break
               fi
-              sleep 2
+              # Fail fast if container crashed or exited prematurely
+              if [ "$(docker inspect -f '{{.State.Running}}' healthkicks-backend 2>/dev/null)" != "true" ]; then
+                echo "Container exited prematurely during startup."
+                break
+              fi
+              if [ $((i % 5)) -eq 0 ]; then
+                echo "Waiting for container startup and database migrations... (${i}/${max_attempts})"
+              fi
+              sleep 3
             done
 
             if [ "$healthy" -ne 1 ]; then
-              echo "ERROR: New container failed health check within 30s. Dumping container logs:"
+              echo "ERROR: New container failed health check within ${max_attempts} attempts ($((max_attempts * 3))s). Dumping container logs:"
               docker logs --tail 50 healthkicks-backend || true
-              docker stop healthkicks-backend || true
+              docker stop --timeout 15 healthkicks-backend || true
               docker rm healthkicks-backend || true
               if docker image inspect healthkicks-backend:rollback >/dev/null 2>&1; then
                 echo "Rolling back to previous working image (healthkicks-backend:rollback)..."

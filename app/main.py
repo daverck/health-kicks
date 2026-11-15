@@ -66,9 +66,12 @@ def run_migrations() -> None:
     if not ini_path.exists():
         ini_path = Path(__file__).resolve().parents[1] / "alembic.ini"
     alembic_cfg = Config(str(ini_path))
+    logger.info("[alembic] Establishing database connection for schema migrations...")
     with engine.begin() as connection:
         alembic_cfg.attributes["connection"] = connection
+        logger.info("[alembic] Running upgrade head...")
         command.upgrade(alembic_cfg, "head")
+        logger.info("[alembic] Migrations upgrade head completed.")
 
 
 _worker_tick_counter = 0

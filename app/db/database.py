@@ -55,7 +55,7 @@ def _connect_with_iam(settings_obj: Settings = settings):
                 keepalives_idle=30,
                 keepalives_interval=10,
                 keepalives_count=5,
-                connect_timeout=30,
+                connect_timeout=15,
                 options="-c statement_timeout=15000",
             )
         except psycopg2.OperationalError:
