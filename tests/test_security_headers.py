@@ -54,3 +54,16 @@ def test_cors_preflight_and_headers() -> None:
     )
     assert "access-control-allow-origin" not in unauthorized_response.headers
 
+
+def test_docs_csp_allows_swagger_ui_assets() -> None:
+    """Verify Content Security Policy on /docs route permits Swagger UI CDN assets."""
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/docs")
+
+    assert response.status_code == 200
+    csp = response.headers.get("content-security-policy", "")
+    assert "cdn.jsdelivr.net" in csp
+    assert "fastapi.tiangolo.com" in csp
+    assert "'unsafe-inline'" in csp
+
+
