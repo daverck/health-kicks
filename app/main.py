@@ -55,6 +55,33 @@ from app.services.ingestion_service import prune_processed_messages
 
 setup_logging()
 
+def _sentry_before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
+    """Filter out transient/intentional database connection timeouts when Aurora DB is stopped."""
+    if "exc_info" in hint:
+        _, exc_value, _ = hint["exc_info"]
+        if exc_value is not None:
+            msg = str(exc_value).lower()
+            if (
+                "timeout expired" in msg
+                or "could not connect to server" in msg
+                or "connection to server at" in msg
+                or "connection refused" in msg
+            ):
+                return None
+
+    logentry = event.get("logentry", {})
+    if isinstance(logentry, dict):
+        log_msg = str(logentry.get("message", "")).lower()
+        if (
+            "timeout expired" in log_msg
+            or "connection to server at" in log_msg
+            or "could not connect to server" in log_msg
+        ):
+            return None
+
+    return event
+
+
 if settings.sentry_dsn:
     import sentry_sdk
 
@@ -63,6 +90,7 @@ if settings.sentry_dsn:
         environment=settings.environment,
         traces_sample_rate=settings.sentry_traces_sample_rate,
         send_default_pii=False,
+        before_send=_sentry_before_send,
     )
 
 logger = logging.getLogger("healthkicks.app")
@@ -108,8 +136,18 @@ async def _fall_alert_escalation_worker() -> None:
             await asyncio.to_thread(_run_fall_alert_worker_tick)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("[fall-alert-worker] Tick skipped or failed")
+        except Exception as exc:
+            msg = str(exc).lower()
+            if (
+                "timeout expired" in msg
+                or "could not connect to server" in msg
+                or "connection to server at" in msg
+                or "connection refused" in msg
+            ):
+                logger.warning("[fall-alert-worker] Database unavailable (skipping tick, retrying in 15s): %s", exc)
+                await asyncio.sleep(15)
+            else:
+                logger.exception("[fall-alert-worker] Tick skipped or failed")
 
 
 @asynccontextmanager
