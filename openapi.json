@@ -2313,6 +2313,178 @@
         "title": "IoTCredentialsResponse",
         "type": "object"
       },
+      "MLModelDetailResponse": {
+        "additionalProperties": false,
+        "description": "Full detail and evaluation manifest for a specific model version.",
+        "properties": {
+          "c_header_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "C Header Size Bytes"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_summary": {
+            "additionalProperties": true,
+            "title": "Dataset Summary",
+            "type": "object"
+          },
+          "flash_usage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flash Usage Pct"
+          },
+          "git_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Commit"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "ram_usage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ram Usage Pct"
+          },
+          "selection_criteria": {
+            "additionalProperties": true,
+            "title": "Selection Criteria",
+            "type": "object"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "window_size_sec": {
+            "default": 3.0,
+            "title": "Window Size Sec",
+            "type": "number"
+          },
+          "window_step_sec": {
+            "default": 0.5,
+            "title": "Window Step Sec",
+            "type": "number"
+          }
+        },
+        "required": [
+          "version",
+          "model_name",
+          "created_at",
+          "is_active"
+        ],
+        "title": "MLModelDetailResponse",
+        "type": "object"
+      },
+      "MLModelSummaryResponse": {
+        "additionalProperties": false,
+        "description": "Lightweight summary of an ML activity classification model version.",
+        "properties": {
+          "accuracy": {
+            "default": 0.0,
+            "title": "Accuracy",
+            "type": "number"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "f1_macro": {
+            "default": 0.0,
+            "title": "F1 Macro",
+            "type": "number"
+          },
+          "git_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Commit"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "precision_macro": {
+            "default": 0.0,
+            "title": "Precision Macro",
+            "type": "number"
+          },
+          "recall_macro": {
+            "default": 0.0,
+            "title": "Recall Macro",
+            "type": "number"
+          },
+          "total_sessions": {
+            "default": 0,
+            "title": "Total Sessions",
+            "type": "integer"
+          },
+          "total_windows": {
+            "default": 0,
+            "title": "Total Windows",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "model_name",
+          "created_at",
+          "is_active"
+        ],
+        "title": "MLModelSummaryResponse",
+        "type": "object"
+      },
       "OAuthCallbackRequest": {
         "additionalProperties": false,
         "description": "OAuth callback POST body.",
@@ -6485,6 +6657,85 @@
           }
         ],
         "summary": "Get Studio Class Stats",
+        "tags": [
+          "Studio"
+        ]
+      }
+    },
+    "/api/v1/studio/models/history": {
+      "get": {
+        "description": "List all historical and active ML activity classification models.",
+        "operationId": "get_models_history_api_v1_studio_models_history_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MLModelSummaryResponse"
+                  },
+                  "title": "Response Get Models History Api V1 Studio Models History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Models History",
+        "tags": [
+          "Studio"
+        ]
+      }
+    },
+    "/api/v1/studio/models/{version}": {
+      "get": {
+        "description": "Get full evaluation metrics, selection criteria, and manifest for a specific model version.",
+        "operationId": "get_model_version_detail_api_v1_studio_models__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MLModelDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Model Version Detail",
         "tags": [
           "Studio"
         ]
