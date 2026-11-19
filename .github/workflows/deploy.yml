@@ -129,7 +129,7 @@ jobs:
               --log-driver json-file \
               --log-opt max-size=20m \
               --log-opt max-file=5 \
-              -p 8000:8000 \
+              -p 127.0.0.1:8000:8000 \
               -v /home/ubuntu/logs:/app/logs \
               -e HEALTHKICKS_LOG_FILE=/app/logs/healthkicks.log \
               --env-file /home/ubuntu/.env \
@@ -168,7 +168,7 @@ jobs:
                   --log-driver json-file \
                   --log-opt max-size=20m \
                   --log-opt max-file=5 \
-                  -p 8000:8000 \
+                  -p 127.0.0.1:8000:8000 \
                   -v /home/ubuntu/logs:/app/logs \
                   -e HEALTHKICKS_LOG_FILE=/app/logs/healthkicks.log \
                   --env-file /home/ubuntu/.env \
