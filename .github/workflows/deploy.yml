@@ -84,8 +84,8 @@ jobs:
 
             IMAGE_URI=${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-            # Log in to ECR from EC2
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+            # Log in to ECR from EC2 (fallback if amazon-ecr-credential-helper is not active)
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com 2>/dev/null || true
 
             # Preventive cleanup of stopped containers and unused images (including tagged)
             docker container prune -f
@@ -111,42 +111,50 @@ jobs:
             mkdir -p /home/ubuntu/logs
             chmod 777 /home/ubuntu/logs || true
 
-            # Preserve the currently running image tag for automatic rollback if the new container fails healthcheck
-            PREV_IMAGE=$(docker inspect --format='{{.Config.Image}}' healthkicks-backend 2>/dev/null || true)
-            if [ -n "$PREV_IMAGE" ]; then
-              docker tag "$PREV_IMAGE" healthkicks-backend:rollback || true
+            # Determine active and target slots for Zero-Downtime Blue/Green deployment
+            if docker ps --format '{{.Names}}' | grep -Eq '^(healthkicks-blue|healthkicks-backend)$'; then
+              TARGET_NAME="healthkicks-green"
+              TARGET_PORT="8001"
+              OLD_NAME="healthkicks-blue"
+            else
+              TARGET_NAME="healthkicks-blue"
+              TARGET_PORT="8000"
+              OLD_NAME="healthkicks-green"
             fi
 
-            # Stop and remove previous container if exists
-            docker stop --timeout 15 healthkicks-backend || true
-            docker rm healthkicks-backend || true
+            echo "Deploying new release to slot: ${TARGET_NAME} (port 127.0.0.1:${TARGET_PORT})"
 
-            # Restart container with IAM variables, bounded Docker log rotation (5x20m = 100MB max),
+            # Clean up any leftover stopped container in the target slot
+            docker stop --timeout 5 "$TARGET_NAME" 2>/dev/null || true
+            docker rm -f "$TARGET_NAME" 2>/dev/null || true
+
+            # Start new container with IAM variables, bounded Docker log rotation (5x20m = 100MB max),
             # and rotated host log file persistence (/home/ubuntu/logs/healthkicks.log)
+            # while the currently active container continues serving live traffic uninterrupted
             docker run -d \
-              --name healthkicks-backend \
+              --name "$TARGET_NAME" \
               --restart unless-stopped \
               --log-driver json-file \
               --log-opt max-size=20m \
               --log-opt max-file=5 \
-              -p 127.0.0.1:8000:8000 \
+              -p 127.0.0.1:${TARGET_PORT}:8000 \
               -v /home/ubuntu/logs:/app/logs \
               -e HEALTHKICKS_LOG_FILE=/app/logs/healthkicks.log \
               --env-file /home/ubuntu/.env \
               "$IMAGE_URI"
 
-            # Poll liveness probe for up to 90 seconds (accommodates Aurora resume and Alembic migrations); auto-rollback on failure
+            # Poll liveness probe for up to 90 seconds (accommodates Aurora resume and Alembic migrations)
             healthy=0
             max_attempts=30
             for i in $(seq 1 "$max_attempts"); do
-              if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              if curl -fsS "http://127.0.0.1:${TARGET_PORT}/health" >/dev/null 2>&1; then
                 healthy=1
-                echo "New container passed /health check on attempt ${i}/${max_attempts}."
+                echo "New container (${TARGET_NAME}) passed /health check on attempt ${i}/${max_attempts}."
                 break
               fi
               # Fail fast if container crashed or exited prematurely
-              if [ "$(docker inspect -f '{{.State.Running}}' healthkicks-backend 2>/dev/null)" != "true" ]; then
-                echo "Container exited prematurely during startup."
+              if [ "$(docker inspect -f '{{.State.Running}}' "$TARGET_NAME" 2>/dev/null)" != "true" ]; then
+                echo "Container ${TARGET_NAME} exited prematurely during startup."
                 break
               fi
               if [ $((i % 5)) -eq 0 ]; then
@@ -156,28 +164,35 @@ jobs:
             done
 
             if [ "$healthy" -ne 1 ]; then
-              echo "ERROR: New container failed health check within ${max_attempts} attempts ($((max_attempts * 3))s). Dumping container logs:"
-              docker logs --tail 50 healthkicks-backend || true
-              docker stop --timeout 15 healthkicks-backend || true
-              docker rm healthkicks-backend || true
-              if docker image inspect healthkicks-backend:rollback >/dev/null 2>&1; then
-                echo "Rolling back to previous working image (healthkicks-backend:rollback)..."
-                docker run -d \
-                  --name healthkicks-backend \
-                  --restart unless-stopped \
-                  --log-driver json-file \
-                  --log-opt max-size=20m \
-                  --log-opt max-file=5 \
-                  -p 127.0.0.1:8000:8000 \
-                  -v /home/ubuntu/logs:/app/logs \
-                  -e HEALTHKICKS_LOG_FILE=/app/logs/healthkicks.log \
-                  --env-file /home/ubuntu/.env \
-                  healthkicks-backend:rollback
-              fi
+              echo "ERROR: New container (${TARGET_NAME}) failed health check within ${max_attempts} attempts ($((max_attempts * 3))s). Dumping container logs:"
+              docker logs --tail 50 "$TARGET_NAME" || true
+              docker stop --timeout 15 "$TARGET_NAME" || true
+              docker rm "$TARGET_NAME" || true
+              echo "Aborting deployment. Previous active container remains untouched and continues serving live traffic."
               exit 1
             fi
 
-            docker rmi healthkicks-backend:rollback 2>/dev/null || true
+            # Switch Nginx upstream to the newly verified container port (0ms downtime)
+            sudo tee /etc/nginx/conf.d/healthkicks-upstream.conf > /dev/null <<EOF
+            upstream healthkicks_backend {
+                server 127.0.0.1:${TARGET_PORT};
+                keepalive 16;
+            }
+            EOF
+
+            # Ensure Nginx site configuration references the dynamic upstream block
+            if grep -q "proxy_pass http://127.0.0.1:8000;" /etc/nginx/sites-available/healthkicks 2>/dev/null; then
+              sudo sed -i 's|proxy_pass http://127.0.0.1:8000;|proxy_pass http://healthkicks_backend;|g' /etc/nginx/sites-available/healthkicks
+            fi
+
+            sudo nginx -t && sudo systemctl reload nginx
+            echo "Nginx traffic seamlessly switched to ${TARGET_NAME} on port ${TARGET_PORT}."
+
+            # Gracefully drain and remove the retired container slot (and legacy container if present)
+            docker stop --timeout 15 "$OLD_NAME" 2>/dev/null || true
+            docker rm "$OLD_NAME" 2>/dev/null || true
+            docker stop --timeout 15 healthkicks-backend 2>/dev/null || true
+            docker rm healthkicks-backend 2>/dev/null || true
 
             # Cleanup replaced old image to keep disk space clean
             docker image prune -a -f
