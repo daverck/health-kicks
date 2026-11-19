@@ -23,11 +23,15 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+
+import joblib
 
 from scripts.train_detector import (
     build_dataset_from_sessions,
@@ -72,6 +76,7 @@ def run_c_transpilation(
     model_path: Path,
     output_header_path: Path,
     firmware_dir: Path,
+    model_version: str | None = None,
 ) -> bool:
     """Invokes export_model_to_c.py to generate activity_model_generated.h."""
     export_script = firmware_dir / "tools" / "export_model_to_c.py"
@@ -87,6 +92,8 @@ def run_c_transpilation(
         "--output",
         str(output_header_path.resolve()),
     ]
+    if model_version:
+        cmd.extend(["--model-version", model_version])
 
     logger.info("Executing C transpilation: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -148,6 +155,204 @@ def run_platformio_build(firmware_dir: Path) -> tuple[bool, str]:
 
     stats_str = ", ".join(stats) if stats else "Build succeeded"
     return True, stats_str
+
+
+def parse_build_stats_pct(stats_str: str) -> tuple[float | None, float | None]:
+    """Extracts Flash and RAM percentages from build statistics string."""
+    flash_pct: float | None = None
+    ram_pct: float | None = None
+    flash_m = re.search(r"Flash:\s+([\d\.]+)%", stats_str)
+    if flash_m:
+        try:
+            flash_pct = float(flash_m.group(1))
+        except ValueError:
+            pass
+    ram_m = re.search(r"RAM:\s+([\d\.]+)%", stats_str)
+    if ram_m:
+        try:
+            ram_pct = float(ram_m.group(1))
+        except ValueError:
+            pass
+    return flash_pct, ram_pct
+
+
+def get_git_commit() -> str | None:
+    """Returns the current git short commit hash if available."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def resolve_next_model_version(
+    explicit_version: str | None = None,
+    synthetic: bool = False,
+    offline: bool = False,
+) -> str:
+    """Determines the semantic model version, auto-incrementing if not provided."""
+    if explicit_version:
+        v = explicit_version.strip()
+        if not v.startswith("v"):
+            v = f"v{v}"
+        return v
+
+    # 1. Primary fast offline resolution: read from committed model_metrics.json
+    try:
+        metrics_file = Path(__file__).resolve().parent.parent / "app" / "core" / "model_metrics.json"
+        if metrics_file.exists():
+            data = json.loads(metrics_file.read_text(encoding="utf-8"))
+            if "model_version" in data and data["model_version"]:
+                return _bump_version(str(data["model_version"]))
+    except Exception:
+        pass
+
+    # 2. Secondary fallback: query latest version from database if online and not synthetic
+    if not (synthetic or offline):
+        try:
+            from app.db.database import SessionLocal
+            from app.db.models import MLModel
+
+            db = SessionLocal()
+            try:
+                latest = db.query(MLModel).order_by(MLModel.created_at.desc()).first()
+                if latest and latest.version:
+                    return _bump_version(latest.version)
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    return "v1.0.0"
+
+
+def _bump_version(version_str: str) -> str:
+    """Auto-increments the patch number of a semantic version string (e.g. v1.0.0 -> v1.0.1)."""
+    raw = version_str.lstrip("v")
+    parts = raw.split(".")
+    try:
+        if len(parts) == 3:
+            major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+            return f"v{major}.{minor}.{patch + 1}"
+        elif len(parts) == 2:
+            major, minor = int(parts[0]), int(parts[1])
+            return f"v{major}.{minor + 1}.0"
+    except ValueError:
+        pass
+    return f"{version_str}.1"
+
+
+def save_model_registry_bundle(
+    version: str,
+    package: dict[str, Any],
+    selection_criteria: dict[str, Any],
+    dataset_summary: dict[str, Any],
+    git_commit: str | None = None,
+    c_header_size: int | None = None,
+    flash_pct: float | None = None,
+    ram_pct: float | None = None,
+) -> Path:
+    """Saves local immutable model bundle (manifest.json + activity_classifier.joblib)."""
+    base_dir = Path(__file__).resolve().parent.parent / "scripts" / "models" / "registry" / version
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "model_version": version,
+        "model_name": str(package.get("model_name")),
+        "trained_at_utc": str(package.get("trained_at_utc")),
+        "git_commit": git_commit,
+        "window_size_sec": float(package.get("window_size_sec") or 3.0),
+        "selection_criteria": selection_criteria,
+        "dataset_summary": dataset_summary,
+        "metrics": package.get("metrics", {}),
+        "c_header_size_bytes": c_header_size,
+        "flash_usage_pct": flash_pct,
+        "ram_usage_pct": ram_pct,
+    }
+
+    manifest_path = base_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    joblib_path = base_dir / "activity_classifier.joblib"
+    joblib.dump(package, joblib_path)
+    logger.info("Saved local model registry bundle: %s", base_dir)
+    return base_dir
+
+
+def persist_model_to_database(
+    version: str,
+    package: dict[str, Any],
+    selection_criteria: dict[str, Any],
+    dataset_summary: dict[str, Any],
+    git_commit: str | None = None,
+    c_header_size: int | None = None,
+    flash_pct: float | None = None,
+    ram_pct: float | None = None,
+    synthetic: bool = False,
+    offline: bool = False,
+) -> bool:
+    """Inserts or updates model record in PostgreSQL ml_models table."""
+    if synthetic or offline:
+        logger.info("Skipping PostgreSQL model persistence in synthetic/offline mode.")
+        return True
+
+    try:
+        from app.db.database import SessionLocal
+        from app.db.models import MLModel
+
+        db = SessionLocal()
+        try:
+            # Set previous active models to inactive
+            db.query(MLModel).filter(MLModel.is_active == True).update({"is_active": False})  # noqa: E712
+
+            existing = db.query(MLModel).filter(MLModel.version == version).first()
+            if existing:
+                existing.model_name = str(package.get("model_name"))
+                existing.git_commit = git_commit
+                existing.is_active = True
+                existing.window_size_sec = float(package.get("window_size_sec") or 3.0)
+                existing.selection_criteria = selection_criteria
+                existing.dataset_summary = dataset_summary
+                existing.metrics = package.get("metrics", {})
+                existing.c_header_size_bytes = c_header_size
+                existing.flash_usage_pct = flash_pct
+                existing.ram_usage_pct = ram_pct
+            else:
+                new_model = MLModel(
+                    version=version,
+                    model_name=str(package.get("model_name")),
+                    git_commit=git_commit,
+                    is_active=True,
+                    window_size_sec=float(package.get("window_size_sec") or 3.0),
+                    selection_criteria=selection_criteria,
+                    dataset_summary=dataset_summary,
+                    metrics=package.get("metrics", {}),
+                    c_header_size_bytes=c_header_size,
+                    flash_usage_pct=flash_pct,
+                    ram_usage_pct=ram_pct,
+                )
+                db.add(new_model)
+
+            db.commit()
+            logger.info("Successfully persisted model %s to PostgreSQL ml_models table.", version)
+            return True
+        except Exception as db_err:
+            db.rollback()
+            logger.warning("Could not persist model to PostgreSQL (non-fatal): %s", db_err)
+            return False
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Database unavailable for ML registry: %s", exc)
+        return False
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -241,6 +446,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Filter sessions recorded on or after this date (format: YYYY-MM-DD).",
     )
+    parser.add_argument(
+        "--model-version",
+        type=str,
+        default=None,
+        help="Semantic model version (e.g. v1.2.0). Auto-incremented if omitted.",
+    )
     return parser.parse_args(args)
 
 
@@ -249,11 +460,19 @@ def main(argv: list[str] | None = None) -> int:
     load_project_env()
     args = parse_args(argv)
     min_sessions = 0 if args.synthetic else args.min_sessions_per_class
+    model_version = resolve_next_model_version(
+        args.model_version,
+        synthetic=args.synthetic,
+        offline=args.offline,
+    )
+    git_commit = get_git_commit()
 
     print("\n" + "=" * 72)
     print(" HEALTHKICKS MLOPS - END-TO-END EDGE MODEL UPDATE PIPELINE")
     print("=" * 72)
     print(f"* Mode                 : {'SYNTHETIC (Offline)' if args.synthetic else 'PRODUCTION (Postgres + DynamoDB)'}")
+    print(f"* Model Version        : {model_version}")
+    print(f"* Git Commit           : {git_commit or 'unknown'}")
     print(f"* Model Artifact       : {args.output_model}")
     print(f"* Quality Gate F1 Min  : {args.min_f1 * 100:.1f} %")
     print(f"* Window Parameters    : {args.window_size:.1f}s window, {args.window_step:.1f}s step")
@@ -271,8 +490,26 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Firmware directory error: %s", fnf_err)
         return 1
 
-    model_path = Path(args.output_model).resolve()
+    backend_root = Path(__file__).resolve().parent.parent
+    model_path = Path(args.output_model)
+    if not model_path.is_absolute():
+        model_path = (backend_root / model_path).resolve()
+    else:
+        model_path = model_path.resolve()
+
     header_path = (firmware_dir / args.output_header).resolve()
+
+    selection_criteria = {
+        "min_sessions_per_class": min_sessions,
+        "max_sessions_per_class": args.max_sessions_per_class,
+        "min_date": args.min_date,
+        "window_size_sec": args.window_size,
+        "window_step_sec": args.window_step,
+        "min_f1_threshold": args.min_f1,
+        "synthetic": args.synthetic,
+    }
+    dataset_summary: dict[str, Any] = {}
+    package: dict[str, Any] = {}
 
     # -------------------------------------------------------------------------
     # STEP 1: TRAINING OR USING EXISTING MODEL
@@ -280,6 +517,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_train:
         print("\n>>> [STEP 1/4] Synchronizing sessions & training candidate models...")
         cache_path = Path(args.cache_dir)
+        if not cache_path.is_absolute():
+            cache_path = (backend_root / cache_path).resolve()
         sessions_data = sync_sessions_cache(
             cache_dir=cache_path,
             force_refresh=args.force_refresh,
@@ -293,14 +532,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         print("\n>>> [STEP 2/4] Extracting temporal & biomechanical features...")
-        X, y = build_dataset_from_sessions(
+        dataset_res = build_dataset_from_sessions(
             sessions_data=sessions_data,
             window_size_sec=args.window_size,
             step_sec=args.window_step,
             min_sessions_per_class=min_sessions,
             max_sessions_per_class=args.max_sessions_per_class,
             min_date=args.min_date,
+            return_summary=True,
         )
+        X, y, dataset_summary = dataset_res
 
         if len(X) == 0:
             logger.error("Feature extraction produced 0 valid windows. Pipeline aborted.")
@@ -314,6 +555,10 @@ def main(argv: list[str] | None = None) -> int:
                 output_model_path=str(model_path),
                 window_size_sec=args.window_size,
                 include_unsupported_c=False,
+                model_version=model_version,
+                selection_criteria=selection_criteria,
+                dataset_summary=dataset_summary,
+                git_commit=git_commit,
             )
         except Exception as train_err:
             logger.error("Training failed: %s", train_err)
@@ -331,12 +576,26 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print("[QUALITY GATE] PASSED! Model meets accuracy standards for embedded deployment.")
 
+        # Save local uncommitted registry bundle (manifest.json + activity_classifier.joblib)
+        try:
+            save_model_registry_bundle(
+                version=model_version,
+                package=package,
+                selection_criteria=selection_criteria,
+                dataset_summary=dataset_summary,
+                git_commit=git_commit,
+            )
+        except Exception as bundle_err:
+            logger.warning("Could not save local registry bundle: %s", bundle_err)
+
         # Automatically synchronize lightweight model_metrics.json for runtime API
         try:
             import json
             metrics_payload = {
+                "model_version": model_version,
                 "trained_at_utc": str(package.get("trained_at_utc")),
                 "model_name": str(package.get("model_name")),
+                "git_commit": git_commit,
                 "window_size_sec": float(package.get("window_size_sec") or 3.0),
                 "metrics": {
                     "f1_macro": float(package.get("metrics", {}).get("f1_macro", 0.0)),
@@ -358,6 +617,14 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("Existing model artifact not found: %s", model_path)
             return 1
         print(f"    Artifact: {model_path} ({model_path.stat().st_size / 1024:.1f} KB)")
+        try:
+            import joblib
+            loaded = joblib.load(model_path)
+            if isinstance(loaded, dict):
+                package = loaded
+                model_version = str(loaded.get("model_version") or model_version)
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # STEP 4: C TRANSPILATION (m2cgen)
@@ -367,17 +634,21 @@ def main(argv: list[str] | None = None) -> int:
         model_path=model_path,
         output_header_path=header_path,
         firmware_dir=firmware_dir,
+        model_version=model_version,
     )
     if not transpile_ok:
         logger.error("C transpilation failed. Pipeline aborted.")
         return 3
 
-    header_size_str = f"({header_path.stat().st_size} bytes)" if header_path.exists() else ""
+    header_size = header_path.stat().st_size if header_path.exists() else None
+    header_size_str = f"({header_size} bytes)" if header_size else ""
     print(f"[OK] Generated C header: {header_path} {header_size_str}")
 
     # -------------------------------------------------------------------------
-    # STEP 5: FIRMWARE BUILD CHECK (PLATFORMIO)
+    # STEP 5: FIRMWARE BUILD CHECK (PLATFORMIO) & DATABASE PERSISTENCE
     # -------------------------------------------------------------------------
+    flash_pct: float | None = None
+    ram_pct: float | None = None
     if not args.no_build_check:
         print("\n>>> [VERIFICATION] Building ESP32-S3 firmware with PlatformIO...")
         build_ok, stats_msg = run_platformio_build(firmware_dir)
@@ -385,8 +656,24 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("PlatformIO build verification FAILED:\n%s", stats_msg)
             return 4
         print(f"[OK] Firmware compilation SUCCESSFUL! ({stats_msg})")
+        flash_pct, ram_pct = parse_build_stats_pct(stats_msg)
     else:
         print("\n>>> [VERIFICATION] PlatformIO build check skipped (--no-build-check).")
+
+    # Persist model record into PostgreSQL database (ml_models table) if package available
+    if package:
+        persist_model_to_database(
+            version=model_version,
+            package=package,
+            selection_criteria=selection_criteria,
+            dataset_summary=dataset_summary,
+            git_commit=git_commit,
+            c_header_size=header_size,
+            flash_pct=flash_pct,
+            ram_pct=ram_pct,
+            synthetic=args.synthetic,
+            offline=args.offline,
+        )
 
     # -------------------------------------------------------------------------
     # SUMMARY & NEXT STEPS

@@ -12,6 +12,8 @@ from app.api.deps import CurrentUser, RequireClinicianOrAdmin
 from app.db.database import get_db
 from app.schemas.telemetry import (
     ImuReadingResponse,
+    MLModelDetailResponse,
+    MLModelSummaryResponse,
     StudioClassDetailStatsResponse,
     StudioClassesSummaryResponse,
     StudioDatasetStatsResponse,
@@ -25,6 +27,8 @@ from app.services.studio_service import (
     compute_class_detail_stats,
     compute_classes_summary,
     compute_studio_stats,
+    get_model_detail,
+    query_models_history,
 )
 from app.services.telemetry_service import TelemetryService
 
@@ -186,6 +190,37 @@ def create_telemetry_router(
     ) -> StudioClassDetailStatsResponse:
         """Get detailed daily counts, duration distribution, and ML metrics for a specific activity class."""
         return compute_class_detail_stats(db=db, user=user, label=label)
+
+    @studio_router.get(
+        "/models/history",
+        response_model=list[MLModelSummaryResponse],
+        status_code=status.HTTP_200_OK,
+    )
+    def get_models_history(
+        user: RequireClinicianOrAdmin,
+        db: Session = Depends(get_db),
+    ) -> list[MLModelSummaryResponse]:
+        """List all historical and active ML activity classification models."""
+        return query_models_history(db=db)
+
+    @studio_router.get(
+        "/models/{version}",
+        response_model=MLModelDetailResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def get_model_version_detail(
+        version: str,
+        user: RequireClinicianOrAdmin,
+        db: Session = Depends(get_db),
+    ) -> MLModelDetailResponse:
+        """Get full evaluation metrics, selection criteria, and manifest for a specific model version."""
+        detail = get_model_detail(db=db, version=version)
+        if not detail:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Model version '{version}' not found",
+            )
+        return detail
 
 
     root_router.include_router(devices_router)

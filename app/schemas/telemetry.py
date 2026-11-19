@@ -1,7 +1,7 @@
 """Strict Pydantic schemas for DynamoDB IMU telemetry."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -149,4 +149,39 @@ class StudioClassesSummaryResponse(StrictModel):
     daily_counts: list[StudioClassDailyCount] = Field(default_factory=list)
     classes: list[StudioClassSummaryItem] = Field(default_factory=list)
     confusion_matrix: StudioConfusionMatrix | None = None
+
+
+class MLModelSummaryResponse(StrictModel):
+    """Lightweight summary of an ML activity classification model version."""
+
+    version: str
+    model_name: str
+    created_at: datetime
+    is_active: bool
+    git_commit: str | None = None
+    f1_macro: float = 0.0
+    accuracy: float = 0.0
+    precision_macro: float = 0.0
+    recall_macro: float = 0.0
+    total_sessions: int = 0
+    total_windows: int = 0
+
+
+class MLModelDetailResponse(StrictModel):
+    """Full detail and evaluation manifest for a specific model version."""
+
+    version: str
+    model_name: str
+    created_at: datetime
+    is_active: bool
+    git_commit: str | None = None
+    window_size_sec: float = 3.0
+    window_step_sec: float = 0.5
+    selection_criteria: dict[str, Any] = Field(default_factory=dict)
+    dataset_summary: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    c_header_size_bytes: int | None = None
+    flash_usage_pct: float | None = None
+    ram_usage_pct: float | None = None
+
 

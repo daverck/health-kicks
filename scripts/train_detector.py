@@ -222,7 +222,8 @@ def build_dataset_from_sessions(
     max_sessions_per_class: int | None = None,
     excluded_labels: set[str] | None = None,
     min_date: str | None = None,
-) -> tuple[pd.DataFrame, np.ndarray]:
+    return_summary: bool = False,
+) -> tuple[pd.DataFrame, np.ndarray] | tuple[pd.DataFrame, np.ndarray, dict[str, Any]]:
     """Splits each session into sliding windows and extracts features.
 
     Filters out sessions with excluded labels (e.g. legacy 'stairs') and classes
@@ -409,10 +410,31 @@ def build_dataset_from_sessions(
             X_rows.append(feat)
             y_labels.append(label)
 
-    if not X_rows:
-        return pd.DataFrame(), np.array([])
+    summary: dict[str, Any] = {
+        "total_windows": len(X_rows),
+        "total_sessions": len(valid_sessions),
+        "session_ids": [
+            str(s.get("session_id") or s.get("id"))
+            for s in valid_sessions
+            if (s.get("session_id") or s.get("id"))
+        ],
+        "class_sessions": {
+            lbl: sum(1 for s in valid_sessions if s.get("label") == lbl)
+            for lbl in set(s.get("label") for s in valid_sessions if s.get("label"))
+        },
+        "class_windows": (
+            {lbl: int(np.sum(np.array(y_labels) == lbl)) for lbl in set(y_labels)}
+            if y_labels
+            else {}
+        ),
+    }
 
-    return pd.DataFrame(X_rows), np.array(y_labels)
+    if not X_rows:
+        df_res, y_res = pd.DataFrame(), np.array([])
+        return (df_res, y_res, summary) if return_summary else (df_res, y_res)
+
+    df_res, y_res = pd.DataFrame(X_rows), np.array(y_labels)
+    return (df_res, y_res, summary) if return_summary else (df_res, y_res)
 
 
 # -----------------------------------------------------------------------------
@@ -986,6 +1008,10 @@ def train_and_benchmark(
     output_model_path: str = "scripts/models/activity_classifier.joblib",
     window_size_sec: float = 3.0,
     include_unsupported_c: bool = False,
+    model_version: str | None = None,
+    selection_criteria: dict[str, Any] | None = None,
+    dataset_summary: dict[str, Any] | None = None,
+    git_commit: str | None = None,
 ) -> dict[str, Any]:
     """Compares candidate classifiers using 5-Fold Stratified CV.
 
@@ -1121,6 +1147,7 @@ def train_and_benchmark(
     benign_classes = [c for c in unique_classes if is_benign_activity(c)]
 
     package = {
+        "model_version": model_version or "v1.0.0",
         "model_name": best_name,
         "estimator": best_clf,
         "feature_names": list(X.columns),
@@ -1129,6 +1156,9 @@ def train_and_benchmark(
         "benign_classes": benign_classes,
         "window_size_sec": float(window_size_sec),
         "trained_at_utc": datetime.now(UTC).isoformat(),
+        "git_commit": git_commit,
+        "selection_criteria": selection_criteria or {},
+        "dataset_summary": dataset_summary or {},
         "is_m2cgen_compatible": (best_name != "HistGradientBoosting"),
         "metrics": {
             "f1_macro": best_info["f1_macro"],

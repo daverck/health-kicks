@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.edge_ai import EDGE_AI_LABELS
 from app.core.pseudonymization import get_subject_pseudonym
-from app.db.models import StudioSession, User, UserRole
+from app.db.models import MLModel, StudioSession, User, UserRole
 from app.schemas.studio import (
     PaginatedSessionsResponse,
     StudioAuthorSummary,
@@ -21,6 +21,8 @@ from app.schemas.studio import (
     StudioSessionUpdatePayload,
 )
 from app.schemas.telemetry import (
+    MLModelDetailResponse,
+    MLModelSummaryResponse,
     StudioClassDailyCount,
     StudioClassDetailStatsResponse,
     StudioClassDurationStats,
@@ -729,4 +731,130 @@ def delete_studio_session(
 
     db.delete(session)
     db.commit()
+
+
+def query_models_history(db: Session) -> list[MLModelSummaryResponse]:
+    """Retrieves all registered ML models ordered from newest to oldest."""
+    models = db.query(MLModel).order_by(MLModel.created_at.desc()).all()
+    if models:
+        result: list[MLModelSummaryResponse] = []
+        for m in models:
+            metrics = m.metrics or {}
+            ds = m.dataset_summary or {}
+            result.append(
+                MLModelSummaryResponse(
+                    version=m.version,
+                    model_name=m.model_name,
+                    created_at=m.created_at,
+                    is_active=m.is_active,
+                    git_commit=m.git_commit,
+                    f1_macro=round(float(metrics.get("f1_macro", 0.0)), 4),
+                    accuracy=round(float(metrics.get("accuracy", 0.0)), 4),
+                    precision_macro=round(float(metrics.get("precision_macro", 0.0)), 4),
+                    recall_macro=round(float(metrics.get("recall_macro", 0.0)), 4),
+                    total_sessions=int(ds.get("total_sessions", 0)),
+                    total_windows=int(ds.get("total_windows", 0)),
+                )
+            )
+        return result
+
+    # Fallback to committed model_metrics.json if database has no records
+    try:
+        import json
+        from pathlib import Path
+
+        json_path = Path(__file__).resolve().parent.parent / "core" / "model_metrics.json"
+        if json_path.exists():
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            metrics = data.get("metrics", {})
+            trained_at_str = data.get("trained_at_utc")
+            created_at = (
+                datetime.fromisoformat(trained_at_str)
+                if trained_at_str
+                else datetime.now()
+            )
+            return [
+                MLModelSummaryResponse(
+                    version=str(data.get("model_version", "v1.0.0")),
+                    model_name=str(data.get("model_name", "RandomForest_Standard")),
+                    created_at=created_at,
+                    is_active=True,
+                    git_commit=data.get("git_commit"),
+                    f1_macro=round(float(metrics.get("f1_macro", 0.0)), 4),
+                    accuracy=round(float(metrics.get("accuracy", 0.0)), 4),
+                    precision_macro=round(float(metrics.get("precision_macro", 0.0)), 4),
+                    recall_macro=round(float(metrics.get("recall_macro", 0.0)), 4),
+                    total_sessions=0,
+                    total_windows=0,
+                )
+            ]
+    except Exception:
+        pass
+
+    return []
+
+
+def get_model_detail(db: Session, version: str) -> MLModelDetailResponse | None:
+    """Retrieves full manifest and evaluation metrics for a specific model version."""
+    query = db.query(MLModel)
+    if version.lower() in ("active", "latest"):
+        model = query.filter(MLModel.is_active == True).first()  # noqa: E712
+        if not model:
+            model = query.order_by(MLModel.created_at.desc()).first()
+    else:
+        norm_version = version if version.startswith("v") else f"v{version}"
+        model = query.filter(MLModel.version == norm_version).first()
+
+    if model:
+        return MLModelDetailResponse(
+            version=model.version,
+            model_name=model.model_name,
+            created_at=model.created_at,
+            is_active=model.is_active,
+            git_commit=model.git_commit,
+            window_size_sec=model.window_size_sec,
+            window_step_sec=model.window_step_sec,
+            selection_criteria=model.selection_criteria or {},
+            dataset_summary=model.dataset_summary or {},
+            metrics=model.metrics or {},
+            c_header_size_bytes=model.c_header_size_bytes,
+            flash_usage_pct=model.flash_usage_pct,
+            ram_usage_pct=model.ram_usage_pct,
+        )
+
+    # Fallback to committed model_metrics.json if matching active/latest or exact version
+    try:
+        import json
+        from pathlib import Path
+
+        json_path = Path(__file__).resolve().parent.parent / "core" / "model_metrics.json"
+        if json_path.exists():
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            json_version = str(data.get("model_version", "v1.0.0"))
+            if version.lower() in ("active", "latest") or version in (json_version, json_version.lstrip("v")):
+                trained_at_str = data.get("trained_at_utc")
+                created_at = (
+                    datetime.fromisoformat(trained_at_str)
+                    if trained_at_str
+                    else datetime.now()
+                )
+                return MLModelDetailResponse(
+                    version=json_version,
+                    model_name=str(data.get("model_name", "RandomForest_Standard")),
+                    created_at=created_at,
+                    is_active=True,
+                    git_commit=data.get("git_commit"),
+                    window_size_sec=float(data.get("window_size_sec", 3.0)),
+                    window_step_sec=0.5,
+                    selection_criteria={},
+                    dataset_summary={},
+                    metrics=data.get("metrics", {}),
+                    c_header_size_bytes=None,
+                    flash_usage_pct=None,
+                    ram_usage_pct=None,
+                )
+    except Exception:
+        pass
+
+    return None
 

@@ -3,12 +3,11 @@
 import uuid as _uuid
 from datetime import UTC, date, datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
-    UUID as PgUUID,
-)
-from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -22,6 +21,10 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
 )
+from sqlalchemy import (
+    UUID as PgUUID,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.pseudonymization import get_subject_pseudonym
@@ -442,3 +445,46 @@ class FallAlertNotification(Base):
     error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     alert: Mapped["FallAlert"] = relationship("FallAlert", back_populates="notifications")
+
+
+class MLModel(Base):
+    """Registry record for edge and cloud ML activity classification models."""
+
+    __tablename__ = "ml_models"
+    __table_args__ = (
+        Index("ix_ml_models_is_active", "is_active"),
+        Index("ix_ml_models_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), default=uuid4, unique=True, index=True, nullable=False
+    )
+    version: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    git_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Windowing & selection criteria
+    window_size_sec: Mapped[float] = mapped_column(Float, default=3.0, nullable=False)
+    window_step_sec: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    selection_criteria: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False, default=dict
+    )
+    dataset_summary: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False, default=dict
+    )
+
+    # Evaluation metrics (macro F1, accuracy, per-class, confusion matrix)
+    metrics: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False, default=dict
+    )
+
+    # Embedded compilation footprint
+    c_header_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    flash_usage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ram_usage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
