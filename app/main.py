@@ -55,7 +55,19 @@ from app.services.ingestion_service import prune_processed_messages
 
 setup_logging()
 
+if settings.sentry_dsn:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        send_default_pii=False,
+    )
+
 logger = logging.getLogger("healthkicks.app")
+if settings.sentry_dsn:
+    logger.info("[sentry] Initialized Sentry SDK for environment '%s'", settings.environment)
 access_logger = logging.getLogger("healthkicks.access")
 publisher = AWSIoTPublishService()
 

@@ -89,6 +89,9 @@ class Settings:
     fall_alert_replay_threshold_sec: int = 120
     fall_alert_max_contacts: int = 5
     fall_alert_worker_interval_sec: int = 5
+    # Sentry Error Tracking & Performance Monitoring
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.2
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -330,6 +333,17 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
                 _nested_value(yaml_values, "fall_alert", "worker_interval_sec", defaults.fall_alert_worker_interval_sec),
             )
         ),
+        # Sentry
+        "sentry_dsn": yaml_values.get(
+            "sentry_dsn",
+            _nested_value(yaml_values, "sentry", "dsn", defaults.sentry_dsn),
+        ),
+        "sentry_traces_sample_rate": float(
+            yaml_values.get(
+                "sentry_traces_sample_rate",
+                _nested_value(yaml_values, "sentry", "traces_sample_rate", defaults.sentry_traces_sample_rate),
+            )
+        ),
     }
 
     environment_overrides: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
@@ -470,6 +484,12 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "fall_alert_worker_interval_sec": (
             ("HEALTHKICKS_FALL_ALERT_WORKER_INTERVAL_SEC", "FALL_ALERT_WORKER_INTERVAL_SEC"),
             int,
+        ),
+        # Sentry Error Tracking & Observability
+        "sentry_dsn": (("SENTRY_DSN", "HEALTHKICKS_SENTRY_DSN"), str),
+        "sentry_traces_sample_rate": (
+            ("SENTRY_TRACES_SAMPLE_RATE", "HEALTHKICKS_SENTRY_TRACES_SAMPLE_RATE"),
+            float,
         ),
     }
     for field_name, (environment_names, converter) in environment_overrides.items():
