@@ -123,7 +123,7 @@ class UserRole(str, Enum):
     """Role hierarchy for authorization checks."""
 
     admin = "admin"
-    clinician = "clinician"
+    trainer = "trainer"
     user = "user"
 
 
@@ -161,9 +161,14 @@ class User(Base):
         return self.role == UserRole.admin
 
     @property
+    def is_trainer_or_admin(self) -> bool:
+        """Check if user has trainer or admin privileges."""
+        return self.role in (UserRole.admin, UserRole.trainer)
+
+    @property
     def is_clinician_or_admin(self) -> bool:
-        """Check if user has clinician or admin privileges."""
-        return self.role in (UserRole.admin, UserRole.clinician)
+        """Deprecated alias for is_trainer_or_admin."""
+        return self.is_trainer_or_admin
 
 
 class DeviceOwnership(Base):
@@ -392,9 +397,7 @@ class FallAlert(Base):
     next_action_at_utc: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True, nullable=True
     )
-    closed_at_utc: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    closed_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -418,9 +421,7 @@ class FallAlertNotification(Base):
     """Audit trail of each notification (email or SMS) dispatched during fall alert escalation."""
 
     __tablename__ = "fall_alert_notifications"
-    __table_args__ = (
-        Index("ix_fall_alert_notifications_alert_rank", "alert_id", "rank", "id"),
-    )
+    __table_args__ = (Index("ix_fall_alert_notifications_alert_rank", "alert_id", "rank", "id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     alert_id: Mapped[int] = mapped_column(
@@ -487,4 +488,3 @@ class MLModel(Base):
     c_header_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     flash_usage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     ram_usage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-

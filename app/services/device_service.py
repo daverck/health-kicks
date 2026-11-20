@@ -25,23 +25,21 @@ def verify_device_ownership(
     db: Session,
     user: User,
     device_id: str,
-    allow_clinician: bool = False,
+    allow_trainer: bool = False,
+    allow_clinician: bool | None = None,
 ) -> None:
     """Verify that a user is authorized to access/operate on a device.
 
-    Admins are always authorized. Clinicians are authorized if allow_clinician is True.
+    Admins are always authorized. Trainers are authorized if allow_trainer is True.
     Regular users must have an active DeviceOwnership record for the device.
     """
+    effective_allow_trainer = allow_trainer or (allow_clinician is True)
     if user.role == UserRole.admin:
         return
-    if allow_clinician and user.role == UserRole.clinician:
+    if effective_allow_trainer and user.role == UserRole.trainer:
         return
 
-    ownership = (
-        db.query(DeviceOwnership)
-        .filter_by(user_id=user.id, device_id=device_id)
-        .first()
-    )
+    ownership = db.query(DeviceOwnership).filter_by(user_id=user.id, device_id=device_id).first()
     if ownership is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -93,11 +91,7 @@ def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceRespo
             detail="Device not found",
         )
 
-    existing_ownerships = (
-        db.query(DeviceOwnership)
-        .filter_by(device_id=payload.device_id)
-        .all()
-    )
+    existing_ownerships = db.query(DeviceOwnership).filter_by(device_id=payload.device_id).all()
 
     # Check if already bound to the requesting user
     if any(o.user_id == user_id for o in existing_ownerships):
@@ -109,14 +103,15 @@ def bind_device(db: Session, user_id: int, payload: DeviceCreate) -> DeviceRespo
     # Check if currently bound to another user
     if existing_ownerships:
         previous_user_ids = [o.user_id for o in existing_ownerships]
-        timestamps = [device.last_seen_utc] + [o.bound_at_utc for o in existing_ownerships if o.bound_at_utc]
+        timestamps = [device.last_seen_utc] + [
+            o.bound_at_utc for o in existing_ownerships if o.bound_at_utc
+        ]
         valid_timestamps = [t for t in timestamps if t is not None]
 
         now = datetime.now(UTC)
         if valid_timestamps:
             last_activity = max(
-                t if t.tzinfo is not None else t.replace(tzinfo=UTC)
-                for t in valid_timestamps
+                t if t.tzinfo is not None else t.replace(tzinfo=UTC) for t in valid_timestamps
             )
         else:
             last_activity = None
@@ -232,9 +227,8 @@ def list_all_devices(
     cursor: str | None = None,
 ) -> list[DeviceResponse]:
     """Retrieve all registered devices for administrator overview."""
-    query = (
-        db.query(Device, DeviceOwnership.bound_at_utc)
-        .outerjoin(DeviceOwnership, Device.device_id == DeviceOwnership.device_id)
+    query = db.query(Device, DeviceOwnership.bound_at_utc).outerjoin(
+        DeviceOwnership, Device.device_id == DeviceOwnership.device_id
     )
 
     decoded = decode_cursor(cursor)
@@ -299,9 +293,7 @@ def query_devices(
                     db=db, user_id=target_user.id, skip=skip, limit=fetch_limit, cursor=cursor
                 )
         else:
-            devices = list_all_devices(
-                db=db, skip=skip, limit=fetch_limit, cursor=cursor
-            )
+            devices = list_all_devices(db=db, skip=skip, limit=fetch_limit, cursor=cursor)
     else:
         devices = list_user_devices(
             db=db, user_id=user.id, skip=skip, limit=fetch_limit, cursor=cursor
@@ -408,9 +400,7 @@ def resolve_user_by_identifier(db: Session, user_identifier: int | str | None) -
     return (
         db.query(User)
         .filter(
-            (User.google_sub == cleaned)
-            | (User.azure_sub == cleaned)
-            | (User.email == cleaned)
+            (User.google_sub == cleaned) | (User.azure_sub == cleaned) | (User.email == cleaned)
         )
         .first()
     )
@@ -442,7 +432,9 @@ def update_single_device_presence(
 
     db.commit()
     db.refresh(device)
-    logger.info("Relayed device presence update: device=%s, state=%s", device.device_id, device.status)
+    logger.info(
+        "Relayed device presence update: device=%s, state=%s", device.device_id, device.status
+    )
     return device
 
 
@@ -511,4 +503,3 @@ def process_device_presence(
 
 # Backwards compatibility alias
 handle_user_lwt_disconnect = disconnect_user_devices_on_lwt
-

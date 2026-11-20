@@ -39,7 +39,7 @@ def auth_user(db_session) -> User:
         google_sub="test-sub-1",
         email="clinician@example.com",
         name="Clinician",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
     )
     db_session.add(user)
     db_session.commit()
@@ -63,7 +63,9 @@ def iot_service(mock_iot_client):
 @pytest.fixture()
 def test_client(auth_user, iot_service, db_session) -> TestClient:
     app = FastAPI()
-    app.include_router(create_telemetry_router(service=MagicMock(spec=TelemetryService), iot_service=iot_service))
+    app.include_router(
+        create_telemetry_router(service=MagicMock(spec=TelemetryService), iot_service=iot_service)
+    )
 
     def override_get_current_user():
         return auth_user
@@ -76,7 +78,9 @@ def test_client(auth_user, iot_service, db_session) -> TestClient:
     return TestClient(app)
 
 
-def test_start_studio_session_success_defaults(test_client, mock_iot_client, auth_user, db_session) -> None:
+def test_start_studio_session_success_defaults(
+    test_client, mock_iot_client, auth_user, db_session
+) -> None:
     device_id = "shoe-test-001"
     response = test_client.post(
         f"/api/v1/devices/{device_id}/commands/studio/start",
@@ -97,7 +101,9 @@ def test_start_studio_session_success_defaults(test_client, mock_iot_client, aut
     assert parsed_uuid.version == 4
 
     # Validate StudioSession is NOT persisted in PostgreSQL until IMU telemetry arrives
-    saved_session = db_session.query(StudioSession).filter(StudioSession.uuid == parsed_uuid).first()
+    saved_session = (
+        db_session.query(StudioSession).filter(StudioSession.uuid == parsed_uuid).first()
+    )
     assert saved_session is None
 
     # Validate mock publish call
@@ -114,7 +120,6 @@ def test_start_studio_session_success_defaults(test_client, mock_iot_client, aut
     assert payload["pulse_duration_ms"] == 150
     assert payload["pulse_pause_ms"] == 350
     assert payload["pulse_intensity"] == 210
-
 
 
 def test_start_studio_session_success_custom_parameters(test_client, mock_iot_client) -> None:

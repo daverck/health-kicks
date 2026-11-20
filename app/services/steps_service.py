@@ -134,9 +134,7 @@ def resolve_steps_date_range(
     today = datetime.now(UTC).date()
     resolved_to_date = today if to_date is None else to_date
     resolved_from_date = (
-        resolved_to_date - timedelta(days=days - 1)
-        if from_date is None
-        else from_date
+        resolved_to_date - timedelta(days=days - 1) if from_date is None else from_date
     )
 
     if resolved_from_date > resolved_to_date:
@@ -204,7 +202,7 @@ def get_steps_history(
 ) -> DailyStepsHistoryResponse:
     """Retrieve historical daily step counts aggregated by activity type across a date range.
 
-    Enforces authorization: non-admin users (user and clinician) can only query their own data.
+    Enforces authorization: non-admin users (user and trainer) can only query their own data.
     """
     stmt = (
         select(DailyActivityStep)

@@ -43,7 +43,7 @@ def mock_google_settings(monkeypatch):
 
 
 def test_issue_and_verify_access_token_roundtrip(db_session) -> None:
-    user = User(google_sub="sub-1", email="a@example.com", role=UserRole.clinician)
+    user = User(google_sub="sub-1", email="a@example.com", role=UserRole.trainer)
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
@@ -51,7 +51,7 @@ def test_issue_and_verify_access_token_roundtrip(db_session) -> None:
     token = token_service.issue_access_token(user)
     claims = token_service.verify_access_token(token)
     assert claims["sub"] == str(user.uuid)
-    assert claims["role"] == "clinician"
+    assert claims["role"] == "trainer"
     assert claims["email"] == "a@example.com"
     assert claims["exp"] > claims["iat"]
 
@@ -79,7 +79,9 @@ def test_get_or_create_user_rebinds_existing_email(db_session) -> None:
     existing = User(google_sub="old-sub", email="x@example.com", role=UserRole.admin)
     db_session.add(existing)
     db_session.commit()
-    user = google_auth_service.get_or_create_user(db_session, {"sub": "new-sub", "email": "x@example.com"})
+    user = google_auth_service.get_or_create_user(
+        db_session, {"sub": "new-sub", "email": "x@example.com"}
+    )
     assert user.id == existing.id
     assert user.google_sub == "new-sub"  # sub refreshed, role preserved
 
@@ -106,7 +108,7 @@ def _protected_app(db_session) -> FastAPI:
 
 
 def test_role_authorization_rejects_non_admin(db_session) -> None:
-    user = User(google_sub="s", email="c@example.com", role=UserRole.clinician)
+    user = User(google_sub="s", email="c@example.com", role=UserRole.trainer)
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
@@ -118,6 +120,7 @@ def test_role_authorization_rejects_non_admin(db_session) -> None:
 
     def fake_bearer():
         import fastapi.security as sec
+
         return sec.HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
     app.dependency_overrides[bearer_scheme] = fake_bearer
@@ -133,6 +136,7 @@ def test_role_authorization_rejects_non_admin(db_session) -> None:
 
     def fake_bearer_admin():
         import fastapi.security as sec
+
         return sec.HTTPAuthorizationCredentials(scheme="Bearer", credentials=admin_token)
 
     app.dependency_overrides[bearer_scheme] = fake_bearer_admin
@@ -184,7 +188,9 @@ def test_endpoint_google_login_redirect(mock_google_settings) -> None:
     from app.main import app
 
     client = TestClient(app)
-    res = client.get("/api/v1/auth/google/login", params={"redirect": "true"}, follow_redirects=False)
+    res = client.get(
+        "/api/v1/auth/google/login", params={"redirect": "true"}, follow_redirects=False
+    )
     assert res.status_code in (302, 307)
     assert "accounts.google.com" in res.headers["location"]
 
@@ -297,6 +303,7 @@ def test_verify_google_id_token_malformed() -> None:
 def test_verify_google_id_token_invalid_issuer(mock_google_settings) -> None:
     mock_google_settings(google_client_id="test-client-id")
     import jwt
+
     token = jwt.encode(
         {"iss": "https://evil.example.com", "aud": "test-client-id", "exp": 9999999999},
         "test-secret-key-32-characters-long",
@@ -309,6 +316,7 @@ def test_verify_google_id_token_invalid_issuer(mock_google_settings) -> None:
 def test_verify_google_id_token_audience_mismatch(mock_google_settings) -> None:
     mock_google_settings(google_client_id="expected-client-id")
     import jwt
+
     token = jwt.encode(
         {"iss": "https://accounts.google.com", "aud": "wrong-client-id", "exp": 9999999999},
         "test-secret-key-32-characters-long",
@@ -323,6 +331,7 @@ def test_verify_google_id_token_expired(mock_google_settings) -> None:
     import time
 
     import jwt
+
     token = jwt.encode(
         {
             "iss": "https://accounts.google.com",
@@ -342,6 +351,7 @@ def test_verify_google_id_token_no_matching_key(mock_google_settings) -> None:
     from unittest.mock import patch
 
     import jwt
+
     token = jwt.encode(
         {
             "iss": "https://accounts.google.com",
@@ -353,7 +363,9 @@ def test_verify_google_id_token_no_matching_key(mock_google_settings) -> None:
         headers={"kid": "unknown-kid"},
     )
     with patch("app.services.google_auth_service._google_jwks", return_value={"keys": []}):
-        with pytest.raises(google_auth_service.GoogleAuthError, match="No matching Google signing key"):
+        with pytest.raises(
+            google_auth_service.GoogleAuthError, match="No matching Google signing key"
+        ):
             google_auth_service.verify_google_id_token(token)
 
 
@@ -410,6 +422,7 @@ def test_exchange_code_for_id_token_network_error(mock_google_settings) -> None:
     from unittest.mock import patch
 
     import httpx
+
     with patch("httpx.post", side_effect=httpx.ConnectError("Connection refused")):
         with pytest.raises(google_auth_service.GoogleAuthError, match="network failure"):
             google_auth_service.exchange_code_for_id_token("auth-code")
@@ -428,16 +441,16 @@ def test_endpoint_google_callback_post_unexpected_exception(caplog) -> None:
     valid_state = serializer.dumps({"nonce": secrets.token_urlsafe(16), "provider": "google"})
 
     with patch(
-            "app.services.google_auth_service.exchange_code_for_id_token",
-            side_effect=RuntimeError("Surprise crash in exchange"),
-        ):
-            client = TestClient(app)
-            res = client.post(
-                "/api/v1/auth/google/callback",
-                json={"code": "any-code", "state": valid_state},
-            )
-            assert res.status_code == 500
-            assert "unexpected error during code exchange" in caplog.text
+        "app.services.google_auth_service.exchange_code_for_id_token",
+        side_effect=RuntimeError("Surprise crash in exchange"),
+    ):
+        client = TestClient(app)
+        res = client.post(
+            "/api/v1/auth/google/callback",
+            json={"code": "any-code", "state": valid_state},
+        )
+        assert res.status_code == 500
+        assert "unexpected error during code exchange" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +488,9 @@ def test_verify_refresh_token_expired(db_session) -> None:
         "iat": int(time.time()) - 3600,
         "exp": int(time.time()) - 10,
     }
-    expired_token = jwt.encode(expired_payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    expired_token = jwt.encode(
+        expired_payload, settings.jwt_secret, algorithm=settings.jwt_algorithm
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         token_service.verify_refresh_token(expired_token)
@@ -552,7 +567,12 @@ def test_endpoint_refresh_nominal(db_session) -> None:
     from app.db.database import get_db
     from app.main import app
 
-    user = User(google_sub="g-refresh-nom", email="refresh.user@example.com", role=UserRole.user, name="Refreshed")
+    user = User(
+        google_sub="g-refresh-nom",
+        email="refresh.user@example.com",
+        role=UserRole.user,
+        name="Refreshed",
+    )
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
@@ -683,7 +703,9 @@ def test_verify_oauth_state_rejects_untimed_serializer() -> None:
     from app.core.config import settings
 
     untimed = URLSafeSerializer(settings.jwt_secret, salt="oauth-state")
-    untimed_state = untimed.dumps({"nonce": secrets.token_hex(16), "provider": "google", "platform": "web"})
+    untimed_state = untimed.dumps(
+        {"nonce": secrets.token_hex(16), "provider": "google", "platform": "web"}
+    )
     with pytest.raises(HTTPException) as exc_info:
         verify_oauth_state(untimed_state, expected_provider="google")
     assert exc_info.value.status_code == 400
@@ -791,8 +813,6 @@ def test_google_pkce_s256_and_ticket_exchange_flow(db_session, mock_google_setti
             json={"code": "oauth-code", "state": state, "code_verifier": verifier},
         )
         assert ok_post.status_code == 200
-
-
 
 
 def test_user_response_and_jwt_uuid_alignment(db_session) -> None:

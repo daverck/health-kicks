@@ -234,7 +234,7 @@ def test_fall_alert_ingest_and_studio_confirm_idempotency(db_session: Session) -
     clinician = User(
         email="clinician@healthkicks.io",
         name="Clinician",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
         is_active=True,
     )
     db_session.add(clinician)
@@ -382,5 +382,3 @@ def test_dynamo_circuit_breaker_recovers_after_cooldown() -> None:
     store._dynamo_retry_after = 0.0
     assert store._dynamo_unavailable is False
     assert store._get_table() is fake_table
-
-

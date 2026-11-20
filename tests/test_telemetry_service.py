@@ -53,7 +53,7 @@ def test_query_device_telemetry_session_not_found():
     service = TelemetryService()
     service.get_session_readings = MagicMock(return_value=None)
     db = MagicMock()
-    user = User(id=1, email="clinician@hk.com", role=UserRole.clinician)
+    user = User(id=1, email="clinician@hk.com", role=UserRole.trainer)
 
     with pytest.raises(HTTPException) as exc_info:
         service.query_device_telemetry(
@@ -77,7 +77,7 @@ def test_query_device_telemetry_session_success():
     )
     service.get_session_readings = MagicMock(return_value=mock_response)
     db = MagicMock()
-    user = User(id=1, email="clinician@hk.com", role=UserRole.clinician)
+    user = User(id=1, email="clinician@hk.com", role=UserRole.trainer)
 
     res = service.query_device_telemetry(
         db=db,

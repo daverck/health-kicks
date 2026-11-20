@@ -55,7 +55,9 @@ def require_roles(*roles: UserRole):
 
 
 RequireAdmin = Annotated[User, Depends(require_roles(UserRole.admin))]
-RequireClinicianOrAdmin = Annotated[User, Depends(require_roles(UserRole.clinician))]
+RequireTrainerOrAdmin = Annotated[User, Depends(require_roles(UserRole.trainer))]
+# Deprecated alias for backwards compatibility
+RequireClinicianOrAdmin = RequireTrainerOrAdmin
 
 
 def verify_ingest_token(

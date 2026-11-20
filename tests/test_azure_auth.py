@@ -166,11 +166,13 @@ def test_email_fallback_order(mock_azure_settings, mock_azure_jwks) -> None:
     )
     create_token, _ = mock_azure_jwks
 
-    dummy_id_token = create_token({
-        "sub": "az-sub-1",
-        "email": "token-email@example.com",
-        "preferred_username": "token-pref@example.com",
-    })
+    dummy_id_token = create_token(
+        {
+            "sub": "az-sub-1",
+            "email": "token-email@example.com",
+            "preferred_username": "token-pref@example.com",
+        }
+    )
 
     token_mock = MagicMock()
     token_mock.status_code = 200
@@ -188,7 +190,10 @@ def test_email_fallback_order(mock_azure_settings, mock_azure_jwks) -> None:
         "mail": "primary-mail@example.com",
         "userPrincipalName": "upn@example.com",
     }
-    with patch("httpx.post", return_value=token_mock), patch("httpx.get", return_value=graph_mock_1):
+    with (
+        patch("httpx.post", return_value=token_mock),
+        patch("httpx.get", return_value=graph_mock_1),
+    ):
         info = azure_auth_service.exchange_code_for_azure_user("code-1")
         assert info["email"] == "primary-mail@example.com"
         assert info["azure_sub"] == "az-sub-1"
@@ -203,7 +208,10 @@ def test_email_fallback_order(mock_azure_settings, mock_azure_jwks) -> None:
         "mail": None,
         "userPrincipalName": "upn@example.com",
     }
-    with patch("httpx.post", return_value=token_mock), patch("httpx.get", return_value=graph_mock_2):
+    with (
+        patch("httpx.post", return_value=token_mock),
+        patch("httpx.get", return_value=graph_mock_2),
+    ):
         info = azure_auth_service.exchange_code_for_azure_user("code-2")
         assert info["email"] == "upn@example.com"
 
@@ -216,22 +224,30 @@ def test_email_fallback_order(mock_azure_settings, mock_azure_jwks) -> None:
         "mail": None,
         "userPrincipalName": None,
     }
-    with patch("httpx.post", return_value=token_mock), patch("httpx.get", return_value=graph_mock_3):
+    with (
+        patch("httpx.post", return_value=token_mock),
+        patch("httpx.get", return_value=graph_mock_3),
+    ):
         info = azure_auth_service.exchange_code_for_azure_user("code-3")
         assert info["email"] == "token-email@example.com"
 
     # Case 4: Graph profile None, id_token has only preferred_username
-    dummy_id_token_pref = create_token({
-        "sub": "az-sub-1",
-        "preferred_username": "token-pref@example.com",
-    })
+    dummy_id_token_pref = create_token(
+        {
+            "sub": "az-sub-1",
+            "preferred_username": "token-pref@example.com",
+        }
+    )
     token_mock_pref = MagicMock()
     token_mock_pref.status_code = 200
     token_mock_pref.json.return_value = {
         "access_token": "mock-access",
         "id_token": dummy_id_token_pref,
     }
-    with patch("httpx.post", return_value=token_mock_pref), patch("httpx.get", return_value=graph_mock_3):
+    with (
+        patch("httpx.post", return_value=token_mock_pref),
+        patch("httpx.get", return_value=graph_mock_3),
+    ):
         info = azure_auth_service.exchange_code_for_azure_user("code-4")
         assert info["email"] == "token-pref@example.com"
 
@@ -243,14 +259,19 @@ def test_email_fallback_order(mock_azure_settings, mock_azure_jwks) -> None:
         "access_token": "mock-access",
         "id_token": dummy_id_token_empty,
     }
-    with patch("httpx.post", return_value=token_mock_empty), patch("httpx.get", return_value=graph_mock_3):
+    with (
+        patch("httpx.post", return_value=token_mock_empty),
+        patch("httpx.get", return_value=graph_mock_3),
+    ):
         with pytest.raises(AzureAuthError, match="No valid email found in Microsoft account"):
             azure_auth_service.exchange_code_for_azure_user("code-5")
 
 
 def test_verify_azure_id_token_unconfigured(mock_azure_settings) -> None:
     mock_azure_settings(azure_client_id="")
-    with pytest.raises(AzureAuthError, match="Microsoft Azure OAuth credentials are not configured"):
+    with pytest.raises(
+        AzureAuthError, match="Microsoft Azure OAuth credentials are not configured"
+    ):
         azure_auth_service.verify_azure_id_token("any-token")
 
 
@@ -263,7 +284,12 @@ def test_verify_azure_id_token_malformed(mock_azure_settings) -> None:
 def test_verify_azure_id_token_unsupported_algorithm(mock_azure_settings) -> None:
     mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
     token = jwt.encode(
-        {"sub": "1", "iss": "https://login.microsoftonline.com/tenant-1/v2.0", "aud": "cid", "exp": 9999999999},
+        {
+            "sub": "1",
+            "iss": "https://login.microsoftonline.com/tenant-1/v2.0",
+            "aud": "cid",
+            "exp": 9999999999,
+        },
         "symmetric-secret-key-32-chars-long",
         algorithm="HS256",
         headers={"kid": "some-kid"},
@@ -276,7 +302,12 @@ def test_verify_azure_id_token_missing_kid(mock_azure_settings, rsa_keypair) -> 
     mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
     private_key, _ = rsa_keypair
     token = jwt.encode(
-        {"sub": "1", "iss": "https://login.microsoftonline.com/tenant-1/v2.0", "aud": "cid", "exp": 9999999999},
+        {
+            "sub": "1",
+            "iss": "https://login.microsoftonline.com/tenant-1/v2.0",
+            "aud": "cid",
+            "exp": 9999999999,
+        },
         private_key,
         algorithm="RS256",
     )
@@ -284,7 +315,9 @@ def test_verify_azure_id_token_missing_kid(mock_azure_settings, rsa_keypair) -> 
         azure_auth_service.verify_azure_id_token(token)
 
 
-def test_verify_azure_id_token_specific_tenant_mismatch(mock_azure_settings, mock_azure_jwks) -> None:
+def test_verify_azure_id_token_specific_tenant_mismatch(
+    mock_azure_settings, mock_azure_jwks
+) -> None:
     mock_azure_settings(azure_client_id="cid", azure_tenant_id="expected-tenant")
     create_token, _ = mock_azure_jwks
     token = create_token({"iss": "https://login.microsoftonline.com/wrong-tenant/v2.0"})
@@ -292,10 +325,14 @@ def test_verify_azure_id_token_specific_tenant_mismatch(mock_azure_settings, moc
         azure_auth_service.verify_azure_id_token(token)
 
 
-def test_verify_azure_id_token_common_missing_or_invalid_tid(mock_azure_settings, mock_azure_jwks) -> None:
+def test_verify_azure_id_token_common_missing_or_invalid_tid(
+    mock_azure_settings, mock_azure_jwks
+) -> None:
     mock_azure_settings(azure_client_id="cid", azure_tenant_id="common")
     create_token, _ = mock_azure_jwks
-    token = create_token({"iss": "https://login.microsoftonline.com/tenant-a/v2.0", "tid": "tenant-b"})
+    token = create_token(
+        {"iss": "https://login.microsoftonline.com/tenant-a/v2.0", "tid": "tenant-b"}
+    )
     with pytest.raises(AzureAuthError, match="Invalid Azure token issuer or tenant"):
         azure_auth_service.verify_azure_id_token(token)
 
@@ -310,6 +347,7 @@ def test_verify_azure_id_token_audience_mismatch(mock_azure_settings, mock_azure
 
 def test_verify_azure_id_token_expired(mock_azure_settings, mock_azure_jwks) -> None:
     import time
+
     mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
     create_token, _ = mock_azure_jwks
     token = create_token({"exp": int(time.time()) - 30})
@@ -317,17 +355,24 @@ def test_verify_azure_id_token_expired(mock_azure_settings, mock_azure_jwks) -> 
         azure_auth_service.verify_azure_id_token(token)
 
 
-def test_verify_azure_id_token_signing_key_fetch_error(mock_azure_settings, mock_azure_jwks) -> None:
+def test_verify_azure_id_token_signing_key_fetch_error(
+    mock_azure_settings, mock_azure_jwks
+) -> None:
     mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
     create_token, mock_client = mock_azure_jwks
-    mock_client.get_signing_key_from_jwt.side_effect = jwt.PyJWKClientError("Key ID not found in JWKS")
+    mock_client.get_signing_key_from_jwt.side_effect = jwt.PyJWKClientError(
+        "Key ID not found in JWKS"
+    )
     token = create_token({"sub": "user-123"})
     with pytest.raises(AzureAuthError, match="No matching Azure signing key"):
         azure_auth_service.verify_azure_id_token(token)
 
 
-def test_verify_azure_id_token_signature_tampered(mock_azure_settings, mock_azure_jwks, rsa_keypair) -> None:
+def test_verify_azure_id_token_signature_tampered(
+    mock_azure_settings, mock_azure_jwks, rsa_keypair
+) -> None:
     from cryptography.hazmat.primitives.asymmetric import rsa
+
     mock_azure_settings(azure_client_id="cid", azure_tenant_id="tenant-1")
     create_token, _ = mock_azure_jwks
     attacker_private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -339,11 +384,13 @@ def test_verify_azure_id_token_signature_tampered(mock_azure_settings, mock_azur
 def test_verify_azure_id_token_success(mock_azure_settings, mock_azure_jwks) -> None:
     mock_azure_settings(azure_client_id="test-client-id", azure_tenant_id="my-tenant-uuid")
     create_token, _ = mock_azure_jwks
-    token = create_token({
-        "sub": "az-valid-user-123",
-        "email": "doctor@healthkicks.org",
-        "name": "Dr. Validated",
-    })
+    token = create_token(
+        {
+            "sub": "az-valid-user-123",
+            "email": "doctor@healthkicks.org",
+            "name": "Dr. Validated",
+        }
+    )
     verified = azure_auth_service.verify_azure_id_token(token)
     assert verified["sub"] == "az-valid-user-123"
     assert verified["email"] == "doctor@healthkicks.org"
@@ -453,7 +500,10 @@ def test_endpoint_azure_login_redirect(auth_client) -> None:
     location = res.headers["location"]
     assert "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/authorize" in location
     assert "client_id=test-az-client-id" in location
-    assert "scope=openid+profile+email+User.Read" in location or "scope=openid%20profile%20email%20User.Read" in location
+    assert (
+        "scope=openid+profile+email+User.Read" in location
+        or "scope=openid%20profile%20email%20User.Read" in location
+    )
     assert "state=" in location
 
 
@@ -463,16 +513,24 @@ def test_endpoint_azure_login_json(auth_client) -> None:
     data = res.json()
     assert "authorization_url" in data
     assert "state" in data
-    assert "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/authorize" in data["authorization_url"]
+    assert (
+        "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/authorize"
+        in data["authorization_url"]
+    )
 
     # Verify state is signed and contained in authorization_url
     from itsdangerous import URLSafeTimedSerializer
+
     serializer = URLSafeTimedSerializer(settings.jwt_secret, salt="oauth-state")
     state_payload = serializer.loads(data["state"])
     assert state_payload["provider"] == "azure"
     assert "nonce" in state_payload and len(state_payload["nonce"]) > 0
     from urllib.parse import quote
-    assert quote(data["state"], safe="") in data["authorization_url"] or data["state"] in data["authorization_url"]
+
+    assert (
+        quote(data["state"], safe="") in data["authorization_url"]
+        or data["state"] in data["authorization_url"]
+    )
 
 
 def test_endpoint_azure_callback_invalid_state(auth_client) -> None:
@@ -565,7 +623,7 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
         azure_sub=None,
         email="linked.doc@healthkicks.org",
         name="Dr. Gregory",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
     )
     db_session.add(google_user)
     db_session.commit()
@@ -597,7 +655,7 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
         assert "id" not in data["user"]
         assert data["user"]["uuid"] == str(google_user.uuid)
         assert data["user"]["email"] == "linked.doc@healthkicks.org"
-        assert data["user"]["role"] == "clinician"
+        assert data["user"]["role"] == "trainer"
 
         # 3. Verify in DB that account was linked without overriding google_sub
         db_user = db_session.query(User).filter_by(id=user_id).one()
@@ -613,7 +671,7 @@ def test_endpoint_azure_callback_post_links_existing_google_user(auth_client, db
         assert "id" not in me_res.json()
         assert me_res.json()["uuid"] == str(google_user.uuid)
         assert me_res.json()["email"] == "linked.doc@healthkicks.org"
-        assert me_res.json()["role"] == "clinician"
+        assert me_res.json()["role"] == "trainer"
 
 
 def test_azure_pkce_and_ticket_exchange(auth_client) -> None:
@@ -663,4 +721,3 @@ def test_azure_pkce_and_ticket_exchange(auth_client) -> None:
         )
         assert ex_res.status_code == 200
         assert ex_res.json()["user"]["email"] == "pkce.azure@healthkicks.org"
-

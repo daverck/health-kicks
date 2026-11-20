@@ -42,6 +42,7 @@ def db_session() -> Session:
 @pytest.fixture()
 def client(db_session: Session) -> TestClient:
     """TestClient with overridden get_db dependency."""
+
     def override_get_db():
         try:
             yield db_session
@@ -55,13 +56,13 @@ def client(db_session: Session) -> TestClient:
 
 
 @pytest.fixture()
-def clinician_headers(db_session: Session) -> dict[str, str]:
+def trainer_headers(db_session: Session) -> dict[str, str]:
     """Creates a clinician user and returns JWT authorization headers."""
     from app.services.token_service import issue_access_token
 
     clinician = User(
         email="clinician_ml@healthkicks.local",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
         is_active=True,
     )
     db_session.add(clinician)
@@ -86,7 +87,12 @@ def test_ml_model_persistence_and_query(db_session: Session) -> None:
         window_step_sec=0.5,
         selection_criteria={"min_sessions": 20, "synthetic": False},
         dataset_summary={"total_windows": 1500, "total_sessions": 45},
-        metrics={"f1_macro": 0.885, "accuracy": 0.912, "precision_macro": 0.89, "recall_macro": 0.88},
+        metrics={
+            "f1_macro": 0.885,
+            "accuracy": 0.912,
+            "precision_macro": 0.89,
+            "recall_macro": 0.88,
+        },
         c_header_size_bytes=350000,
         flash_usage_pct=26.4,
         ram_usage_pct=11.8,
@@ -163,7 +169,9 @@ def test_get_model_detail(db_session: Session) -> None:
 # -----------------------------------------------------------------------------
 # 2. REST API Endpoint Tests
 # -----------------------------------------------------------------------------
-def test_api_models_history_endpoint(client: TestClient, clinician_headers: dict[str, str], db_session: Session) -> None:
+def test_api_models_history_endpoint(
+    client: TestClient, trainer_headers: dict[str, str], db_session: Session
+) -> None:
     """GET /api/v1/studio/models/history returns HTTP 200 with list of models."""
     m = MLModel(
         version="v1.0.0",
@@ -176,7 +184,7 @@ def test_api_models_history_endpoint(client: TestClient, clinician_headers: dict
     db_session.add(m)
     db_session.commit()
 
-    response = client.get("/api/v1/studio/models/history", headers=clinician_headers)
+    response = client.get("/api/v1/studio/models/history", headers=trainer_headers)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
@@ -185,7 +193,9 @@ def test_api_models_history_endpoint(client: TestClient, clinician_headers: dict
     assert data[0]["f1_macro"] == 0.85
 
 
-def test_api_model_detail_endpoint(client: TestClient, clinician_headers: dict[str, str], db_session: Session) -> None:
+def test_api_model_detail_endpoint(
+    client: TestClient, trainer_headers: dict[str, str], db_session: Session
+) -> None:
     """GET /api/v1/studio/models/{version} returns full manifest or 404."""
     m = MLModel(
         version="v1.5.0",
@@ -199,12 +209,12 @@ def test_api_model_detail_endpoint(client: TestClient, clinician_headers: dict[s
     db_session.add(m)
     db_session.commit()
 
-    resp_ok = client.get("/api/v1/studio/models/v1.5.0", headers=clinician_headers)
+    resp_ok = client.get("/api/v1/studio/models/v1.5.0", headers=trainer_headers)
     assert resp_ok.status_code == 200
     assert resp_ok.json()["version"] == "v1.5.0"
     assert resp_ok.json()["selection_criteria"]["synthetic"] is True
 
-    resp_404 = client.get("/api/v1/studio/models/v9.9.9", headers=clinician_headers)
+    resp_404 = client.get("/api/v1/studio/models/v9.9.9", headers=trainer_headers)
     assert resp_404.status_code == 404
 
 
@@ -264,6 +274,7 @@ def test_save_model_registry_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert joblib_file.exists()
 
     import json
+
     data = json.loads(manifest_file.read_text(encoding="utf-8"))
     assert data["model_version"] == "v1.8.0-test"
     assert data["git_commit"] == "abcdef1"

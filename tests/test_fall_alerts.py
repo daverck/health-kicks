@@ -190,12 +190,12 @@ def patient_user(db_session) -> User:
 
 
 @pytest.fixture()
-def clinician_user(db_session) -> User:
+def trainer_user(db_session) -> User:
     u = User(
         google_sub="sub-clinician-1",
         email="claire.dubois@example.com",
         name="Claire Dubois",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
         is_active=True,
     )
     db_session.add(u)
@@ -847,9 +847,7 @@ def test_sms_escalation_dual_channel_sms_status_and_sms_ack(
     assert sms_notif.status == FallAlertNotificationStatus.ACKNOWLEDGED.value
 
 
-def test_sms_status_failed_records_error_message(
-    client, db_session, patient_user
-) -> None:
+def test_sms_status_failed_records_error_message(client, db_session, patient_user) -> None:
     headers = _auth_headers(patient_user)
     ingest_headers = {"X-Ingest-Token": "test-ingest-secret"}
 
@@ -891,11 +889,7 @@ def test_sms_status_failed_records_error_message(
         },
     )
 
-    sms_notif = (
-        db_session.query(FallAlertNotification)
-        .filter_by(channel="sms")
-        .one()
-    )
+    sms_notif = db_session.query(FallAlertNotification).filter_by(channel="sms").one()
 
     res_fail = client.post(
         "/api/v1/internal/fall-alerts",
@@ -1198,7 +1192,7 @@ def test_public_ack_get_is_side_effect_free_and_post_acknowledges(
 
 
 def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
-    client, db_session, patient_user, clinician_user, admin_user
+    client, db_session, patient_user, trainer_user, admin_user
 ) -> None:
     now = datetime.now(UTC)
     alert_patient = FallAlert(
@@ -1219,9 +1213,9 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
         escalation_started_at_utc=now - timedelta(minutes=9),
         closed_at_utc=now - timedelta(minutes=7),
     )
-    alert_clinician = FallAlert(
+    alert_trainer = FallAlert(
         event_id="evt-hist-clinician",
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-2",
         event_type="fall_lateral",
         confidence_score=0.87,
@@ -1231,7 +1225,7 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
         detected_at_utc=now - timedelta(minutes=5),
         closed_at_utc=now - timedelta(minutes=4),
     )
-    db_session.add_all([alert_patient, alert_clinician])
+    db_session.add_all([alert_patient, alert_trainer])
     db_session.flush()
 
     notif = FallAlertNotification(
@@ -1257,7 +1251,11 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     assert pat_items[0]["id"] == alert_patient.id
     assert pat_items[0]["is_pseudonymized"] is False
     assert pat_items[0]["user_display_name"] == f"Patient {patient_user.pseudonym}"
-    assert pat_items[0]["acknowledged_by"] == {"first_name": "Marie", "last_name": "Dupont", "rank": 1}
+    assert pat_items[0]["acknowledged_by"] == {
+        "first_name": "Marie",
+        "last_name": "Dupont",
+        "rank": 1,
+    }
 
     det_pat = client.get(
         f"/api/v1/fall-alerts/{alert_patient.id}",
@@ -1272,16 +1270,16 @@ def test_fall_alerts_history_rbac_and_gdpr_pseudonymization(
     # 2. Clinician only sees their own alert, and gets 404 on patient's alert
     res_clin = client.get(
         f"/api/v1/fall-alerts?user_id={patient_user.id}",
-        headers=_auth_headers(clinician_user),
+        headers=_auth_headers(trainer_user),
     )
     assert res_clin.status_code == 200
-    clin_items = res_clin.json()["items"]
-    assert len(clin_items) == 1
-    assert clin_items[0]["id"] == alert_clinician.id
+    trainer_items = res_clin.json()["items"]
+    assert len(trainer_items) == 1
+    assert trainer_items[0]["id"] == alert_trainer.id
 
     res_clin_forbidden = client.get(
         f"/api/v1/fall-alerts/{alert_patient.id}",
-        headers=_auth_headers(clinician_user),
+        headers=_auth_headers(trainer_user),
     )
     assert res_clin_forbidden.status_code == 404
 
@@ -1361,9 +1359,7 @@ def test_mobile_direct_sms_status_endpoint(
 
     # Notification in DB is initially PENDING_SMS
     sms_notif = (
-        db_session.query(FallAlertNotification)
-        .filter_by(alert_id=alert_id, channel="sms")
-        .one()
+        db_session.query(FallAlertNotification).filter_by(alert_id=alert_id, channel="sms").one()
     )
     assert sms_notif.status == FallAlertNotificationStatus.PENDING_SMS.value
 
@@ -1397,7 +1393,7 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
     client: TestClient,
     db_session: Session,
     patient_user: User,
-    clinician_user: User,
+    trainer_user: User,
     admin_user: User,
 ) -> None:
     """Test filtering fall alerts by numeric ID, pseudonym, or unmatched string (200 OK without 422)."""
@@ -1412,9 +1408,9 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
         state=FallAlertState.ACKNOWLEDGED.value,
         detected_at_utc=now - timedelta(minutes=10),
     )
-    alert_clinician = FallAlert(
+    alert_trainer = FallAlert(
         event_id="evt-filter-clin",
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-2",
         event_type="fall_lateral",
         confidence_score=0.88,
@@ -1423,7 +1419,7 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
         cancel_reason="user_cancel",
         detected_at_utc=now - timedelta(minutes=5),
     )
-    db_session.add_all([alert_patient, alert_clinician])
+    db_session.add_all([alert_patient, alert_trainer])
     db_session.commit()
 
     admin_headers = _auth_headers(admin_user)
@@ -1454,7 +1450,9 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
     assert all(item["user_id"] == patient_user.id for item in pseudo_items)
 
     # Also test legacy user_id filter with pseudonym string
-    res_pseudo_legacy = client.get(f"/api/v1/fall-alerts?user_id={pat_pseudo}", headers=admin_headers)
+    res_pseudo_legacy = client.get(
+        f"/api/v1/fall-alerts?user_id={pat_pseudo}", headers=admin_headers
+    )
     assert res_pseudo_legacy.status_code == 200
     assert len(res_pseudo_legacy.json()["items"]) >= 1
 
@@ -1472,9 +1470,7 @@ def test_fall_alerts_user_id_filter_numeric_and_pseudonym(
         assert item["subject_pseudonym"] == pat_pseudo
 
 
-def test_fall_alert_ingest_uuid_and_downlink_topic(
-    client, db_session, patient_user, fake_iot
-):
+def test_fall_alert_ingest_uuid_and_downlink_topic(client, db_session, patient_user, fake_iot):
     """Verify that fall alert ingest accepts user_id as UUID string and publishes to healthkicks/v1/users/{uuid}/fall-alert/status."""
     ingest_headers = {"X-Ingest-Token": "test-ingest-secret"}
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
@@ -1603,4 +1599,3 @@ def test_to_fall_alert_ack_result_unit(patient_user) -> None:
     assert res.state == FallAlertState.ACKNOWLEDGED.value
     assert res.acknowledged_by == "Jean Valjean"
     assert "Prise en charge enregistrée avec succès par Jean Valjean." in res.message
-

@@ -36,7 +36,7 @@ def auth_user(db_session) -> User:
         google_sub="test-sub-1",
         email="clinician@example.com",
         name="Clinician",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
     )
     db_session.add(user)
     db_session.commit()
@@ -121,9 +121,7 @@ def test_get_session_readings_success(telemetry_service, mock_table) -> None:
     assert response.readings[0].ax == 0.12
     assert response.readings[0].az == 9.81
     # Verify timestamp ISO
-    assert response.readings[0].timestamp_iso == datetime.fromtimestamp(
-        1700000000, tz=UTC
-    )
+    assert response.readings[0].timestamp_iso == datetime.fromtimestamp(1700000000, tz=UTC)
 
 
 def test_get_session_readings_pagination(telemetry_service, mock_table) -> None:
@@ -248,12 +246,8 @@ def test_trim_session_readings_keeps_interval_and_deletes_both_ends(
 
     assert retained_count == 2
     assert batch_mock.delete_item.call_count == 2
-    batch_mock.delete_item.assert_any_call(
-        Key={"device_id": "HK-1", "timestamp": 1_000_000}
-    )
-    batch_mock.delete_item.assert_any_call(
-        Key={"device_id": "HK-1", "timestamp": 2_500_001}
-    )
+    batch_mock.delete_item.assert_any_call(Key={"device_id": "HK-1", "timestamp": 1_000_000})
+    batch_mock.delete_item.assert_any_call(Key={"device_id": "HK-1", "timestamp": 2_500_001})
 
 
 def test_trim_session_readings_empty(telemetry_service, mock_table) -> None:
@@ -335,7 +329,9 @@ def test_api_get_telemetry_by_timerange_success(test_client, mock_table) -> None
 
     start = "2023-11-14T22:13:20Z"
     end = "2023-11-14T22:13:30Z"
-    res = test_client.get(f"/api/v1/devices/HK-1/telemetry?start_time={start}&end_time={end}&limit=100")
+    res = test_client.get(
+        f"/api/v1/devices/HK-1/telemetry?start_time={start}&end_time={end}&limit=100"
+    )
     assert res.status_code == 200
     data = res.json()
     assert isinstance(data, list)
@@ -395,7 +391,9 @@ def test_api_get_telemetry_temporal_isolation(db_session, telemetry_service, moc
     # 1. Range strictly before bound_at_utc returns empty list without querying DynamoDB
     start_prior = "2023-11-14T22:13:00Z"
     end_prior = "2023-11-14T22:13:20Z"
-    res = client.get(f"/api/v1/devices/HK-BOUND/telemetry?start_time={start_prior}&end_time={end_prior}")
+    res = client.get(
+        f"/api/v1/devices/HK-BOUND/telemetry?start_time={start_prior}&end_time={end_prior}"
+    )
     assert res.status_code == 200
     assert res.json() == []
 
@@ -418,14 +416,21 @@ def test_api_get_telemetry_temporal_isolation(db_session, telemetry_service, moc
     start_str = "2023-11-14T22:13:20Z"
     end_str = "2023-11-14T22:13:30Z"
     from unittest.mock import patch
-    with patch.object(telemetry_service, "get_timerange_readings", wraps=telemetry_service.get_timerange_readings) as spy:
-        res2 = client.get(f"/api/v1/devices/HK-BOUND/telemetry?start_time={start_str}&end_time={end_str}")
+
+    with patch.object(
+        telemetry_service, "get_timerange_readings", wraps=telemetry_service.get_timerange_readings
+    ) as spy:
+        res2 = client.get(
+            f"/api/v1/devices/HK-BOUND/telemetry?start_time={start_str}&end_time={end_str}"
+        )
         assert res2.status_code == 200
         assert len(res2.json()) == 1
         spy.assert_called_once_with(
             device_id="HK-BOUND",
             start_epoch_us=clamped_us,
-            end_epoch_us=int(datetime(2023, 11, 14, 22, 13, 30, tzinfo=UTC).timestamp() * 1_000_000),
+            end_epoch_us=int(
+                datetime(2023, 11, 14, 22, 13, 30, tzinfo=UTC).timestamp() * 1_000_000
+            ),
             limit=1000,
         )
 
@@ -537,4 +542,3 @@ def test_update_session_label_uses_batch_writer(telemetry_service, mock_table) -
     assert batch_mock.put_item.call_count == 2
     assert batch_mock.put_item.call_args_list[0][1]["Item"]["label"] == "run"
     mock_table.update_item.assert_not_called()
-

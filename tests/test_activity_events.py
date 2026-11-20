@@ -32,6 +32,7 @@ def client(db_session):
         yield db_session
 
     from app.core.config import get_settings
+
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_settings] = lambda: ingestion_settings.__class__(
         ingest_token="secret-test-token", environment="production"
@@ -47,7 +48,7 @@ def test_user(db_session) -> User:
         google_sub="sub-activity-user",
         email="activity_user@example.com",
         name="Activity Tester",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
         is_active=True,
     )
     db_session.add(user)
@@ -55,16 +56,18 @@ def test_user(db_session) -> User:
     db_session.refresh(user)
 
     early_bound = datetime(2020, 1, 1, tzinfo=UTC)
-    db_session.add_all([
-        DeviceOwnership(user_id=user.id, device_id="HK-1", bound_at_utc=early_bound),
-        DeviceOwnership(user_id=user.id, device_id="HK-2", bound_at_utc=early_bound),
-        DeviceOwnership(user_id=user.id, device_id="HK-99", bound_at_utc=early_bound),
-        DeviceOwnership(user_id=user.id, device_id="HK-FILTER", bound_at_utc=early_bound),
-        DeviceOwnership(user_id=user.id, device_id="HK-FALLS", bound_at_utc=early_bound),
-        DeviceOwnership(user_id=user.id, device_id="HK-ALL", bound_at_utc=early_bound),
-        DeviceOwnership(user_id=user.id, device_id="HK-DATES", bound_at_utc=early_bound),
-        DeviceOwnership(user_id=user.id, device_id="HK-COMBO", bound_at_utc=early_bound),
-    ])
+    db_session.add_all(
+        [
+            DeviceOwnership(user_id=user.id, device_id="HK-1", bound_at_utc=early_bound),
+            DeviceOwnership(user_id=user.id, device_id="HK-2", bound_at_utc=early_bound),
+            DeviceOwnership(user_id=user.id, device_id="HK-99", bound_at_utc=early_bound),
+            DeviceOwnership(user_id=user.id, device_id="HK-FILTER", bound_at_utc=early_bound),
+            DeviceOwnership(user_id=user.id, device_id="HK-FALLS", bound_at_utc=early_bound),
+            DeviceOwnership(user_id=user.id, device_id="HK-ALL", bound_at_utc=early_bound),
+            DeviceOwnership(user_id=user.id, device_id="HK-DATES", bound_at_utc=early_bound),
+            DeviceOwnership(user_id=user.id, device_id="HK-COMBO", bound_at_utc=early_bound),
+        ]
+    )
     db_session.commit()
     return user
 
@@ -301,7 +304,9 @@ def test_list_activities_filter_by_specific_event_type(client, db_session, auth_
 def test_list_activities_filter_by_falls_group(client, db_session, auth_headers):
     """Verify event_type='falls' filters all fall events (fall_forward, fall_lateral, etc.)."""
     base_time = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
-    for i, event_type in enumerate(["walk", "fall_forward", "fall_lateral", "fall_backward", "idle"]):
+    for i, event_type in enumerate(
+        ["walk", "fall_forward", "fall_lateral", "fall_backward", "idle"]
+    ):
         db_session.add(
             ActivityEvent(
                 device_id="HK-FALLS",
@@ -540,7 +545,9 @@ def test_ingest_raw_telemetry_webhook_updates_aurora_session(client, db_session,
             "sample_count": 76,
             "duration_sec": 4.0,
             "is_hitl": True,
-            "readings": [{"timestamp": 1726224000.0 + i, "ax": 0.1, "ay": 0.9, "az": -0.1} for i in range(76)],
+            "readings": [
+                {"timestamp": 1726224000.0 + i, "ax": 0.1, "ay": 0.9, "az": -0.1} for i in range(76)
+            ],
         },
     }
     res_hitl = client.post("/api/v1/ingest/telemetry/raw", json=hitl_payload, headers=headers)
@@ -664,7 +671,7 @@ def test_list_activities_unowned_device_forbidden(client, db_session) -> None:
         google_sub="sub-clinician-act",
         email="clin_act@example.com",
         name="Clinician Act",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
         is_active=True,
     )
     db_session.add_all([reg, clinician])

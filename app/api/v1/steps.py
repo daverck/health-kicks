@@ -44,7 +44,7 @@ def create_steps_router() -> APIRouter:
         db: Session = Depends(get_db),
     ) -> DailyStepsSyncResponse:
         """Upsert daily activity step snapshots recorded by the edge device or mobile application."""
-        verify_device_ownership(db=db, user=user, device_id=payload.device_id, allow_clinician=False)
+        verify_device_ownership(db=db, user=user, device_id=payload.device_id, allow_trainer=False)
         synced = sync_daily_steps(db=db, user_id=user.id, payload=payload)
         return DailyStepsSyncResponse(status="synchronized", synced_records=synced)
 
@@ -54,15 +54,20 @@ def create_steps_router() -> APIRouter:
         summary="Retrieve daily step counts and activity breakdown for a device",
     )
     def get_history(
-        device_id: Annotated[str, Query(description="Target device ID", min_length=1, max_length=64)],
+        device_id: Annotated[
+            str, Query(description="Target device ID", min_length=1, max_length=64)
+        ],
         user: CurrentUser,
         from_date: Annotated[date | None, Query(description="Start date (YYYY-MM-DD)")] = None,
         to_date: Annotated[date | None, Query(description="End date (YYYY-MM-DD)")] = None,
-        days: Annotated[int, Query(ge=1, le=365, description="Number of past days (used if from_date is omitted)")] = 30,
+        days: Annotated[
+            int,
+            Query(ge=1, le=365, description="Number of past days (used if from_date is omitted)"),
+        ] = 30,
         db: Session = Depends(get_db),
     ) -> DailyStepsHistoryResponse:
         """Fetch step counts history grouped by day and activity type."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_trainer=False)
         resolved_from_date, resolved_to_date = resolve_steps_date_range(
             from_date=from_date, to_date=to_date, days=days
         )
@@ -81,13 +86,15 @@ def create_steps_router() -> APIRouter:
         summary="Retrieve 24-hour step counts breakdown for a device on a specific date",
     )
     def get_hourly(
-        device_id: Annotated[str, Query(description="Target device ID", min_length=1, max_length=64)],
+        device_id: Annotated[
+            str, Query(description="Target device ID", min_length=1, max_length=64)
+        ],
         date: Annotated[date, Query(description="Calendar date (YYYY-MM-DD)")],
         user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> HourlyStepsResponse:
         """Fetch hourly step counts breakdown distributed across the 24 hours of a target date."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=False)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_trainer=False)
         return get_hourly_steps(
             db=db,
             device_id=device_id,

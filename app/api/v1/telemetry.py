@@ -8,7 +8,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, RequireClinicianOrAdmin
+from app.api.deps import CurrentUser, RequireTrainerOrAdmin
 from app.db.database import get_db
 from app.schemas.telemetry import (
     ImuReadingResponse,
@@ -60,7 +60,7 @@ def create_telemetry_router(
         limit: int = Query(default=1000, ge=1, le=2500),
     ) -> StudioSessionReadingsResponse | list[ImuReadingResponse]:
         """Query IMU telemetry by Studio session_id or by time range."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_trainer=True)
         return telemetry_service.query_device_telemetry(
             db=db,
             user=user,
@@ -78,11 +78,11 @@ def create_telemetry_router(
     def delete_session_telemetry(
         device_id: str,
         session_id: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> Response:
         """Purge all telemetry points associated with a Studio session."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_trainer=True)
         telemetry_service.delete_session_readings(
             device_id=device_id,
             session_id=session_id,
@@ -97,11 +97,11 @@ def create_telemetry_router(
     def start_studio_session(
         device_id: str,
         command: StudioStartRequest,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioStartResponse:
         """Trigger a remote Studio IMU recording session on an edge device."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_trainer=True)
 
         session_id = str(uuid.uuid4())
         try:
@@ -147,11 +147,11 @@ def create_telemetry_router(
     )
     def get_device_studio_stats(
         device_id: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioDatasetStatsResponse:
         """Get dataset statistics (session counts and duration by label) for a specific device."""
-        verify_device_ownership(db=db, user=user, device_id=device_id, allow_clinician=True)
+        verify_device_ownership(db=db, user=user, device_id=device_id, allow_trainer=True)
         return compute_studio_stats(db=db, user=user, device_id=device_id)
 
     @studio_router.get(
@@ -160,7 +160,7 @@ def create_telemetry_router(
         status_code=status.HTTP_200_OK,
     )
     def get_global_studio_stats(
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioDatasetStatsResponse:
         """Get dataset statistics (session counts and duration by label) across all devices."""
@@ -172,7 +172,7 @@ def create_telemetry_router(
         status_code=status.HTTP_200_OK,
     )
     def get_studio_classes_summary(
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioClassesSummaryResponse:
         """Get global summary and comparative metrics across all activity classes."""
@@ -185,7 +185,7 @@ def create_telemetry_router(
     )
     def get_studio_class_stats(
         label: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioClassDetailStatsResponse:
         """Get detailed daily counts, duration distribution, and ML metrics for a specific activity class."""
@@ -197,7 +197,7 @@ def create_telemetry_router(
         status_code=status.HTTP_200_OK,
     )
     def get_models_history(
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> list[MLModelSummaryResponse]:
         """List all historical and active ML activity classification models."""
@@ -210,7 +210,7 @@ def create_telemetry_router(
     )
     def get_model_version_detail(
         version: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> MLModelDetailResponse:
         """Get full evaluation metrics, selection criteria, and manifest for a specific model version."""
@@ -221,7 +221,6 @@ def create_telemetry_router(
                 detail=f"Model version '{version}' not found",
             )
         return detail
-
 
     root_router.include_router(devices_router)
     root_router.include_router(studio_router)

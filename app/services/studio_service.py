@@ -86,12 +86,20 @@ def query_studio_sessions(
     duration_sec_max: float | None = None,
 ) -> PaginatedSessionsResponse:
     """List studio sessions with RBAC, cursor keyset pagination, and multi-value filters."""
-    if sample_count_min is not None and sample_count_max is not None and sample_count_min > sample_count_max:
+    if (
+        sample_count_min is not None
+        and sample_count_max is not None
+        and sample_count_min > sample_count_max
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="sample_count_min must be less than or equal to sample_count_max",
         )
-    if duration_sec_min is not None and duration_sec_max is not None and duration_sec_min > duration_sec_max:
+    if (
+        duration_sec_min is not None
+        and duration_sec_max is not None
+        and duration_sec_min > duration_sec_max
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="duration_sec_min must be less than or equal to duration_sec_max",
@@ -179,7 +187,9 @@ def query_studio_sessions(
         sessions = sessions_plus_one
         next_cursor = None
 
-    items = [to_session_summary(s, is_admin=user.is_admin, current_user_id=user.id) for s in sessions]
+    items = [
+        to_session_summary(s, is_admin=user.is_admin, current_user_id=user.id) for s in sessions
+    ]
     return PaginatedSessionsResponse(
         items=items,
         total=total,
@@ -196,14 +206,14 @@ def get_authorized_session(
 ) -> StudioSession:
     """Retrieve a studio session ensuring role-based access control.
 
-    - Requires clinician or admin role.
-    - Clinicians can only access their own sessions.
+    - Requires trainer or admin role.
+    - Trainers can only access their own sessions.
     - Admins can access all sessions.
     """
-    if not user.is_clinician_or_admin:
+    if not user.is_trainer_or_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: access to studio sessions requires clinician or admin privileges",
+            detail="Forbidden: access to studio sessions requires trainer or admin privileges",
         )
 
     sess_uuid = parse_session_uuid(session_id)
@@ -232,7 +242,7 @@ def to_session_summary(
 
     - If the session belongs to the current user (current_user_id == session.user_id):
       PII is preserved, is_pseudonymized is False.
-    - If the session belongs to another user (viewed by admin or clinician):
+    - If the session belongs to another user (viewed by admin or trainer):
       PII (user_email, author_name) is stripped/pseudonymized, is_pseudonymized is True,
       and subject_pseudonym is deterministically generated (SUBJ-XXXXXXXX).
     """
@@ -248,7 +258,7 @@ def to_session_summary(
         author_name = session.user.name if session.user else None
         is_pseudo = False
     else:
-        # Third-party session viewed by clinician or admin: strictly pseudonymize PII
+        # Third-party session viewed by trainer or admin: strictly pseudonymize PII
         user_email = None
         author_name = f"Patient {pseudo}"
         is_pseudo = True
@@ -297,8 +307,12 @@ def compute_studio_stats(
         query.with_entities(
             StudioSession.label,
             func.count(StudioSession.uuid).label("total"),
-            func.coalesce(func.sum(case((StudioSession.is_validated.is_(True), 1), else_=0)), 0).label("validated"),
-            func.coalesce(func.sum(case((StudioSession.is_validated.is_(False), 1), else_=0)), 0).label("pending"),
+            func.coalesce(
+                func.sum(case((StudioSession.is_validated.is_(True), 1), else_=0)), 0
+            ).label("validated"),
+            func.coalesce(
+                func.sum(case((StudioSession.is_validated.is_(False), 1), else_=0)), 0
+            ).label("pending"),
             func.coalesce(func.sum(StudioSession.duration_sec), 0.0).label("duration_sum"),
             func.coalesce(func.sum(StudioSession.sample_count), 0).label("sample_sum"),
         )
@@ -346,7 +360,9 @@ def compute_class_detail_stats(
     validated_sessions = sum(1 for s in sessions if bool(s.is_validated))
     pending_sessions = total_sessions - validated_sessions
 
-    durations = [float(s.duration_sec) for s in sessions if s.duration_sec is not None and s.duration_sec > 0]
+    durations = [
+        float(s.duration_sec) for s in sessions if s.duration_sec is not None and s.duration_sec > 0
+    ]
     if durations:
         import numpy as np
 
@@ -424,7 +440,6 @@ def compute_class_detail_stats(
     )
 
 
-
 def compute_classes_summary(
     db: Session,
     user: User,
@@ -455,8 +470,12 @@ def compute_classes_summary(
 
         metrics_dict = load_champion_model_metrics()
         class_metrics_map = metrics_dict.get("class_metrics", {})
-        macro_metrics["precision"] = float(metrics_dict.get("precision_macro", metrics_dict.get("macro_precision", 0.0)))
-        macro_metrics["recall"] = float(metrics_dict.get("recall_macro", metrics_dict.get("macro_recall", 0.0)))
+        macro_metrics["precision"] = float(
+            metrics_dict.get("precision_macro", metrics_dict.get("macro_precision", 0.0))
+        )
+        macro_metrics["recall"] = float(
+            metrics_dict.get("recall_macro", metrics_dict.get("macro_recall", 0.0))
+        )
         macro_metrics["f1"] = float(metrics_dict.get("f1_macro", metrics_dict.get("macro_f1", 0.0)))
         raw_cm = metrics_dict.get("confusion_matrix")
         if raw_cm and isinstance(raw_cm, dict) and "labels" in raw_cm and "matrix" in raw_cm:
@@ -494,7 +513,9 @@ def compute_classes_summary(
         for d_key, d_val in sorted(daily_map.items())
     ]
 
-    all_labels = set(edge_ai_labels_sorted()) | set(sessions_by_label.keys()) | set(class_metrics_map.keys())
+    all_labels = (
+        set(edge_ai_labels_sorted()) | set(sessions_by_label.keys()) | set(class_metrics_map.keys())
+    )
     sorted_labels = sorted(all_labels)
 
     items: list[StudioClassSummaryItem] = []
@@ -509,7 +530,11 @@ def compute_classes_summary(
         c_validated = sum(1 for s in sess_list if bool(s.is_validated))
         c_pending = c_total - c_validated
 
-        c_durations = [float(s.duration_sec) for s in sess_list if s.duration_sec is not None and s.duration_sec > 0]
+        c_durations = [
+            float(s.duration_sec)
+            for s in sess_list
+            if s.duration_sec is not None and s.duration_sec > 0
+        ]
         c_tot_dur = round(sum(c_durations), 2)
         total_duration_sec += c_tot_dur
         c_median_dur = round(float(np.median(c_durations)), 2) if c_durations else 0.0
@@ -572,7 +597,7 @@ def query_studio_authors(db: Session, user: User) -> list[StudioAuthorSummary]:
         )
         authors: list[StudioAuthorSummary] = []
         for u in users:
-            is_own = (u.id == user.id)
+            is_own = u.id == user.id
             pseudo = u.pseudonym or get_subject_pseudonym(str(u.uuid) if u.uuid else u.id)
             if is_own:
                 authors.append(
@@ -769,9 +794,7 @@ def query_models_history(db: Session) -> list[MLModelSummaryResponse]:
             metrics = data.get("metrics", {})
             trained_at_str = data.get("trained_at_utc")
             created_at = (
-                datetime.fromisoformat(trained_at_str)
-                if trained_at_str
-                else datetime.now()
+                datetime.fromisoformat(trained_at_str) if trained_at_str else datetime.now()
             )
             return [
                 MLModelSummaryResponse(
@@ -831,12 +854,13 @@ def get_model_detail(db: Session, version: str) -> MLModelDetailResponse | None:
         if json_path.exists():
             data = json.loads(json_path.read_text(encoding="utf-8"))
             json_version = str(data.get("model_version", "v1.0.0"))
-            if version.lower() in ("active", "latest") or version in (json_version, json_version.lstrip("v")):
+            if version.lower() in ("active", "latest") or version in (
+                json_version,
+                json_version.lstrip("v"),
+            ):
                 trained_at_str = data.get("trained_at_utc")
                 created_at = (
-                    datetime.fromisoformat(trained_at_str)
-                    if trained_at_str
-                    else datetime.now()
+                    datetime.fromisoformat(trained_at_str) if trained_at_str else datetime.now()
                 )
                 return MLModelDetailResponse(
                     version=json_version,
@@ -857,4 +881,3 @@ def get_model_detail(db: Session, version: str) -> MLModelDetailResponse | None:
         pass
 
     return None
-

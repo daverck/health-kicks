@@ -160,14 +160,14 @@ def test_update_user_profile_admin_can_update_role_and_active(db_session):
     db_session.refresh(admin)
     db_session.refresh(user)
 
-    update = UserUpdate(role=UserRole.clinician, is_active=False)
+    update = UserUpdate(role=UserRole.trainer, is_active=False)
     res = update_user_profile(
         db=db_session,
         current_user=admin,
         user_uuid=user.uuid,
         update=update,
     )
-    assert res["role"] == "clinician"
+    assert res["role"] == "trainer"
     assert res["is_active"] is False
 
 

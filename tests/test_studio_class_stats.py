@@ -29,12 +29,12 @@ def db_session():
 
 
 @pytest.fixture()
-def clinician_user(db_session) -> User:
+def trainer_user(db_session) -> User:
     user = User(
         google_sub="test-sub-clinician",
         email="clinician@example.com",
         name="Clinician Dr.",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
     )
     db_session.add(user)
     db_session.commit()
@@ -48,7 +48,7 @@ def other_user(db_session) -> User:
         google_sub="test-sub-other",
         email="other@example.com",
         name="Other Clinician",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
     )
     db_session.add(user)
     db_session.commit()
@@ -71,12 +71,12 @@ def admin_user(db_session) -> User:
 
 
 @pytest.fixture()
-def test_client(clinician_user, db_session) -> TestClient:
+def test_client(trainer_user, db_session) -> TestClient:
     app = FastAPI()
     app.include_router(create_telemetry_router(service=TelemetryService(table=MagicMock())))
 
     def override_get_current_user():
-        return clinician_user
+        return trainer_user
 
     def override_get_db():
         yield db_session
@@ -86,7 +86,7 @@ def test_client(clinician_user, db_session) -> TestClient:
     return TestClient(app)
 
 
-def test_get_studio_class_stats_empty(test_client, clinician_user, db_session):
+def test_get_studio_class_stats_empty(test_client, trainer_user, db_session):
     """Test getting stats for a class with zero sessions."""
     resp = test_client.get("/api/v1/studio/classes/walk/stats")
     assert resp.status_code == 200
@@ -103,12 +103,12 @@ def test_get_studio_class_stats_empty(test_client, clinician_user, db_session):
     assert "f1_score" in data["ml_metrics"]
 
 
-def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_user, db_session):
+def test_get_studio_class_stats_aggregated(test_client, trainer_user, other_user, db_session):
     """Test aggregated stats including daily breakdown, validation counts, and duration metrics."""
     # 3 sessions on 2026-10-25 (2 validated, 1 pending)
     # 2 sessions on 2026-10-26 (2 validated)
     s1 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="walk",
         duration_sec=4.0,
@@ -117,7 +117,7 @@ def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_us
         created_at=datetime(2026, 10, 25, 10, 0, 0, tzinfo=UTC),
     )
     s2 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="walk",
         duration_sec=6.0,
@@ -126,7 +126,7 @@ def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_us
         created_at=datetime(2026, 10, 25, 11, 0, 0, tzinfo=UTC),
     )
     s3 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-2",
         label="walk",
         duration_sec=5.0,
@@ -135,7 +135,7 @@ def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_us
         created_at=datetime(2026, 10, 25, 12, 0, 0, tzinfo=UTC),
     )
     s4 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="walk",
         duration_sec=5.0,
@@ -144,7 +144,7 @@ def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_us
         created_at=datetime(2026, 10, 26, 14, 0, 0, tzinfo=UTC),
     )
     s5 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="walk",
         duration_sec=10.0,
@@ -154,7 +154,7 @@ def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_us
     )
     # Session for a different class
     s_other_class = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="idle",
         duration_sec=5.0,
@@ -208,10 +208,9 @@ def test_get_studio_class_stats_aggregated(test_client, clinician_user, other_us
     assert d2["pending_count"] == 0
 
 
-
-def test_get_studio_classes_summary(test_client, db_session, clinician_user, other_user):
+def test_get_studio_classes_summary(test_client, db_session, trainer_user, other_user):
     s1 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="walk",
         duration_sec=4.0,
@@ -220,7 +219,7 @@ def test_get_studio_classes_summary(test_client, db_session, clinician_user, oth
         created_at=datetime(2026, 10, 25, 10, 0, 0, tzinfo=UTC),
     )
     s2 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="walk",
         duration_sec=6.0,
@@ -229,7 +228,7 @@ def test_get_studio_classes_summary(test_client, db_session, clinician_user, oth
         created_at=datetime(2026, 10, 26, 11, 0, 0, tzinfo=UTC),
     )
     s3 = StudioSession(
-        user_id=clinician_user.id,
+        user_id=trainer_user.id,
         device_id="HK-1",
         label="idle",
         duration_sec=5.0,

@@ -35,7 +35,7 @@ def auth_user(db_session) -> User:
         google_sub="test-sub-stats",
         email="researcher@example.com",
         name="Researcher",
-        role=UserRole.clinician,
+        role=UserRole.trainer,
     )
     db_session.add(user)
     db_session.commit()
@@ -205,9 +205,31 @@ def test_get_dataset_stats_raises_on_dynamo_error(telemetry_service, mock_table)
 
 def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
-    s1 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="walk", duration_sec=5.0, sample_count=50)
-    s2 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-123", label="stumble", duration_sec=10.0, sample_count=100)
-    s3 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-999", label="walk", duration_sec=7.0, sample_count=70)
+
+    s1 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=auth_user.id,
+        device_id="shoe-123",
+        label="walk",
+        duration_sec=5.0,
+        sample_count=50,
+    )
+    s2 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=auth_user.id,
+        device_id="shoe-123",
+        label="stumble",
+        duration_sec=10.0,
+        sample_count=100,
+    )
+    s3 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=auth_user.id,
+        device_id="shoe-999",
+        label="walk",
+        duration_sec=7.0,
+        sample_count=70,
+    )
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -232,9 +254,31 @@ def test_get_device_studio_stats_endpoint(test_client, auth_user, db_session) ->
 
 def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) -> None:
     import uuid
-    s1 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-1", label="walk", duration_sec=5.0, sample_count=50)
-    s2 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-2", label="walk", duration_sec=5.0, sample_count=50)
-    s3 = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="shoe-3", label="run", duration_sec=10.0, sample_count=100)
+
+    s1 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=auth_user.id,
+        device_id="shoe-1",
+        label="walk",
+        duration_sec=5.0,
+        sample_count=50,
+    )
+    s2 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=auth_user.id,
+        device_id="shoe-2",
+        label="walk",
+        duration_sec=5.0,
+        sample_count=50,
+    )
+    s3 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=auth_user.id,
+        device_id="shoe-3",
+        label="run",
+        duration_sec=10.0,
+        sample_count=100,
+    )
     db_session.add_all([s1, s2, s3])
     db_session.commit()
 
@@ -251,12 +295,27 @@ def test_get_global_studio_stats_endpoint(test_client, auth_user, db_session) ->
 def test_studio_stats_rbac_strict_isolation(db_session, auth_user, admin_user) -> None:
     """Non-admin only sees their own sessions, admin sees all sessions."""
     import uuid
+
     db_session.query(StudioSession).delete()
     db_session.commit()
 
-    s_clinician = StudioSession(uuid=uuid.uuid4(), user_id=auth_user.id, device_id="dev-1", label="walk", duration_sec=5.0, sample_count=50)
-    s_other = StudioSession(uuid=uuid.uuid4(), user_id=admin_user.id, device_id="dev-2", label="idle", duration_sec=10.0, sample_count=100)
-    db_session.add_all([s_clinician, s_other])
+    s_trainer = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=auth_user.id,
+        device_id="dev-1",
+        label="walk",
+        duration_sec=5.0,
+        sample_count=50,
+    )
+    s_other = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=admin_user.id,
+        device_id="dev-2",
+        label="idle",
+        duration_sec=10.0,
+        sample_count=100,
+    )
+    db_session.add_all([s_trainer, s_other])
     db_session.commit()
 
     # Clinician client
@@ -264,14 +323,14 @@ def test_studio_stats_rbac_strict_isolation(db_session, auth_user, admin_user) -
     app.include_router(create_telemetry_router())
     app.dependency_overrides[get_current_user] = lambda: auth_user
     app.dependency_overrides[get_db] = lambda: db_session
-    client_clinician = TestClient(app)
+    client_trainer = TestClient(app)
 
-    res_clinician = client_clinician.get("/api/v1/studio/stats")
-    assert res_clinician.status_code == 200
-    data_clinician = res_clinician.json()
-    assert data_clinician["total_sessions"] == 1
-    assert data_clinician["by_label"] == {"walk": 1}
-    assert data_clinician["total_duration_sec"] == 5.0
+    res_trainer = client_trainer.get("/api/v1/studio/stats")
+    assert res_trainer.status_code == 200
+    data_trainer = res_trainer.json()
+    assert data_trainer["total_sessions"] == 1
+    assert data_trainer["by_label"] == {"walk": 1}
+    assert data_trainer["total_duration_sec"] == 5.0
 
     # Admin client
     app.dependency_overrides[get_current_user] = lambda: admin_user
@@ -296,5 +355,3 @@ def test_studio_stats_endpoints_unauthenticated(mock_table, db_session) -> None:
 
     res_global = unauth_client.get("/api/v1/studio/stats")
     assert res_global.status_code == 401
-
-

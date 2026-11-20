@@ -5,7 +5,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import RequireClinicianOrAdmin
+from app.api.deps import RequireTrainerOrAdmin
 from app.api.v1.utils import validate_and_normalize_date_range
 from app.db.database import get_db
 from app.schemas.studio import (
@@ -40,22 +40,44 @@ def create_studio_sessions_router(
 
     @router.get("", response_model=PaginatedSessionsResponse)
     def list_sessions(
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         page: int = Query(default=1, ge=1),
         size: int = Query(default=20, ge=1, le=100),
         cursor: str | None = Query(default=None, description="Opaque cursor for keyset pagination"),
-        label: str | None = Query(default=None, description="Single activity label or comma-separated list of labels"),
-        device_id: str | None = Query(default=None, description="Single device ID or comma-separated list of device IDs"),
-        pseudonym: str | None = Query(default=None, description="Filter by author pseudonym (admin)"),
-        is_validated: bool | None = Query(default=None, description="Filter by session validation status"),
-        is_hitl: bool | None = Query(default=None, description="Filter by HITL session (True) or standard (False)"),
-        classification: str | None = Query(default=None, description="Filter by classification ('edge_ai' or 'research')"),
-        start_date: datetime | None = Query(None, description="Start date/time (inclusive, ISO 8601)"),
+        label: str | None = Query(
+            default=None, description="Single activity label or comma-separated list of labels"
+        ),
+        device_id: str | None = Query(
+            default=None, description="Single device ID or comma-separated list of device IDs"
+        ),
+        pseudonym: str | None = Query(
+            default=None, description="Filter by author pseudonym (admin)"
+        ),
+        is_validated: bool | None = Query(
+            default=None, description="Filter by session validation status"
+        ),
+        is_hitl: bool | None = Query(
+            default=None, description="Filter by HITL session (True) or standard (False)"
+        ),
+        classification: str | None = Query(
+            default=None, description="Filter by classification ('edge_ai' or 'research')"
+        ),
+        start_date: datetime | None = Query(
+            None, description="Start date/time (inclusive, ISO 8601)"
+        ),
         end_date: datetime | None = Query(None, description="End date/time (inclusive, ISO 8601)"),
-        sample_count_min: int | None = Query(default=None, ge=0, description="Minimum number of IMU samples"),
-        sample_count_max: int | None = Query(default=None, ge=0, description="Maximum number of IMU samples"),
-        duration_sec_min: float | None = Query(default=None, ge=0, description="Minimum session duration in seconds"),
-        duration_sec_max: float | None = Query(default=None, ge=0, description="Maximum session duration in seconds"),
+        sample_count_min: int | None = Query(
+            default=None, ge=0, description="Minimum number of IMU samples"
+        ),
+        sample_count_max: int | None = Query(
+            default=None, ge=0, description="Maximum number of IMU samples"
+        ),
+        duration_sec_min: float | None = Query(
+            default=None, ge=0, description="Minimum session duration in seconds"
+        ),
+        duration_sec_max: float | None = Query(
+            default=None, ge=0, description="Maximum session duration in seconds"
+        ),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
     ) -> PaginatedSessionsResponse:
@@ -85,7 +107,7 @@ def create_studio_sessions_router(
 
     @router.get("/authors", response_model=list[StudioAuthorSummary])
     def list_studio_authors(
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> list[StudioAuthorSummary]:
         """List authors who have recorded studio sessions with GDPR pseudonymization for third-party authors."""
@@ -94,7 +116,7 @@ def create_studio_sessions_router(
     @router.get("/{session_id}", response_model=StudioSessionDetail)
     def get_session_detail(
         session_id: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionDetail:
         """Fetch studio session metadata from Aurora DB (including sample_count)."""
@@ -105,7 +127,7 @@ def create_studio_sessions_router(
     @router.get("/{session_id}/readings", response_model=StudioSessionReadingsResponse)
     def get_session_readings(
         session_id: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionReadingsResponse:
         """Fetch raw IMU readings for an authorized studio session from DynamoDB."""
@@ -140,7 +162,7 @@ def create_studio_sessions_router(
     def trim_session(
         session_id: str,
         payload: StudioSessionTrimPayload,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionSummary:
         """Keep a selected time interval from an unvalidated session."""
@@ -151,7 +173,7 @@ def create_studio_sessions_router(
     @router.patch("/{session_id}/confirm", response_model=StudioSessionSummary)
     def confirm_session(
         session_id: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionSummary:
         """Confirm and validate a studio session for dataset inclusion."""
@@ -165,7 +187,7 @@ def create_studio_sessions_router(
     def update_session(
         session_id: str,
         payload: StudioSessionUpdatePayload,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> StudioSessionSummary:
         """Reclassify a studio session's activity label or update validation in PostgreSQL and DynamoDB."""
@@ -176,7 +198,7 @@ def create_studio_sessions_router(
     @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_session(
         session_id: str,
-        user: RequireClinicianOrAdmin,
+        user: RequireTrainerOrAdmin,
         db: Session = Depends(get_db),
     ) -> Response:
         """Purge a studio session from PostgreSQL and delete all raw IMU frames in DynamoDB."""

@@ -44,7 +44,9 @@ def test_status_ingestion_updates_device_presence() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
-    device = ingest_device_status(session, {"header": {"device_id": "shoe-2"}, "payload": {"status": "offline"}})
+    device = ingest_device_status(
+        session, {"header": {"device_id": "shoe-2"}, "payload": {"status": "offline"}}
+    )
     assert device.device_id == "shoe-2"
     assert device.status == DeviceStatus.offline
     assert device.last_seen_utc is not None
@@ -60,7 +62,11 @@ def test_haptic_failure_is_logged() -> None:
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     admin = User(id=1, email="admin@test.com", name="Admin", role=UserRole.admin)
-    endpoint = next(route.endpoint for route in create_cloud_router(FailedPublisher()).routes if route.path.endswith("haptic/trigger"))
+    endpoint = next(
+        route.endpoint
+        for route in create_cloud_router(FailedPublisher()).routes
+        if route.path.endswith("haptic/trigger")
+    )
     try:
         endpoint("shoe-3", HapticTrigger(intensity=80), user=admin, db=session)
     except Exception as error:
@@ -111,7 +117,9 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     haptic_history_endpoint = next(
         route.endpoint for route in router.routes if route.path.endswith("haptic/history")
     )
-    history_page = haptic_history_endpoint(TEST_DEVICE_ID, user=admin, page=1, page_size=10, db=session)
+    history_page = haptic_history_endpoint(
+        TEST_DEVICE_ID, user=admin, page=1, page_size=10, db=session
+    )
     assert history_page.total == 1
     assert history_page.items[0].device_id == TEST_DEVICE_ID
     assert history_page.items[0].intensity == 120
@@ -121,7 +129,9 @@ def test_haptic_trigger_records_in_haptic_log_only_and_exposes_history() -> None
     activities_endpoint = next(
         route.endpoint for route in router.routes if route.path.endswith("events/activities")
     )
-    activities_page = activities_endpoint(TEST_DEVICE_ID, user=admin, page=1, page_size=10, db=session)
+    activities_page = activities_endpoint(
+        TEST_DEVICE_ID, user=admin, page=1, page_size=10, db=session
+    )
     assert activities_page.total == 0
 
     session.close()
@@ -248,14 +258,24 @@ def test_list_activities_multi_device_and_multi_type() -> None:
     )
 
     t = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
-    session.add_all([
-        Device(device_id="HK-1"),
-        Device(device_id="HK-2"),
-        ActivityEvent(device_id="HK-1", event_type="walk", confidence_score=0.9, timestamp_utc=t),
-        ActivityEvent(device_id="HK-2", event_type="run", confidence_score=0.85, timestamp_utc=t),
-        ActivityEvent(device_id="HK-1", event_type="stairs_up", confidence_score=0.8, timestamp_utc=t),
-        ActivityEvent(device_id="HK-2", event_type="fall_forward", confidence_score=0.95, timestamp_utc=t),
-    ])
+    session.add_all(
+        [
+            Device(device_id="HK-1"),
+            Device(device_id="HK-2"),
+            ActivityEvent(
+                device_id="HK-1", event_type="walk", confidence_score=0.9, timestamp_utc=t
+            ),
+            ActivityEvent(
+                device_id="HK-2", event_type="run", confidence_score=0.85, timestamp_utc=t
+            ),
+            ActivityEvent(
+                device_id="HK-1", event_type="stairs_up", confidence_score=0.8, timestamp_utc=t
+            ),
+            ActivityEvent(
+                device_id="HK-2", event_type="fall_forward", confidence_score=0.95, timestamp_utc=t
+            ),
+        ]
+    )
     session.commit()
 
     # Multi-device query HK-1,HK-2
@@ -269,12 +289,16 @@ def test_list_activities_multi_device_and_multi_type() -> None:
     assert res_all.total == 4
 
     # Multi-activity filtering: walk,run
-    res_types = activities_endpoint("HK-1,HK-2", user=admin, event_type="walk,run", page=1, page_size=10, db=session)
+    res_types = activities_endpoint(
+        "HK-1,HK-2", user=admin, event_type="walk,run", page=1, page_size=10, db=session
+    )
     assert res_types.total == 2
     assert {item.event_type for item in res_types.items} == {"walk", "run"}
 
     # Multi-activity filtering: stairs_up,falls
-    res_falls = activities_endpoint("HK-1,HK-2", user=admin, event_type="stairs_up,falls", page=1, page_size=10, db=session)
+    res_falls = activities_endpoint(
+        "HK-1,HK-2", user=admin, event_type="stairs_up,falls", page=1, page_size=10, db=session
+    )
     assert res_falls.total == 2
     assert {item.event_type for item in res_falls.items} == {"stairs_up", "fall_forward"}
 
@@ -296,12 +320,26 @@ def test_list_haptic_history_multi_device() -> None:
     )
 
     t = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
-    session.add_all([
-        Device(device_id="HK-1"),
-        Device(device_id="HK-2"),
-        HapticLog(device_id="HK-1", intensity=100, duration_ms=200, triggered_at_utc=t, triggered_by_user=True),
-        HapticLog(device_id="HK-2", intensity=150, duration_ms=300, triggered_at_utc=t, triggered_by_user=True),
-    ])
+    session.add_all(
+        [
+            Device(device_id="HK-1"),
+            Device(device_id="HK-2"),
+            HapticLog(
+                device_id="HK-1",
+                intensity=100,
+                duration_ms=200,
+                triggered_at_utc=t,
+                triggered_by_user=True,
+            ),
+            HapticLog(
+                device_id="HK-2",
+                intensity=150,
+                duration_ms=300,
+                triggered_at_utc=t,
+                triggered_by_user=True,
+            ),
+        ]
+    )
     session.commit()
 
     # Multi-device query
@@ -325,21 +363,39 @@ def test_list_activities_and_haptic_ownership_check() -> None:
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     regular = User(id=2, email="reg@test.com", name="Regular", role=UserRole.user)
-    clinician = User(id=3, email="clin@test.com", name="Clinician", role=UserRole.clinician)
+    clinician = User(id=3, email="clin@test.com", name="Clinician", role=UserRole.trainer)
     t = datetime(2026, 9, 10, 8, 0, 0, tzinfo=UTC)
-    session.add_all([
-        regular,
-        clinician,
-        Device(device_id="HK-1"),
-        Device(device_id="HK-2"),
-        Device(device_id="HK-unowned"),
-        DeviceOwnership(user_id=2, device_id="HK-1", bound_at_utc=t - timedelta(days=1)),
-        DeviceOwnership(user_id=3, device_id="HK-2", bound_at_utc=t - timedelta(days=1)),
-        ActivityEvent(device_id="HK-1", event_type="walk", confidence_score=0.9, timestamp_utc=t),
-        ActivityEvent(device_id="HK-2", event_type="run", confidence_score=0.95, timestamp_utc=t),
-        HapticLog(device_id="HK-1", intensity=100, duration_ms=200, triggered_at_utc=t, triggered_by_user=True),
-        HapticLog(device_id="HK-2", intensity=150, duration_ms=300, triggered_at_utc=t, triggered_by_user=True),
-    ])
+    session.add_all(
+        [
+            regular,
+            clinician,
+            Device(device_id="HK-1"),
+            Device(device_id="HK-2"),
+            Device(device_id="HK-unowned"),
+            DeviceOwnership(user_id=2, device_id="HK-1", bound_at_utc=t - timedelta(days=1)),
+            DeviceOwnership(user_id=3, device_id="HK-2", bound_at_utc=t - timedelta(days=1)),
+            ActivityEvent(
+                device_id="HK-1", event_type="walk", confidence_score=0.9, timestamp_utc=t
+            ),
+            ActivityEvent(
+                device_id="HK-2", event_type="run", confidence_score=0.95, timestamp_utc=t
+            ),
+            HapticLog(
+                device_id="HK-1",
+                intensity=100,
+                duration_ms=200,
+                triggered_at_utc=t,
+                triggered_by_user=True,
+            ),
+            HapticLog(
+                device_id="HK-2",
+                intensity=150,
+                duration_ms=300,
+                triggered_at_utc=t,
+                triggered_by_user=True,
+            ),
+        ]
+    )
     session.commit()
 
     router = create_cloud_router(DummyPublisher())
@@ -387,6 +443,7 @@ def test_list_activities_and_haptic_ownership_check() -> None:
 
 def test_temporal_isolation_for_rebound_device() -> None:
     """Ensure non-admin users (user and clinician) cannot view events prior to device binding, while admins can."""
+
     class DummyPublisher:
         def publish_haptic(self, device_id, command):
             return True
@@ -401,24 +458,42 @@ def test_temporal_isolation_for_rebound_device() -> None:
 
     old_user = User(id=10, email="old@test.com", name="Old Owner", role=UserRole.user)
     new_user = User(id=11, email="new@test.com", name="New Owner", role=UserRole.user)
-    clinician = User(id=12, email="doc@test.com", name="Clinician", role=UserRole.clinician)
+    clinician = User(id=12, email="doc@test.com", name="Clinician", role=UserRole.trainer)
     admin = User(id=13, email="admin@test.com", name="Admin", role=UserRole.admin)
 
-    session.add_all([
-        old_user,
-        new_user,
-        clinician,
-        admin,
-        Device(device_id="HK-X"),
-        DeviceOwnership(user_id=new_user.id, device_id="HK-X", bound_at_utc=t1_bound),
-        DeviceOwnership(user_id=clinician.id, device_id="HK-X", bound_at_utc=t1_bound),
-        # Activity events: one before binding, one after binding
-        ActivityEvent(device_id="HK-X", event_type="walk", confidence_score=0.9, timestamp_utc=t0),
-        ActivityEvent(device_id="HK-X", event_type="run", confidence_score=0.95, timestamp_utc=t2),
-        # Haptic logs: one before binding, one after binding
-        HapticLog(device_id="HK-X", intensity=100, duration_ms=200, triggered_at_utc=t0, triggered_by_user=True),
-        HapticLog(device_id="HK-X", intensity=150, duration_ms=300, triggered_at_utc=t2, triggered_by_user=True),
-    ])
+    session.add_all(
+        [
+            old_user,
+            new_user,
+            clinician,
+            admin,
+            Device(device_id="HK-X"),
+            DeviceOwnership(user_id=new_user.id, device_id="HK-X", bound_at_utc=t1_bound),
+            DeviceOwnership(user_id=clinician.id, device_id="HK-X", bound_at_utc=t1_bound),
+            # Activity events: one before binding, one after binding
+            ActivityEvent(
+                device_id="HK-X", event_type="walk", confidence_score=0.9, timestamp_utc=t0
+            ),
+            ActivityEvent(
+                device_id="HK-X", event_type="run", confidence_score=0.95, timestamp_utc=t2
+            ),
+            # Haptic logs: one before binding, one after binding
+            HapticLog(
+                device_id="HK-X",
+                intensity=100,
+                duration_ms=200,
+                triggered_at_utc=t0,
+                triggered_by_user=True,
+            ),
+            HapticLog(
+                device_id="HK-X",
+                intensity=150,
+                duration_ms=300,
+                triggered_at_utc=t2,
+                triggered_by_user=True,
+            ),
+        ]
+    )
     session.commit()
 
     router = create_cloud_router(DummyPublisher())

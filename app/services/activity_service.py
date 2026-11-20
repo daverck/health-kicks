@@ -27,13 +27,16 @@ def resolve_target_device_ids(device_id: str, user: User, db: Session) -> list[s
     if not raw_devs or any(d.lower() == "all" for d in raw_devs):
         if user.role == UserRole.admin:
             return [d.device_id for d in db.query(Device.device_id).all()]
-        return [o.device_id for o in db.query(DeviceOwnership.device_id).filter_by(user_id=user.id).all()]
+        return [
+            o.device_id
+            for o in db.query(DeviceOwnership.device_id).filter_by(user_id=user.id).all()
+        ]
 
     if user.role == UserRole.admin:
         return raw_devs
 
     if len(raw_devs) == 1:
-        verify_device_ownership(db=db, user=user, device_id=raw_devs[0], allow_clinician=False)
+        verify_device_ownership(db=db, user=user, device_id=raw_devs[0], allow_trainer=False)
         return raw_devs
 
     owned_devs = {
@@ -124,7 +127,9 @@ def resolve_temporal_isolation_conditions(
 
     ownerships = (
         db.query(DeviceOwnership.device_id, DeviceOwnership.bound_at_utc)
-        .filter(DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids))
+        .filter(
+            DeviceOwnership.user_id == user.id, DeviceOwnership.device_id.in_(target_device_ids)
+        )
         .all()
     )
     if not ownerships:
@@ -154,12 +159,14 @@ def query_activity_events(
     page_size: int = 50,
 ) -> tuple[ActivityEventPage, str | None]:
     """Query activity events with device filtering, temporal isolation, type/date filtering and keyset pagination."""
-    target_device_ids, has_access, temporal_filter = _resolve_authorized_devices_with_temporal_filter(
-        db=db,
-        user=user,
-        device_id=device_id,
-        device_id_col=ActivityEvent.device_id,
-        timestamp_col=ActivityEvent.timestamp_utc,
+    target_device_ids, has_access, temporal_filter = (
+        _resolve_authorized_devices_with_temporal_filter(
+            db=db,
+            user=user,
+            device_id=device_id,
+            device_id_col=ActivityEvent.device_id,
+            timestamp_col=ActivityEvent.timestamp_utc,
+        )
     )
     if not target_device_ids or not has_access:
         return ActivityEventPage(items=[], page=page, page_size=page_size, total=0), None
@@ -233,7 +240,9 @@ def query_activity_events(
             event_type=event.event_type,
             timestamp_utc=event.timestamp_utc,
             confidence_score=event.confidence_score,
-            is_pseudonymized=(user.role == UserRole.admin and event.device_id not in user_owned_devs),
+            is_pseudonymized=(
+                user.role == UserRole.admin and event.device_id not in user_owned_devs
+            ),
         )
         for event in events
     ]
@@ -260,12 +269,14 @@ def query_haptic_logs(
     page_size: int = 50,
 ) -> tuple[HapticLogPage, str | None]:
     """Query haptic command history with device filtering, temporal isolation, and keyset pagination."""
-    target_device_ids, has_access, temporal_filter = _resolve_authorized_devices_with_temporal_filter(
-        db=db,
-        user=user,
-        device_id=device_id,
-        device_id_col=HapticLog.device_id,
-        timestamp_col=HapticLog.triggered_at_utc,
+    target_device_ids, has_access, temporal_filter = (
+        _resolve_authorized_devices_with_temporal_filter(
+            db=db,
+            user=user,
+            device_id=device_id,
+            device_id_col=HapticLog.device_id,
+            timestamp_col=HapticLog.triggered_at_utc,
+        )
     )
     if not target_device_ids or not has_access:
         return HapticLogPage(items=[], page=page, page_size=page_size, total=0), None
