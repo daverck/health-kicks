@@ -3338,10 +3338,17 @@
             "title": "User Email"
           },
           "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "deprecated": true,
             "description": "Numeric user ID (deprecated in favor of author_pseudonym)",
-            "title": "User Id",
-            "type": "integer"
+            "title": "User Id"
           },
           "uuid": {
             "format": "uuid",
@@ -3352,7 +3359,6 @@
         "required": [
           "uuid",
           "device_id",
-          "user_id",
           "label",
           "created_at"
         ],
@@ -3502,10 +3508,17 @@
             "title": "User Email"
           },
           "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "deprecated": true,
             "description": "Numeric user ID (deprecated in favor of author_pseudonym)",
-            "title": "User Id",
-            "type": "integer"
+            "title": "User Id"
           },
           "uuid": {
             "format": "uuid",
@@ -3516,7 +3529,6 @@
         "required": [
           "uuid",
           "device_id",
-          "user_id",
           "label",
           "created_at"
         ],
@@ -7430,6 +7442,26 @@
         ]
       }
     },
+    "/api/v1/users/me": {
+      "delete": {
+        "description": "Self-delete authenticated user account with GDPR pseudonymization and anonymization re-keying.",
+        "operationId": "delete_me_api_v1_users_me_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Me",
+        "tags": [
+          "Users"
+        ]
+      }
+    },
     "/api/v1/users/me/alert-contacts": {
       "get": {
         "description": "List emergency contacts for the authenticated user ordered by priority.",
@@ -7703,6 +7735,46 @@
       }
     },
     "/api/v1/users/{user_uuid}": {
+      "delete": {
+        "description": "Delete user account by UUID (administrator or account owner).",
+        "operationId": "delete_user_api_v1_users__user_uuid__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete User",
+        "tags": [
+          "Users"
+        ]
+      },
       "patch": {
         "description": "Update user profile. Users can only update their own profile; admins can update anyone.",
         "operationId": "update_user_api_v1_users__user_uuid__patch",

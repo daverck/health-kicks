@@ -177,11 +177,14 @@ def ingest_raw_telemetry(
         )
 
     user_id = ownership.user_id
+    user = session.query(User).filter_by(id=user_id).first()
+    author_uuid = user.uuid if user else None
 
     is_hitl = bool(payload.get("is_hitl", False))
     studio_session = StudioSession(
         uuid=sess_uuid,
         user_id=user_id,
+        author_uuid=author_uuid,
         device_id=device_id or "unknown",
         label=str(payload.get("label", "unlabeled")),
         sample_count=sample_count,

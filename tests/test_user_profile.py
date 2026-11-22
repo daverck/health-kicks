@@ -264,3 +264,132 @@ def test_update_nonexistent_user_returns_404(client, admin_user) -> None:
     )
 
     assert response.status_code == 404
+
+
+def test_user_self_deletion_with_anonymization_rekeying(
+    client, regular_user, db_session
+) -> None:
+    """User self-deletes via DELETE /api/v1/users/me:
+    - Returns 204 No Content.
+    - Subsequent requests with that user's token return 401.
+    - User's studio sessions persist with user_id is None and author_uuid != original_user.uuid.
+    - All studio sessions of that user share the new author_uuid.
+    - Alert contacts and device ownership records are deleted.
+    """
+    from app.db.models import AlertContact, DeviceOwnership, StudioSession
+
+    token = token_service.issue_access_token(regular_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    old_user_uuid = regular_user.uuid
+    old_user_id = regular_user.id
+
+    # Seed related entities
+    s1 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=old_user_id,
+        author_uuid=old_user_uuid,
+        device_id="HK-1",
+        label="walk",
+    )
+    s2 = StudioSession(
+        uuid=uuid.uuid4(),
+        user_id=old_user_id,
+        author_uuid=old_user_uuid,
+        device_id="HK-1",
+        label="run",
+    )
+    contact = AlertContact(
+        user_id=old_user_id,
+        first_name="Jane",
+        last_name="Doe",
+        email="jane.doe@example.com",
+        priority=1,
+    )
+    ownership = DeviceOwnership(
+        user_id=old_user_id,
+        device_id="HK-1",
+    )
+    db_session.add_all([s1, s2, contact, ownership])
+    db_session.commit()
+
+    # Self delete
+    res = client.delete("/api/v1/users/me", headers=headers)
+    assert res.status_code == 204
+    assert res.text == ""
+
+    # Subsequent request with old token returns 401 Unauthorized
+    res_subsequent = client.get("/api/v1/users", headers=headers)
+    assert res_subsequent.status_code == 401
+
+    # Verify user record is deleted
+    assert db_session.query(User).filter(User.id == old_user_id).one_or_none() is None
+
+    # Verify studio sessions are retained with user_id = None and blinded author_uuid
+    sessions = (
+        db_session.query(StudioSession)
+        .filter(StudioSession.uuid.in_([s1.uuid, s2.uuid]))
+        .all()
+    )
+    assert len(sessions) == 2
+    for s in sessions:
+        assert s.user_id is None
+        assert s.author_uuid is not None
+        assert s.author_uuid != old_user_uuid
+
+    # Both sessions share the exact same re-keyed cohort UUID
+    assert sessions[0].author_uuid == sessions[1].author_uuid
+
+    # Verify cascading deletion of alert contacts and device ownership
+    assert (
+        db_session.query(AlertContact).filter(AlertContact.user_id == old_user_id).count() == 0
+    )
+    assert (
+        db_session.query(DeviceOwnership).filter(DeviceOwnership.user_id == old_user_id).count()
+        == 0
+    )
+
+
+def test_admin_can_delete_another_user_by_uuid(
+    client, admin_user, regular_user, db_session
+) -> None:
+    """Administrator can delete another user via DELETE /api/v1/users/{uuid} -> 204."""
+    admin_token = token_service.issue_access_token(admin_user)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    target_uuid = regular_user.uuid
+
+    res = client.delete(f"/api/v1/users/{target_uuid}", headers=headers)
+    assert res.status_code == 204
+    assert db_session.query(User).filter(User.uuid == target_uuid).one_or_none() is None
+
+
+def test_non_admin_cannot_delete_another_user_by_uuid(
+    client, regular_user, db_session
+) -> None:
+    """Non-administrator attempting to delete another user receives 403 Forbidden."""
+    victim = User(
+        google_sub="victim-sub",
+        email="victim@healthkicks.org",
+        name="Victim User",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(victim)
+    db_session.commit()
+    db_session.refresh(victim)
+
+    token = token_service.issue_access_token(regular_user)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.delete(f"/api/v1/users/{victim.uuid}", headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json()["detail"]
+    assert db_session.query(User).filter(User.uuid == victim.uuid).one_or_none() is not None
+
+
+def test_delete_nonexistent_user_returns_404(client, admin_user) -> None:
+    """Admin deleting an unknown user UUID returns 404 Not Found."""
+    admin_token = token_service.issue_access_token(admin_user)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    res = client.delete(f"/api/v1/users/{uuid.uuid4()}", headers=headers)
+    assert res.status_code == 404

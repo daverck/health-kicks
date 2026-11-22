@@ -178,7 +178,9 @@ class DeviceOwnership(Base):
     __table_args__ = (UniqueConstraint("user_id", "device_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
     device_id: Mapped[str] = mapped_column(String(128), index=True)
     bound_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
@@ -199,7 +201,12 @@ class StudioSession(Base):
     )
 
     uuid: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    author_uuid: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), index=True, nullable=True
+    )
     device_id: Mapped[str] = mapped_column(String(128), index=True)
     label: Mapped[str] = mapped_column(String(64), index=True)
     sample_count: Mapped[int] = mapped_column(Integer, default=0)

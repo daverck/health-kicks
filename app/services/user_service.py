@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.pseudonymization import get_subject_pseudonym
-from app.db.models import User, UserRole
+from app.db.models import StudioSession, User, UserRole
 from app.schemas.user import UserUpdate
 
 logger = logging.getLogger(__name__)
@@ -197,5 +197,64 @@ def update_user_profile(
     db.commit()
     db.refresh(target_user)
     return serialize_user(target_user)
+
+
+def delete_user_account(db: Session, target_user: User) -> None:
+    """Delete a user account and blind historical studio data by re-keying to a random cohort UUID."""
+    user_id = target_user.id
+    old_uuid = target_user.uuid
+    # 1. Generate fresh random cohort UUID
+    anonymized_cohort_uuid = uuid.uuid4()
+
+    # 2. Re-key studio sessions to the fresh cohort UUID and sever user_id link
+    db.query(StudioSession).filter(StudioSession.user_id == user_id).update(
+        {
+            StudioSession.author_uuid: anonymized_cohort_uuid,
+            StudioSession.user_id: None,
+        },
+        synchronize_session=False,
+    )
+
+    # Clean up dependent rows for database engines where FK cascade pragma is not active (e.g. default SQLite)
+    bind = db.get_bind()
+    if bind and "sqlite" in str(getattr(bind, "engine", bind).url):
+        from app.db.models import (
+            AlertContact,
+            DailyActivityStep,
+            DeviceOwnership,
+            FallAlert,
+            HourlyActivityStep,
+        )
+
+        db.query(AlertContact).filter(AlertContact.user_id == user_id).delete(synchronize_session=False)
+        db.query(FallAlert).filter(FallAlert.user_id == user_id).delete(synchronize_session=False)
+        db.query(DailyActivityStep).filter(DailyActivityStep.user_id == user_id).delete(synchronize_session=False)
+        db.query(HourlyActivityStep).filter(HourlyActivityStep.user_id == user_id).delete(synchronize_session=False)
+        db.query(DeviceOwnership).filter(DeviceOwnership.user_id == user_id).delete(synchronize_session=False)
+
+    # 3. Delete the user row (cascades deletion of alert_contacts, fall_alerts, daily_activity_steps, hourly_activity_steps, device_ownership)
+    db.delete(target_user)
+    db.commit()
+
+    logger.info(
+        "User account deleted and data blinded: old_uuid=%s rekeyed_cohort_uuid=%s",
+        old_uuid,
+        anonymized_cohort_uuid,
+    )
+
+
+def delete_user_by_uuid(db: Session, current_user: User, target_uuid: UUID) -> None:
+    """Delete a user account by UUID enforcing role permissions (admin or self only)."""
+    if current_user.role != UserRole.admin and current_user.uuid != target_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: cannot delete another user",
+        )
+
+    target_user = db.query(User).filter(User.uuid == target_uuid).one_or_none()
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    delete_user_account(db=db, target_user=target_user)
 
 

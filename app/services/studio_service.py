@@ -245,26 +245,38 @@ def to_session_summary(
     - If the session belongs to another user (viewed by admin or trainer):
       PII (user_email, author_name) is stripped/pseudonymized, is_pseudonymized is True,
       and subject_pseudonym is deterministically generated (SUBJ-XXXXXXXX).
+    - If session.user_id is None (account was deleted):
+      The author is blinded and attributed to an anonymized contributor cohort (SUBJ-XXXXXXXX).
     """
-    is_own = current_user_id is not None and session.user_id == current_user_id
-    pseudo = (
-        session.user.pseudonym
-        if session.user and session.user.pseudonym
-        else get_subject_pseudonym(session.user_id)
-    )
-
-    if is_own:
-        user_email = session.user.email if (is_admin and session.user) else None
-        author_name = session.user.name if session.user else None
-        is_pseudo = False
-    else:
-        # Third-party session viewed by trainer or admin: strictly pseudonymize PII
+    if session.user_id is None:
+        short_cohort = str(session.author_uuid)[:8].upper() if session.author_uuid else "ANON"
+        author_name = f"Contributeur #{short_cohort}"
+        author_pseudonym = f"SUBJ-{short_cohort}"
+        subject_pseudonym = f"SUBJ-{short_cohort}"
+        author_uuid = session.author_uuid
         user_email = None
-        author_name = f"Patient {pseudo}"
         is_pseudo = True
+    else:
+        is_own = current_user_id is not None and session.user_id == current_user_id
+        pseudo = (
+            session.user.pseudonym
+            if session.user and session.user.pseudonym
+            else get_subject_pseudonym(session.user_id)
+        )
 
-    author_uuid = session.user.uuid if session.user else None
-    author_pseudonym = pseudo
+        if is_own:
+            user_email = session.user.email if (is_admin and session.user) else None
+            author_name = session.user.name if session.user else None
+            is_pseudo = False
+        else:
+            # Third-party session viewed by trainer or admin: strictly pseudonymize PII
+            user_email = None
+            author_name = f"Patient {pseudo}"
+            is_pseudo = True
+
+        author_uuid = session.author_uuid or (session.user.uuid if session.user else None)
+        author_pseudonym = pseudo
+        subject_pseudonym = pseudo
 
     return StudioSessionSummary(
         uuid=session.uuid,
@@ -272,7 +284,7 @@ def to_session_summary(
         user_id=session.user_id,
         user_email=user_email,
         author_name=author_name,
-        subject_pseudonym=pseudo,
+        subject_pseudonym=subject_pseudonym,
         author_uuid=author_uuid,
         author_pseudonym=author_pseudonym,
         is_pseudonymized=is_pseudo,
@@ -621,6 +633,27 @@ def query_studio_authors(db: Session, user: User) -> list[StudioAuthorSummary]:
                         is_pseudonymized=True,
                     )
                 )
+        # Include distinct anonymized cohorts where user_id is None
+        anon_sessions = (
+            db.query(StudioSession.author_uuid)
+            .filter(StudioSession.user_id.is_(None), StudioSession.author_uuid.isnot(None))
+            .distinct()
+            .all()
+        )
+        for (a_uuid,) in anon_sessions:
+            if a_uuid:
+                short_cohort = str(a_uuid)[:8].upper()
+                authors.append(
+                    StudioAuthorSummary(
+                        author_uuid=a_uuid,
+                        author_pseudonym=f"SUBJ-{short_cohort}",
+                        email=f"subj-{short_cohort.lower()}@pseudonym.healthkicks.local",
+                        name=f"Contributeur #{short_cohort}",
+                        subject_pseudonym=f"SUBJ-{short_cohort}",
+                        is_pseudonymized=True,
+                    )
+                )
+
         return authors
 
     own_pseudo = user.pseudonym or get_subject_pseudonym(str(user.uuid) if user.uuid else user.id)
