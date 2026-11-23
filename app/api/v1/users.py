@@ -8,11 +8,27 @@ from sqlalchemy.orm import Session
 from app.api.deps import CurrentUser, RequireAdmin
 from app.db.database import get_db
 from app.schemas.user import UserUpdate
-from app.services import user_service
+from app.services import export_service, user_service
 
 
 def create_users_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1/users", tags=["Users"])
+
+    @router.post("/me/export", response_model=None)
+    def export_my_data(
+        user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> Response:
+        """GDPR Article 20 Right to Data Portability: export all user data in a structured ZIP archive."""
+        zip_bytes, filename = export_service.generate_export_zip(db=db, user=user)
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Type": "application/zip",
+            },
+        )
 
     @router.get("")
     def list_users(admin: RequireAdmin, db: Session = Depends(get_db)) -> list[dict]:
