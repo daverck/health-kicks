@@ -1,6 +1,115 @@
 {
   "components": {
     "schemas": {
+      "AccessAuditLogResponse": {
+        "additionalProperties": false,
+        "description": "Representation of an immutable access audit entry.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Email"
+          },
+          "actor_role": {
+            "title": "Actor Role",
+            "type": "string"
+          },
+          "actor_uuid": {
+            "format": "uuid",
+            "title": "Actor Uuid",
+            "type": "string"
+          },
+          "created_at_utc": {
+            "format": "date-time",
+            "title": "Created At Utc",
+            "type": "string"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          },
+          "patient_pseudonym": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Pseudonym"
+          },
+          "patient_uuid": {
+            "format": "uuid",
+            "title": "Patient Uuid",
+            "type": "string"
+          },
+          "resource": {
+            "title": "Resource",
+            "type": "string"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          },
+          "uuid": {
+            "format": "uuid",
+            "title": "Uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "actor_uuid",
+          "actor_role",
+          "actor_email",
+          "patient_uuid",
+          "patient_pseudonym",
+          "action",
+          "resource",
+          "resource_id",
+          "ip_address",
+          "user_agent",
+          "created_at_utc"
+        ],
+        "title": "AccessAuditLogResponse",
+        "type": "object"
+      },
       "ActivityEventPage": {
         "additionalProperties": false,
         "properties": {
@@ -2568,6 +2677,46 @@
         "title": "OAuthTicketExchangeRequest",
         "type": "object"
       },
+      "PaginatedAccessAuditLogsResponse": {
+        "additionalProperties": false,
+        "description": "Paginated collection of access audit entries.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccessAuditLogResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "description": "Current page number",
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "description": "Entries per page",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Total matching audit records",
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "page",
+          "page_size",
+          "items"
+        ],
+        "title": "PaginatedAccessAuditLogsResponse",
+        "type": "object"
+      },
       "PaginatedFallAlertsResponse": {
         "additionalProperties": false,
         "description": "Paginated response of fall alert summaries.",
@@ -3938,6 +4087,184 @@
         "summary": "Read Root",
         "tags": [
           "Health"
+        ]
+      }
+    },
+    "/api/v1/audit/access-logs": {
+      "get": {
+        "description": "List tamper-resistant audit logs recording trainer and admin access to patient records.",
+        "operationId": "list_access_logs_api_v1_audit_access_logs_get",
+        "parameters": [
+          {
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Entries per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Entries per page",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter by actor user UUID",
+            "in": "query",
+            "name": "actor_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by actor user UUID",
+              "title": "Actor Uuid"
+            }
+          },
+          {
+            "description": "Filter by target patient UUID",
+            "in": "query",
+            "name": "patient_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by target patient UUID",
+              "title": "Patient Uuid"
+            }
+          },
+          {
+            "description": "Filter by action (e.g. READ, UPDATE, DELETE)",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by action (e.g. READ, UPDATE, DELETE)",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "Filter by resource (e.g. profile, fall_alerts)",
+            "in": "query",
+            "name": "resource",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by resource (e.g. profile, fall_alerts)",
+              "title": "Resource"
+            }
+          },
+          {
+            "description": "Start UTC timestamp",
+            "in": "query",
+            "name": "from_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start UTC timestamp",
+              "title": "From Date"
+            }
+          },
+          {
+            "description": "End UTC timestamp",
+            "in": "query",
+            "name": "to_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "End UTC timestamp",
+              "title": "To Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedAccessAuditLogsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Query immutable access audit logs for compliance monitoring",
+        "tags": [
+          "Audit"
         ]
       }
     },
@@ -7731,6 +8058,31 @@
         "summary": "Send My Alert Contact Test Email",
         "tags": [
           "Fall Alerts"
+        ]
+      }
+    },
+    "/api/v1/users/me/export": {
+      "post": {
+        "description": "GDPR Article 20 Right to Data Portability: export all user data in a structured ZIP archive.",
+        "operationId": "export_my_data_api_v1_users_me_export_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export My Data",
+        "tags": [
+          "Users"
         ]
       }
     },
