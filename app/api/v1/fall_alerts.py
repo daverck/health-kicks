@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import CurrentUser
 from app.core.rate_limit import rate_limiter
 from app.db.database import get_db
-from app.db.models import FallAlert, UserRole
+from app.db.models import FallAlert, User, UserRole
+from app.schemas.audit import AuditAction, AuditResource
 from app.schemas.fall_alert import (
     AlertContactCreate,
     AlertContactResponse,
@@ -27,6 +28,7 @@ from app.schemas.fall_alert import (
     FallAlertSmsStatusRequest,
     PaginatedFallAlertsResponse,
 )
+from app.services import audit_service
 from app.services.aws_iot_service import AWSIoTPublishService
 from app.services.email_service import SmtpEmailChannel
 from app.services.fall_alert_service import (
@@ -253,7 +255,7 @@ def create_fall_alerts_router(
     ) -> PaginatedFallAlertsResponse:
         """List fall alerts with pagination, state/date filtering, RBAC isolation, and GDPR pseudonymization."""
         raw_end = request.query_params.get("end_date") if request is not None else None
-        return query_fall_alerts(
+        res = query_fall_alerts(
             db=db,
             user=user,
             page=page,
@@ -265,6 +267,19 @@ def create_fall_alerts_router(
             user_id=user_id,
             pseudonym=pseudonym,
         )
+        if user.role == UserRole.admin and pseudonym:
+            # Audit admin querying specific patient fall alert history
+            patient = db.query(User).filter(User.pseudonym == pseudonym).first()
+            if patient:
+                audit_service.record_access_log(
+                    db=db,
+                    actor=user,
+                    patient=patient,
+                    action=AuditAction.READ,
+                    resource=AuditResource.fall_alerts,
+                    request=request,
+                )
+        return res
 
     @router.get(
         "/fall-alerts/{alert_identifier}",
@@ -273,6 +288,7 @@ def create_fall_alerts_router(
     def get_fall_alert_detail(
         alert_identifier: str,
         user: CurrentUser,
+        request: Request,
         db: Session = Depends(get_db),
     ) -> FallAlertDetail:
         """Retrieve full details and notification log for a single fall alert (by int ID or UUID)."""
@@ -307,6 +323,20 @@ def create_fall_alerts_router(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Fall alert not found",
             )
+
+        if user.id != alert.user_id:
+            patient = db.query(User).filter(User.id == alert.user_id).first()
+            if patient:
+                audit_service.record_access_log(
+                    db=db,
+                    actor=user,
+                    patient=patient,
+                    action=AuditAction.READ,
+                    resource=AuditResource.fall_alerts,
+                    resource_id=str(alert.uuid),
+                    request=request,
+                )
+
         return to_fall_alert_detail(alert, user)
 
     return router

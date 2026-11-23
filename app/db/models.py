@@ -495,3 +495,32 @@ class MLModel(Base):
     c_header_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     flash_usage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     ram_usage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class AccessAuditLog(Base):
+    """Immutable audit trail for healthcare data access by administrative and clinical actors."""
+
+    __tablename__ = "access_audit_logs"
+    __table_args__ = (
+        Index("ix_audit_patient_created", "patient_uuid", "created_at_utc"),
+        Index("ix_audit_actor_created", "actor_uuid", "created_at_utc"),
+        Index("ix_audit_resource_action", "resource", "action", "created_at_utc"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), default=uuid4, unique=True, index=True, nullable=False
+    )
+    actor_uuid: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), index=True, nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    patient_uuid: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), index=True, nullable=False)
+    patient_pseudonym: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    resource: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, nullable=False
+    )

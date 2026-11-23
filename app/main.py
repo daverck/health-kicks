@@ -15,6 +15,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from alembic import command
+from app.api.v1.audit import create_audit_router
 from app.api.v1.auth import create_auth_router
 from app.api.v1.cloud import create_cloud_router
 from app.api.v1.devices import create_devices_router
@@ -54,6 +55,7 @@ from app.services.fall_alert_service import process_due_fall_alerts
 from app.services.ingestion_service import prune_processed_messages
 
 setup_logging()
+
 
 def _sentry_before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
     """Filter out transient/intentional database connection timeouts when Aurora DB is stopped."""
@@ -144,7 +146,10 @@ async def _fall_alert_escalation_worker() -> None:
                 or "connection to server at" in msg
                 or "connection refused" in msg
             ):
-                logger.warning("[fall-alert-worker] Database unavailable (skipping tick, retrying in 15s): %s", exc)
+                logger.warning(
+                    "[fall-alert-worker] Database unavailable (skipping tick, retrying in 15s): %s",
+                    exc,
+                )
                 await asyncio.sleep(15)
             else:
                 logger.exception("[fall-alert-worker] Tick skipped or failed")
@@ -245,16 +250,12 @@ async def idempotency_middleware(request: Request, call_next: Any) -> Response:
     if resolution.outcome == IdempotencyOutcome.MISMATCH:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content={
-                "detail": "Idempotency-Key cannot be reused with a different request payload"
-            },
+            content={"detail": "Idempotency-Key cannot be reused with a different request payload"},
         )
     if resolution.outcome == IdempotencyOutcome.IN_PROGRESS:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            content={
-                "detail": "A request with this Idempotency-Key is currently being processed"
-            },
+            content={"detail": "A request with this Idempotency-Key is currently being processed"},
         )
     if resolution.outcome == IdempotencyOutcome.REPLAY and resolution.cached_response is not None:
         cached = resolution.cached_response
@@ -399,9 +400,13 @@ async def correlation_id_middleware(request: Request, call_next: Any) -> Respons
         cid = trace_id
         tp = generate_traceparent(trace_id=trace_id)
     else:
-        raw_cid = request.headers.get(CORRELATION_HEADER.lower()) or request.headers.get(REQUEST_ID_HEADER.lower())
+        raw_cid = request.headers.get(CORRELATION_HEADER.lower()) or request.headers.get(
+            REQUEST_ID_HEADER.lower()
+        )
         cid = sanitize_correlation_id(raw_cid)
-        trace_id_hex = cid if (len(cid) == 32 and all(c in "0123456789abcdefABCDEF" for c in cid)) else None
+        trace_id_hex = (
+            cid if (len(cid) == 32 and all(c in "0123456789abcdefABCDEF" for c in cid)) else None
+        )
         tp = generate_traceparent(trace_id=trace_id_hex)
 
     token = correlation_id_ctx.set(cid)
@@ -415,15 +420,19 @@ async def correlation_id_middleware(request: Request, call_next: Any) -> Respons
 
 
 is_prod = str(settings.environment).lower() in ("prod", "production")
-cors_origins = list(settings.public_origins) if settings.public_origins else [
-    "http://localhost:4200",
-    "http://127.0.0.1:4200",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "capacitor://localhost",
-]
+cors_origins = (
+    list(settings.public_origins)
+    if settings.public_origins
+    else [
+        "http://localhost:4200",
+        "http://127.0.0.1:4200",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "capacitor://localhost",
+    ]
+)
 cors_origin_regex = None if is_prod else r"^https?://(localhost|127\.0\.0\.1)(:[00-9]+)?$"
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -436,6 +445,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(create_cloud_router(publisher))
+app.include_router(create_audit_router())
 app.include_router(create_auth_router())
 app.include_router(create_devices_router())
 app.include_router(create_users_router())
@@ -464,9 +474,7 @@ def metrics_summary(request: Request, format: str | None = None) -> Response:
     """Operational metrics summary, supporting standard Prometheus exposition and JSON."""
     accept = request.headers.get("accept", "")
     wants_prometheus = (
-        format == "prometheus"
-        or "text/plain" in accept
-        or "application/openmetrics-text" in accept
+        format == "prometheus" or "text/plain" in accept or "application/openmetrics-text" in accept
     )
     if wants_prometheus and format != "json":
         content = metrics_collector.get_prometheus_text()
