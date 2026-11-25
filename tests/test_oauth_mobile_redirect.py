@@ -44,13 +44,13 @@ def mock_oauth_settings(monkeypatch):
     overrides = {
         "google_client_id": "test-google-client-id",
         "google_client_secret": "test-google-client-secret",
-        "google_redirect_uri": "https://healthkicks.duckdns.org/auth/google/callback",
-        "google_mobile_redirect_uri": "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback",
+        "google_redirect_uri": "https://app.healthkicks.eu/auth/google/callback",
+        "google_mobile_redirect_uri": "https://api.healthkicks.eu/api/v1/auth/google/callback",
         "azure_client_id": "test-azure-client-id",
         "azure_client_secret": "test-azure-client-secret",
         "azure_tenant_id": "common",
-        "azure_redirect_uri": "https://healthkicks.duckdns.org/auth/azure/callback",
-        "azure_mobile_redirect_uri": "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback",
+        "azure_redirect_uri": "https://app.healthkicks.eu/auth/azure/callback",
+        "azure_mobile_redirect_uri": "https://api.healthkicks.eu/api/v1/auth/azure/callback",
     }
     new_settings = dataclasses.replace(current, **overrides)
     monkeypatch.setattr(app.core.config, "settings", new_settings)
@@ -126,7 +126,7 @@ class TestGoogleOAuthMobileRedirects:
         query_params = parse_qs(urlparse(location).query)
         state = query_params["state"][0]
         assert get_state_platform(state) == "mobile"
-        assert query_params["redirect_uri"][0] == "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback"
+        assert query_params["redirect_uri"][0] == "https://api.healthkicks.eu/api/v1/auth/google/callback"
 
     def test_google_login_generates_web_state_when_redirect_false(self, client) -> None:
         res = client.get("/api/v1/auth/google/login", params={"redirect": "false"}, follow_redirects=False)
@@ -134,7 +134,7 @@ class TestGoogleOAuthMobileRedirects:
         data = res.json()
         assert get_state_platform(data["state"]) == "web"
         query_params = parse_qs(urlparse(data["authorization_url"]).query)
-        assert query_params["redirect_uri"][0] == "https://healthkicks.duckdns.org/auth/google/callback"
+        assert query_params["redirect_uri"][0] == "https://app.healthkicks.eu/auth/google/callback"
 
     def test_google_callback_get_success_redirects_to_mobile_deep_link(self, client) -> None:
         mobile_state = generate_oauth_state("google", platform="mobile")
@@ -187,7 +187,7 @@ class TestGoogleOAuthMobileRedirects:
 
             assert res.status_code in (302, 307)
             location = res.headers["location"]
-            assert "healthkicks.duckdns.org" in location
+            assert "app.healthkicks.eu" in location
             assert "/auth/google/callback" in location
             params = parse_qs(urlparse(location).query)
             assert "ticket" in params
@@ -256,7 +256,7 @@ class TestAzureOAuthMobileRedirects:
         query_params = parse_qs(urlparse(location).query)
         state = query_params["state"][0]
         assert get_state_platform(state) == "mobile"
-        assert query_params["redirect_uri"][0] == "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
+        assert query_params["redirect_uri"][0] == "https://api.healthkicks.eu/api/v1/auth/azure/callback"
 
     def test_azure_login_generates_web_state_when_redirect_false(self, client) -> None:
         res = client.get("/api/v1/auth/azure/login", params={"redirect": "false"}, follow_redirects=False)
@@ -264,7 +264,7 @@ class TestAzureOAuthMobileRedirects:
         data = res.json()
         assert get_state_platform(data["state"]) == "web"
         query_params = parse_qs(urlparse(data["authorization_url"]).query)
-        assert query_params["redirect_uri"][0] == "https://healthkicks.duckdns.org/auth/azure/callback"
+        assert query_params["redirect_uri"][0] == "https://app.healthkicks.eu/auth/azure/callback"
 
     def test_azure_callback_get_success_redirects_to_mobile_deep_link(self, client) -> None:
         mobile_state = generate_oauth_state("azure", platform="mobile")
@@ -307,8 +307,8 @@ class TestOAuthServiceRedirectUriSelection:
         web_params = parse_qs(urlparse(web_url).query)
         mobile_params = parse_qs(urlparse(mobile_url).query)
 
-        assert web_params["redirect_uri"][0] == "https://healthkicks.duckdns.org/auth/google/callback"
-        assert mobile_params["redirect_uri"][0] == "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback"
+        assert web_params["redirect_uri"][0] == "https://app.healthkicks.eu/auth/google/callback"
+        assert mobile_params["redirect_uri"][0] == "https://api.healthkicks.eu/api/v1/auth/google/callback"
 
     def test_azure_auth_url_selects_mobile_and_web_redirect_uri(self) -> None:
         from app.services.azure_auth_service import azure_authorization_url
@@ -319,8 +319,8 @@ class TestOAuthServiceRedirectUriSelection:
         web_params = parse_qs(urlparse(web_url).query)
         mobile_params = parse_qs(urlparse(mobile_url).query)
 
-        assert web_params["redirect_uri"][0] == "https://healthkicks.duckdns.org/auth/azure/callback"
-        assert mobile_params["redirect_uri"][0] == "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
+        assert web_params["redirect_uri"][0] == "https://app.healthkicks.eu/auth/azure/callback"
+        assert mobile_params["redirect_uri"][0] == "https://api.healthkicks.eu/api/v1/auth/azure/callback"
 
     def test_google_token_exchange_posts_expected_redirect_uri(self) -> None:
         from app.services.google_auth_service import exchange_code_for_id_token
@@ -330,10 +330,10 @@ class TestOAuthServiceRedirectUriSelection:
             mock_post.return_value.json.return_value = {"id_token": "valid.id.token"}
 
             exchange_code_for_id_token("code-1", is_mobile=True)
-            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback"
+            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://api.healthkicks.eu/api/v1/auth/google/callback"
 
             exchange_code_for_id_token("code-2", is_mobile=False)
-            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://healthkicks.duckdns.org/auth/google/callback"
+            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://app.healthkicks.eu/auth/google/callback"
 
     def test_azure_token_exchange_posts_expected_redirect_uri(self) -> None:
         from app.services.azure_auth_service import exchange_code_for_azure_user
@@ -345,8 +345,8 @@ class TestOAuthServiceRedirectUriSelection:
             mock_get.return_value.json.return_value = {"mail": "test@healthkicks.org", "id": "az-1"}
 
             exchange_code_for_azure_user("code-1", is_mobile=True)
-            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
+            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://api.healthkicks.eu/api/v1/auth/azure/callback"
 
             exchange_code_for_azure_user("code-2", is_mobile=False)
-            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://healthkicks.duckdns.org/auth/azure/callback"
+            assert mock_post.call_args[1]["data"]["redirect_uri"] == "https://app.healthkicks.eu/auth/azure/callback"
 

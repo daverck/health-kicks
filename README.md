@@ -132,7 +132,7 @@ The configuration file path can be customized with `HEALTHKICKS_CONFIG_FILE`.
 Key environment variables:
 - `DATABASE_URL`: PostgreSQL connection string.
 - `USE_RDS_IAM`: Set to `true` when running on AWS with IAM role authentication.
-- `FRONTEND_URL` / `HEALTHKICKS_FRONTEND_URL`: Public Angular frontend URL (e.g. `https://healthkicks.duckdns.org` or `http://localhost:4200`).
+- `FRONTEND_URL` / `HEALTHKICKS_FRONTEND_URL`: Public Angular frontend URL (e.g. `https://app.healthkicks.eu` or `http://localhost:4200`).
 - `HEALTHKICKS_INGEST_TOKEN`: Shared secret for internal ingestion webhooks.
 - `HEALTHKICKS_JWT_SECRET`: Signing secret for JWT access tokens.
 - `AWS_REGION`: AWS target region (default: `eu-north-1`).

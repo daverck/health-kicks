@@ -35,7 +35,7 @@ class Settings:
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:4200/auth/google/callback"
-    google_mobile_redirect_uri: str = "https://healthkicks.duckdns.org:8443/api/v1/auth/google/callback"
+    google_mobile_redirect_uri: str = "https://api.healthkicks.eu/api/v1/auth/google/callback"
     jwt_secret: str = "dev-only-insecure-secret-key-32-chars-min!"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
@@ -48,9 +48,9 @@ class Settings:
     azure_client_secret: str = ""
     azure_tenant_id: str = "common"
     azure_redirect_uri: str = ""
-    azure_mobile_redirect_uri: str = "https://healthkicks.duckdns.org:8443/api/v1/auth/azure/callback"
+    azure_mobile_redirect_uri: str = "https://api.healthkicks.eu/api/v1/auth/azure/callback"
     # Frontend application URL for OAuth redirects
-    frontend_url: str = "https://healthkicks.duckdns.org"
+    frontend_url: str = "https://app.healthkicks.eu"
     # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting, Idempotency)
     dynamodb_telemetry_table: str = "healthkicks_telemetry"
     dynamodb_oauth_tickets_table: str = "healthkicks_oauth_tickets"
@@ -81,7 +81,7 @@ class Settings:
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from_name: str = "HealthKicks Alertes"
-    public_base_url: str = "https://healthkicks.duckdns.org:8443"
+    public_base_url: str = "https://api.healthkicks.eu"
     fall_alert_ack_secret: str = "dev-fall-alert-ack-secret-32bytes"
     fall_alert_cancel_window_sec: int = 60
     fall_alert_escalation_step_sec: int = 180

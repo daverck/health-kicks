@@ -76,7 +76,7 @@ def _handle_oauth_get_callback(
     """Common handler for browser GET redirect callbacks from SSO providers."""
     raw_platform = get_state_platform(state, config=settings)
     is_mobile = (raw_platform == "mobile")
-    frontend_base = getattr(settings, "frontend_url", "https://healthkicks.duckdns.org").rstrip("/")
+    frontend_base = getattr(settings, "frontend_url", "https://app.healthkicks.eu").rstrip("/")
 
     def _redirect_error(message: str) -> RedirectResponse:
         encoded_msg = quote(message, safe="")

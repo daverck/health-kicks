@@ -114,7 +114,7 @@ def test_settings() -> Settings:
         smtp_user="alerts@healthkicks.test",
         smtp_password="app-password-16ch",
         smtp_from_name="HealthKicks Alertes",
-        public_base_url="https://healthkicks.duckdns.org:8443",
+        public_base_url="https://api.healthkicks.eu",
         fall_alert_ack_secret="test-ack-secret-key-minimum-32-bytes",
         fall_alert_cancel_window_sec=60,
         fall_alert_escalation_step_sec=180,
@@ -794,7 +794,7 @@ def test_sms_escalation_dual_channel_sms_status_and_sms_ack(
     assert sms_cmd["is_test"] is False
     assert "[HealthKicks URGENCE]" in sms_cmd["message"]
     assert "/fall-alerts/ack?token=" in sms_cmd["message"]
-    assert "https://healthkicks.duckdns.org/fall-alerts/ack?token=" in sms_cmd["message"]
+    assert "https://app.healthkicks.eu/fall-alerts/ack?token=" in sms_cmd["message"]
 
     # Check notified_contacts_count == 1 (distinct rank count, not 2!)
     res_list = client.get("/api/v1/fall-alerts", headers=headers)
