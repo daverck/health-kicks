@@ -5,7 +5,7 @@
 1. Create a `db.t3.micro` (or larger) PostgreSQL 16 instance in the same VPC as App Runner.
 2. **Security group**: allow inbound TCP 5432 only from App Runner's outbound security group (or, for a private VPC connector, from the App Runner VPC connector SG). Do **not** open 5432 to `0.0.0.0/0`.
 3. Enable **storage encryption** and automated backups.
-4. Note the endpoint, e.g. `healthkicks.xxxx.eu-north-1.rds.amazonaws.com`.
+4. Note the endpoint, e.g. `healthkicks.xxxx.eu-west-1.rds.amazonaws.com`.
 
 Connection string format used by the app (SQLAlchemy driver prefix required):
 
@@ -33,19 +33,19 @@ The application image ships with Alembic and all migrations, so you can apply th
 
 ```powershell
 # Using uv locally with DATABASE_URL
-$env:DATABASE_URL="postgresql+psycopg2://user:pass@healthkicks.xxxx.eu-north-1.rds.amazonaws.com:5432/healthkicks?sslmode=require"
+$env:DATABASE_URL="postgresql+psycopg2://user:pass@healthkicks.xxxx.eu-west-1.rds.amazonaws.com:5432/healthkicks?sslmode=require"
 uv run alembic upgrade head
 ```
 
 ```bash
 # Bash
-DATABASE_URL="postgresql+psycopg2://user:pass@healthkicks.xxxx.eu-north-1.rds.amazonaws.com:5432/healthkicks?sslmode=require" uv run alembic upgrade head
+DATABASE_URL="postgresql+psycopg2://user:pass@healthkicks.xxxx.eu-west-1.rds.amazonaws.com:5432/healthkicks?sslmode=require" uv run alembic upgrade head
 ```
 
 **Network access:** your machine needs to reach RDS on 5432. Either whitelist your IP in the RDS security group temporarily, or tunnel via SSM:
 
 ```powershell
-aws ssm start-session --target <bastion-instance-id> --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["healthkicks.xxxx.eu-north-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["5432"]}'
+aws ssm start-session --target <bastion-instance-id> --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["healthkicks.xxxx.eu-west-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["5432"]}'
 # then point the migration at localhost:5432
 ```
 

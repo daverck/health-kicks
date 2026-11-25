@@ -81,7 +81,7 @@ def test_get_latest_firmware_success(client, auth_headers) -> None:
         "LastModified": datetime(2026, 10, 6, 21, 30, tzinfo=UTC),
     }
     mock_s3.generate_presigned_url.return_value = (
-        "https://healthkicks-firmware-releases.s3.eu-north-1.amazonaws.com/firmware/esp32s3/latest/firmware.bin?AWSAccessKeyId=test"
+        "https://healthkicks-firmware-releases-eu-west-1.s3.eu-west-1.amazonaws.com/firmware/esp32s3/latest/firmware.bin?AWSAccessKeyId=test"
     )
 
     svc = FirmwareDistributionService(s3_client=mock_s3)
@@ -95,7 +95,7 @@ def test_get_latest_firmware_success(client, auth_headers) -> None:
         assert data["sha256"] == "8a32f6b3e7d581f148e658091ecb6a93ad5d24d26f047ff690b200b3e55c2aa7"
         assert data["size_bytes"] == 1048576
         assert data["expires_in_seconds"] == 900
-        assert "https://healthkicks-firmware-releases.s3" in data["download_url"]
+        assert "https://healthkicks-firmware-releases-eu-west-1.s3" in data["download_url"]
     finally:
         app.dependency_overrides.pop(get_firmware_service, None)
 

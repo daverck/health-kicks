@@ -25,7 +25,7 @@ class Settings:
     aws_sts_session_duration: int = 3600
     database_url: str = "postgresql+psycopg2://healthkicks:healthkicks@localhost:5432/healthkicks"
     auto_create_tables: bool = True
-    aws_region: str = "eu-north-1"
+    aws_region: str = "eu-west-1"
     ingest_token: str = ""
     environment: str = "development"
     # RDS IAM authentication (token regenerated per connection, 15 min expiry)
@@ -70,7 +70,7 @@ class Settings:
     log_max_bytes: int = 20_971_520
     log_backup_count: int = 5
     # S3 Firmware distribution
-    s3_firmware_bucket: str = "healthkicks-firmware-releases"
+    s3_firmware_bucket: str = "healthkicks-firmware-releases-eu-west-1"
     s3_firmware_key: str = "firmware/esp32s3/latest/firmware.bin"
     s3_presigned_url_expire_seconds: int = 900
     # GDPR Pseudonymization

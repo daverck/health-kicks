@@ -6,7 +6,7 @@ services:
     command: ["alembic", "upgrade", "head"]
     environment: &api_env
       DATABASE_URL: postgresql+psycopg2://healthkicks:healthkicks@postgres:5432/healthkicks
-      AWS_REGION: ${AWS_REGION:-eu-north-1}
+      AWS_REGION: ${AWS_REGION:-eu-west-1}
       AWS_IOT_ENDPOINT: ${AWS_IOT_ENDPOINT:-}
       AWS_IOT_HAPTIC_COMMAND_TOPIC: ${AWS_IOT_HAPTIC_COMMAND_TOPIC:-healthkicks/v1/{device_id}/commands/haptic}
       HEALTHKICKS_INGEST_TOKEN: ${HEALTHKICKS_INGEST_TOKEN:?Set HEALTHKICKS_INGEST_TOKEN}

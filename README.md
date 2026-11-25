@@ -135,7 +135,7 @@ Key environment variables:
 - `FRONTEND_URL` / `HEALTHKICKS_FRONTEND_URL`: Public Angular frontend URL (e.g. `https://app.healthkicks.eu` or `http://localhost:4200`).
 - `HEALTHKICKS_INGEST_TOKEN`: Shared secret for internal ingestion webhooks.
 - `HEALTHKICKS_JWT_SECRET`: Signing secret for JWT access tokens.
-- `AWS_REGION`: AWS target region (default: `eu-north-1`).
+- `AWS_REGION`: AWS target region (default: `eu-west-1`).
 - `AWS_IOT_ENDPOINT`: AWS IoT Core REST endpoint for publishing commands.
 - `DYNAMODB_TELEMETRY_TABLE`: DynamoDB table name (default: `healthkicks_telemetry`).
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`: SMTP credentials for emergency email alerts.

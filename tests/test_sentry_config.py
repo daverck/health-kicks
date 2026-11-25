@@ -27,7 +27,7 @@ def test_sentry_before_send_filters_db_timeout():
 
     # Simulated psycopg2 / SQLAlchemy timeout error
     err = RuntimeError(
-        'connection to server at "healthkicks-db.cluster-cb46qko685z2.eu-north-1.rds.amazonaws.com" port 5432 failed: timeout expired'
+        'connection to server at "healthkicks-db.cluster-cb46qko685z2.eu-west-1.rds.amazonaws.com" port 5432 failed: timeout expired'
     )
     hint = {"exc_info": (type(err), err, None)}
     event = {"message": "Database error"}

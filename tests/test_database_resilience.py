@@ -43,7 +43,7 @@ def test_iam_connection_creator_regenerates_fresh_token_and_sets_keepalives() ->
     cfg = Settings(
         database_url="postgresql+psycopg2://iam_user@aurora-cluster.example.com:5432/healthkicks",
         use_rds_iam=True,
-        aws_region="eu-north-1",
+        aws_region="eu-west-1",
         database_sslmode="verify-full",
     )
 

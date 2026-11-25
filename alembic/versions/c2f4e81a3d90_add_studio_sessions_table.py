@@ -77,7 +77,7 @@ def _backfill_sessions_from_dynamodb(conn: sa.Connection) -> None:
 
     # 3. Scan DynamoDB telemetry table for items with session_id
     table_name = getattr(settings, "dynamodb_telemetry_table", "healthkicks_telemetry")
-    region = getattr(settings, "aws_region", "eu-north-1")
+    region = getattr(settings, "aws_region", "eu-west-1")
 
     logger.info(f"[backfill] Fetching historical sessions from DynamoDB ({table_name})...")
     sessions: dict[str, dict[str, Any]] = {}

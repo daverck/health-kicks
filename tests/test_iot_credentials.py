@@ -47,8 +47,8 @@ def mock_sts_client():
 @pytest.fixture()
 def sts_service(mock_sts_client):
     test_config = Settings(
-        aws_region="eu-north-1",
-        aws_iot_endpoint="a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com",
+        aws_region="eu-west-1",
+        aws_iot_endpoint="a2k10w7ebf2tx9-ats.iot.eu-west-1.amazonaws.com",
         aws_iot_role_arn="arn:aws:iam::123456789012:role/HealthKicksMobileIoTRole",
         aws_sts_session_duration=3600,
     )
@@ -120,23 +120,23 @@ class TestAWSSTSServiceUnit:
         # Connect statement
         connect_stmt = next(s for s in statements if s["Action"] == ["iot:Connect"])
         assert connect_stmt["Resource"] == [
-            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-42-*",
-            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-42",
-            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-session-42-*",
-            "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-session-42",
+            "arn:aws:iot:eu-west-1:123456789012:client/healthkicks-mobile-42-*",
+            "arn:aws:iot:eu-west-1:123456789012:client/healthkicks-mobile-42",
+            "arn:aws:iot:eu-west-1:123456789012:client/healthkicks-session-42-*",
+            "arn:aws:iot:eu-west-1:123456789012:client/healthkicks-session-42",
         ]
 
         # Publish and Receive statement
         pub_stmt = next(s for s in statements if s["Action"] == ["iot:Publish", "iot:Receive"])
-        assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/HK-1/*" in pub_stmt["Resource"]
-        assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/users/42/*" in pub_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:topic/healthkicks/v1/HK-1/*" in pub_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:topic/healthkicks/v1/users/42/*" in pub_stmt["Resource"]
         # Global users/* wildcard must NOT be present
         assert not any(r.endswith(":topic/healthkicks/v1/users/*") for r in pub_stmt["Resource"])
 
         # Subscribe statement
         sub_stmt = next(s for s in statements if s["Action"] == ["iot:Subscribe"])
-        assert "arn:aws:iot:eu-north-1:123456789012:topicfilter/healthkicks/v1/HK-1/*" in sub_stmt["Resource"]
-        assert "arn:aws:iot:eu-north-1:123456789012:topicfilter/healthkicks/v1/users/42/*" in sub_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:topicfilter/healthkicks/v1/HK-1/*" in sub_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:topicfilter/healthkicks/v1/users/42/*" in sub_stmt["Resource"]
         # Global users/* wildcard must NOT be present
         assert not any(r.endswith(":topicfilter/healthkicks/v1/users/*") for r in sub_stmt["Resource"])
 
@@ -145,12 +145,12 @@ class TestAWSSTSServiceUnit:
         policy = json.loads(policy_str)
 
         connect_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Connect"])
-        assert "arn:aws:iot:eu-north-1:123456789012:client/*" not in connect_stmt["Resource"]
-        assert "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-admin-*" in connect_stmt["Resource"]
-        assert "arn:aws:iot:eu-north-1:123456789012:client/healthkicks-session-admin-*" in connect_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:client/*" not in connect_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:client/healthkicks-mobile-admin-*" in connect_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:client/healthkicks-session-admin-*" in connect_stmt["Resource"]
 
         pub_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Publish", "iot:Receive"])
-        assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/*" in pub_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:topic/healthkicks/v1/*" in pub_stmt["Resource"]
 
     def test_generate_credentials_calls_assume_role(self, sts_service, mock_sts_client):
         creds = sts_service.generate_iot_credentials(user_id=10, device_ids=["HK-1"])
@@ -158,8 +158,8 @@ class TestAWSSTSServiceUnit:
         assert creds["access_key_id"] == "ASIA_MOCK_ACCESS_KEY"
         assert creds["secret_access_key"] == "mock_secret_key"
         assert creds["session_token"] == "mock_session_token_xyz"
-        assert creds["iot_endpoint"] == "a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com"
-        assert creds["region"] == "eu-north-1"
+        assert creds["iot_endpoint"] == "a2k10w7ebf2tx9-ats.iot.eu-west-1.amazonaws.com"
+        assert creds["region"] == "eu-west-1"
         assert "user_id" not in creds
         assert creds["user_uuid"] == "10"
 
@@ -223,8 +223,8 @@ class TestIoTCredentialsEndpoint:
         assert data["access_key_id"] == "ASIA_MOCK_ACCESS_KEY"
         assert data["secret_access_key"] == "mock_secret_key"
         assert data["session_token"] == "mock_session_token_xyz"
-        assert data["iot_endpoint"] == "a2k10w7ebf2tx9-ats.iot.eu-north-1.amazonaws.com"
-        assert data["region"] == "eu-north-1"
+        assert data["iot_endpoint"] == "a2k10w7ebf2tx9-ats.iot.eu-west-1.amazonaws.com"
+        assert data["region"] == "eu-west-1"
         assert "expiration" in data
 
         # Verify the policy passed to STS was scoped to HK-1
@@ -278,11 +278,11 @@ class TestIoTCredentialsEndpoint:
         call_kwargs = mock_sts_client.assume_role.call_args[1]
         policy = json.loads(call_kwargs["Policy"])
         pub_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Publish", "iot:Receive"])
-        assert "arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/*" in pub_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:topic/healthkicks/v1/*" in pub_stmt["Resource"]
 
         connect_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Connect"])
-        assert "arn:aws:iot:eu-north-1:123456789012:client/*" not in connect_stmt["Resource"]
-        assert f"arn:aws:iot:eu-north-1:123456789012:client/healthkicks-mobile-{admin_user.uuid}-*" in connect_stmt["Resource"]
+        assert "arn:aws:iot:eu-west-1:123456789012:client/*" not in connect_stmt["Resource"]
+        assert f"arn:aws:iot:eu-west-1:123456789012:client/healthkicks-mobile-{admin_user.uuid}-*" in connect_stmt["Resource"]
 
     def test_query_parameter_fallback(self, client, standard_user, user_device, mock_sts_client):
         token = token_service.issue_access_token(standard_user)
@@ -310,5 +310,5 @@ class TestIoTCredentialsEndpoint:
         call_kwargs = mock_sts_client.assume_role.call_args[1]
         policy = json.loads(call_kwargs["Policy"])
         pub_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Publish", "iot:Receive"])
-        expected_user_topic = f"arn:aws:iot:eu-north-1:123456789012:topic/healthkicks/v1/users/{standard_user.uuid}/*"
+        expected_user_topic = f"arn:aws:iot:eu-west-1:123456789012:topic/healthkicks/v1/users/{standard_user.uuid}/*"
         assert expected_user_topic in pub_stmt["Resource"]
