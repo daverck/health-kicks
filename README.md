@@ -65,19 +65,23 @@ The health endpoint `GET /api/v1/health` verifies database connectivity and retu
 
 ## REST Endpoints Overview
 
-### Authentication & Users
+### Authentication, Users & GDPR Compliance
 - `POST /api/v1/auth/google/callback`: Exchange Google OAuth2 authorization code for JWT tokens.
 - `POST /api/v1/auth/azure/callback`: Exchange Microsoft Entra ID code for JWT tokens.
 - `POST /api/v1/auth/refresh`: Refresh expired access token with token rotation.
 - `GET /api/v1/users/me`: Current user profile information and role.
+- `POST /api/v1/users/me/export`: Export full personal data archive (GDPR data portability).
+- `DELETE /api/v1/users/me`: Self-service account deletion and data erasure.
+- `GET /api/v1/audit/access-logs`: Tamper-resistant compliance audit logs (admin only, keyset cursor paginated).
 
-### Devices & Haptics
-- `GET /api/v1/devices`: List registered devices (or user-bound devices).
+### Devices, Firmware OTA & Haptics
+- `GET /api/v1/devices`: List registered devices (or user-bound devices, keyset cursor paginated).
+- `GET /api/v1/firmware/latest`: Retrieve latest ESP32-S3 OTA firmware metadata and S3 presigned URL.
 - `POST /api/v1/devices/{device_id}/haptic/trigger`: Trigger remote haptic vibration command.
-- `GET /api/v1/devices/{device_id}/haptic/history`: Paginated log of haptic commands.
+- `GET /api/v1/devices/{device_id}/haptic/history`: Keyset cursor-paginated log of haptic commands.
 
 ### Activity Events & Steps
-- `GET /api/v1/devices/{device_id}/events/activities`: Paginated list of detected activity and fall events.
+- `GET /api/v1/devices/{device_id}/events/activities`: Keyset cursor-paginated list of detected activity and fall events.
 - `POST /api/v1/steps/sync`: Synchronize daily step count aggregates from mobile odometry.
 - `GET /api/v1/steps/history`: Query daily step history with activity breakdowns.
 
@@ -99,6 +103,9 @@ The health endpoint `GET /api/v1/health` verifies database connectivity and retu
 - `PATCH /api/v1/studio/sessions/{id}`: Reclassify studio session label in PostgreSQL and DynamoDB.
 - `PATCH /api/v1/studio/sessions/{id}/trim`: Non-destructive trimming of studio recording bounds.
 - `DELETE /api/v1/studio/sessions/{id}`: Purge studio session and associated raw telemetry frames.
+
+- **Pagination**: Collection endpoints (`/devices`, `/events/activities`, `/haptic/history`, `/fall-alerts`, `/studio/sessions`, `/audit/access-logs`) support $O(1)$ keyset pagination via `cursor` / `next_cursor` and the `X-Next-Cursor` response header (`page`/`skip` offset and `COUNT(*)` are deprecated on cursor queries).
+- **Observability & Idempotency**: Integrated with **Sentry SDK** (`SENTRY_DSN`) and DynamoDB-backed request idempotency (`Idempotency-Key` header on mutating endpoints).
 
 ### Ingestion Webhooks
 - `POST /api/v1/ingest/event`: General edge activity and fall detection webhook from AWS IoT rules.
