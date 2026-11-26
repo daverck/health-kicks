@@ -71,8 +71,9 @@ class FakeDynamoIdempotencyTable:
 
 
 @pytest.fixture()
-def db_session() -> Session:
+def db_session(monkeypatch) -> Session:
     """Provide an isolated in-memory SQLite database session and reset idempotency store."""
+    monkeypatch.setattr(idempotency_store, "_is_production", lambda: False)
     idempotency_store.reset()
     engine = create_engine(
         "sqlite://",
@@ -382,3 +383,41 @@ def test_dynamo_circuit_breaker_recovers_after_cooldown() -> None:
     store._dynamo_retry_after = 0.0
     assert store._dynamo_unavailable is False
     assert store._get_table() is fake_table
+
+
+def test_dynamodb_idempotency_store_fails_closed_in_production(monkeypatch) -> None:
+    """In production, DynamoDB unavailability must fail closed rather than falling back to memory."""
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.core.idempotency import IdempotencyStoreUnavailableError
+
+    store = DynamoDbIdempotencyStore(
+        table=None,
+        config=SimpleNamespace(environment="production", aws_region="eu-west-1"),
+    )
+    monkeypatch.setattr(store, "_get_table", lambda: None)
+
+    with pytest.raises(IdempotencyStoreUnavailableError):
+        store.acquire_or_get("POST:/api/v1/steps:user:1:key-prod-1", "hash-abc")
+
+
+def test_idempotency_middleware_returns_503_when_store_unavailable(monkeypatch) -> None:
+    """Middleware returns 503 Service Unavailable when IdempotencyStoreUnavailableError is raised."""
+    from app.core.idempotency import IdempotencyStoreUnavailableError
+
+    def _raise_unavailable(*_args, **_kwargs):
+        raise IdempotencyStoreUnavailableError("DynamoDB down")
+
+    monkeypatch.setattr(idempotency_store, "acquire_or_get", _raise_unavailable)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/users/me/alert-contacts",
+        json={"name": "Dr. House", "email": "house@example.com"},
+        headers={"Idempotency-Key": "prod-unavailable-001"},
+    )
+    assert response.status_code == 503
+    assert "Idempotency service temporarily unavailable" in response.json()["detail"]
+

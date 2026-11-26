@@ -43,6 +43,10 @@ IDEMPOTENT_PATH_PREFIXES = (
 )
 
 
+class IdempotencyStoreUnavailableError(RuntimeError):
+    """Raised in production when the distributed DynamoDB idempotency store is unavailable."""
+
+
 class IdempotencyOutcome(str, Enum):
     """Resolution outcome when evaluating an incoming Idempotency-Key."""
 
@@ -222,6 +226,24 @@ class DynamoDbIdempotencyStore:
     def _mark_dynamo_unavailable(self) -> None:
         self._dynamo_retry_after = time.monotonic() + DYNAMO_CIRCUIT_BREAKER_COOLDOWN_SEC
 
+    def _is_production(self) -> bool:
+        env = str(getattr(self._config, "environment", "") or "").strip().lower()
+        return env in {"prod", "production"}
+
+    def _acquire_fallback_or_raise(
+        self,
+        scope_key: str,
+        request_hash: str,
+        lock_ttl_seconds: int,
+        reason: str,
+    ) -> IdempotencyResolution:
+        if self._is_production():
+            logger.error("DynamoDB idempotency unavailable in production (%s); failing closed", reason)
+            raise IdempotencyStoreUnavailableError(
+                f"Distributed idempotency store unavailable in production: {reason}"
+            )
+        return self._fallback.acquire_or_get(scope_key, request_hash, lock_ttl_seconds)
+
     def _get_table(self) -> Any | None:
         if self._dynamo_unavailable:
             return None
@@ -270,7 +292,9 @@ class DynamoDbIdempotencyStore:
         """Atomically acquire a distributed lock or read cached idempotent response from DynamoDB."""
         table = self._get_table()
         if table is None:
-            return self._fallback.acquire_or_get(scope_key, request_hash, lock_ttl_seconds)
+            return self._acquire_fallback_or_raise(
+                scope_key, request_hash, lock_ttl_seconds, "table unavailable"
+            )
 
         now = int(time.time())
         expires_at = now + max(1, int(lock_ttl_seconds))
@@ -290,20 +314,26 @@ class DynamoDbIdempotencyStore:
         except ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code != "ConditionalCheckFailedException":
-                logger.warning("DynamoDB idempotency put_item error (%s), falling back to memory", error_code)
+                logger.warning("DynamoDB idempotency put_item error (%s)", error_code)
                 self._dynamo_unavailable = True
-                return self._fallback.acquire_or_get(scope_key, request_hash, lock_ttl_seconds)
+                return self._acquire_fallback_or_raise(
+                    scope_key, request_hash, lock_ttl_seconds, f"put_item {error_code}"
+                )
 
             try:
                 resp = table.get_item(Key={"key": scope_key}, ConsistentRead=True)
                 item = resp.get("Item")
             except (BotoCoreError, ClientError) as get_exc:
-                logger.warning("DynamoDB idempotency get_item failed (%s), falling back to memory", get_exc)
+                logger.warning("DynamoDB idempotency get_item failed (%s)", get_exc)
                 self._dynamo_unavailable = True
-                return self._fallback.acquire_or_get(scope_key, request_hash, lock_ttl_seconds)
+                return self._acquire_fallback_or_raise(
+                    scope_key, request_hash, lock_ttl_seconds, f"get_item {get_exc}"
+                )
 
             if not item or int(item.get("expires_at", 0)) <= now:
-                return self._fallback.acquire_or_get(scope_key, request_hash, lock_ttl_seconds)
+                return self._acquire_fallback_or_raise(
+                    scope_key, request_hash, lock_ttl_seconds, "missing or expired item"
+                )
 
             stored_hash = str(item.get("request_hash", ""))
             if stored_hash != request_hash:
@@ -321,9 +351,11 @@ class DynamoDbIdempotencyStore:
                 ),
             )
         except Exception as exc:
-            logger.warning("DynamoDB idempotency error (%s), falling back to memory", exc)
+            logger.warning("DynamoDB idempotency error (%s)", exc)
             self._dynamo_unavailable = True
-            return self._fallback.acquire_or_get(scope_key, request_hash, lock_ttl_seconds)
+            return self._acquire_fallback_or_raise(
+                scope_key, request_hash, lock_ttl_seconds, str(exc)
+            )
 
     def complete(
         self,
@@ -342,9 +374,12 @@ class DynamoDbIdempotencyStore:
         )
         table = self._get_table()
         if table is None:
-            self._fallback.complete(
-                scope_key, request_hash, status_code, response_body, content_type, effective_ttl
-            )
+            if not self._is_production():
+                self._fallback.complete(
+                    scope_key, request_hash, status_code, response_body, content_type, effective_ttl
+                )
+            else:
+                logger.error("DynamoDB idempotency complete skipped in production: table unavailable")
             return
 
         now = int(time.time())
@@ -362,24 +397,29 @@ class DynamoDbIdempotencyStore:
                 }
             )
         except Exception as exc:
-            logger.warning("DynamoDB idempotency complete failed (%s), using fallback", exc)
             self._dynamo_unavailable = True
-            self._fallback.complete(
-                scope_key, request_hash, status_code, response_body, content_type, effective_ttl
-            )
+            if not self._is_production():
+                logger.warning("DynamoDB idempotency complete failed (%s), using fallback", exc)
+                self._fallback.complete(
+                    scope_key, request_hash, status_code, response_body, content_type, effective_ttl
+                )
+            else:
+                logger.error("DynamoDB idempotency complete failed in production (%s)", exc)
 
     def release(self, scope_key: str) -> None:
         """Delete an IN_PROGRESS lock when the downstream request fails."""
         table = self._get_table()
         if table is None:
-            self._fallback.release(scope_key)
+            if not self._is_production():
+                self._fallback.release(scope_key)
             return
         try:
             table.delete_item(Key={"key": scope_key})
         except Exception as exc:
             logger.debug("DynamoDB idempotency release failed (%s)", exc)
             self._dynamo_unavailable = True
-            self._fallback.release(scope_key)
+            if not self._is_production():
+                self._fallback.release(scope_key)
 
     def reset(self) -> None:
         """Reset in-memory fallback records."""

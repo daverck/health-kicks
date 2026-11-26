@@ -41,6 +41,7 @@ from app.core.idempotency import (
     IDEMPOTENCY_HEADER,
     IDEMPOTENT_REPLAYED_HEADER,
     IdempotencyOutcome,
+    IdempotencyStoreUnavailableError,
     compute_payload_hash,
     compute_request_scope,
     idempotency_store,
@@ -246,7 +247,13 @@ async def idempotency_middleware(request: Request, call_next: Any) -> Response:
     request_hash = compute_payload_hash(body_bytes)
     scope_key = compute_request_scope(request, clean_key)
 
-    resolution = idempotency_store.acquire_or_get(scope_key, request_hash)
+    try:
+        resolution = idempotency_store.acquire_or_get(scope_key, request_hash)
+    except IdempotencyStoreUnavailableError:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Idempotency service temporarily unavailable"},
+        )
     if resolution.outcome == IdempotencyOutcome.MISMATCH:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
