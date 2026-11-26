@@ -402,9 +402,11 @@ def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
     data1 = res1.json()
     assert len(data1["items"]) == 1
     assert data1["items"][0]["uuid"] == str(s3.uuid)
+    assert data1["total"] == 3
+    assert data1["page"] == 1
     assert data1["next_cursor"] is not None
 
-    # Page 2 via next_cursor
+    # Page 2 via next_cursor (count(*) and page must be None)
     cursor1 = data1["next_cursor"]
     res2 = client.get(
         f"/api/v1/studio/sessions?cursor={cursor1}&size=1", headers=_auth_headers(user_a)
@@ -413,9 +415,11 @@ def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
     data2 = res2.json()
     assert len(data2["items"]) == 1
     assert data2["items"][0]["uuid"] == str(s2.uuid)
+    assert data2["total"] is None
+    assert data2["page"] is None
     assert data2["next_cursor"] is not None
 
-    # Page 3 via next_cursor
+    # Page 3 via next_cursor (count(*) and page must be None)
     cursor2 = data2["next_cursor"]
     res3 = client.get(
         f"/api/v1/studio/sessions?cursor={cursor2}&size=1", headers=_auth_headers(user_a)
@@ -424,6 +428,8 @@ def test_list_sessions_cursor_pagination(client, user_a, db_session) -> None:
     data3 = res3.json()
     assert len(data3["items"]) == 1
     assert data3["items"][0]["uuid"] == str(s1.uuid)
+    assert data3["total"] is None
+    assert data3["page"] is None
     assert data3["next_cursor"] is None
 
 

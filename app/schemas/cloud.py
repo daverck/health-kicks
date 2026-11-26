@@ -36,9 +36,13 @@ class ActivityEventResponse(StrictModel):
 
 class ActivityEventPage(StrictModel):
     items: list[ActivityEventResponse]
-    page: int
+    page: int | None = Field(
+        default=None, description="Current page number (deprecated in favor of keyset cursor)"
+    )
     page_size: int
-    total: int
+    total: int | None = Field(
+        default=None, description="Total matching items (omitted or null on cursor pagination)"
+    )
     next_cursor: str | None = None
 
 
@@ -72,7 +76,11 @@ class HapticLogResponse(StrictModel):
 
 class HapticLogPage(StrictModel):
     items: list[HapticLogResponse]
-    page: int
+    page: int | None = Field(
+        default=None, description="Current page number (deprecated in favor of keyset cursor)"
+    )
     page_size: int
-    total: int
+    total: int | None = Field(
+        default=None, description="Total matching items (omitted or null on cursor pagination)"
+    )
     next_cursor: str | None = None

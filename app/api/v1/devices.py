@@ -33,7 +33,12 @@ def create_devices_router() -> APIRouter:
         user: CurrentUser,
         user_uuid: str | None = Query(None, description="Optional user UUID filter for admins"),
         cursor: str | None = Query(None, description="Opaque cursor (timestamp_utc|device_id) for keyset pagination"),
-        skip: int = Query(0, ge=0),
+        skip: int = Query(
+            0,
+            ge=0,
+            deprecated=True,
+            description="Offset skip (deprecated in favor of keyset cursor)",
+        ),
         limit: int = Query(100, ge=1, le=1000),
         db: Session = Depends(get_db),
         response: Response = None,  # type: ignore[assignment]

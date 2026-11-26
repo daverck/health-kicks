@@ -60,7 +60,12 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         cursor: str | None = Query(
             None, description="Opaque cursor (timestamp_utc|id) for keyset pagination"
         ),
-        page: int = Query(1, ge=1),
+        page: int = Query(
+            1,
+            ge=1,
+            deprecated=True,
+            description="Page number (deprecated in favor of keyset cursor)",
+        ),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
@@ -95,7 +100,12 @@ def create_cloud_router(publisher: AWSIoTPublishService) -> APIRouter:
         cursor: str | None = Query(
             None, description="Opaque cursor (timestamp_utc|id) for keyset pagination"
         ),
-        page: int = Query(1, ge=1),
+        page: int = Query(
+            1,
+            ge=1,
+            deprecated=True,
+            description="Page number (deprecated in favor of keyset cursor)",
+        ),
         page_size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]

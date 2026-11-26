@@ -101,8 +101,12 @@ class PaginatedSessionsResponse(StrictModel):
     """Paginated collection of studio session summaries."""
 
     items: list[StudioSessionSummary]
-    total: int
-    page: int
+    total: int | None = Field(
+        default=None, description="Total matching sessions (omitted or null on cursor pagination)"
+    )
+    page: int | None = Field(
+        default=None, description="Current page number (deprecated in favor of keyset cursor)"
+    )
     size: int
     next_cursor: str | None = Field(default=None, description="Opaque cursor for keyset pagination of next page")
     prev_cursor: str | None = Field(default=None, description="Opaque cursor for keyset pagination of previous page")

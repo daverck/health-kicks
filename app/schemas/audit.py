@@ -51,7 +51,14 @@ class PaginatedAccessAuditLogsResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    total: int = Field(ge=0, description="Total matching audit records")
-    page: int = Field(ge=1, description="Current page number")
-    page_size: int = Field(ge=1, le=100, description="Entries per page")
+    total: int | None = Field(
+        default=None, ge=0, description="Total matching audit records (omitted or null on cursor pagination)"
+    )
+    page: int | None = Field(
+        default=None, ge=1, description="Current page number (deprecated in favor of keyset cursor)"
+    )
+    page_size: int = Field(default=50, ge=1, le=100, description="Entries per page")
     items: list[AccessAuditLogResponse]
+    next_cursor: str | None = Field(
+        default=None, description="Opaque cursor for keyset pagination of next page"
+    )

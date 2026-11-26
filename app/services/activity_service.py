@@ -212,7 +212,10 @@ def query_activity_events(
         except ValueError:
             pass
 
-    total = query.with_entities(func.count(ActivityEvent.id)).scalar() or 0
+    if decoded is not None:
+        total = None
+    else:
+        total = query.with_entities(func.count(ActivityEvent.id)).scalar() or 0
     query = query.order_by(ActivityEvent.timestamp_utc.desc(), ActivityEvent.id.desc())
 
     if decoded is None and page > 1:
@@ -249,7 +252,7 @@ def query_activity_events(
 
     page_obj = ActivityEventPage(
         items=items,
-        page=page,
+        page=page if decoded is None else None,
         page_size=page_size,
         total=total,
         next_cursor=next_cursor,
@@ -309,7 +312,10 @@ def query_haptic_logs(
         except ValueError:
             pass
 
-    total = query.with_entities(func.count(HapticLog.id)).scalar() or 0
+    if decoded is not None:
+        total = None
+    else:
+        total = query.with_entities(func.count(HapticLog.id)).scalar() or 0
     query = query.order_by(HapticLog.triggered_at_utc.desc(), HapticLog.id.desc())
 
     if decoded is None and page > 1:
@@ -325,7 +331,7 @@ def query_haptic_logs(
 
     page_obj = HapticLogPage(
         items=[HapticLogResponse.model_validate(log, from_attributes=True) for log in logs],
-        page=page,
+        page=page if decoded is None else None,
         page_size=page_size,
         total=total,
         next_cursor=next_cursor,

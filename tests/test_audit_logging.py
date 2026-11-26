@@ -1,7 +1,7 @@
 """Tests for Immutable Access Audit Logging and Compliance Reporting."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -325,3 +325,104 @@ def test_non_admin_cannot_access_audit_logs(client: TestClient, db_session: Sess
     headers_patient = _auth_headers(patient)
     res_patient = client.get("/api/v1/audit/access-logs", headers=headers_patient)
     assert res_patient.status_code == 403
+
+
+def test_audit_logs_keyset_cursor_pagination(client: TestClient, db_session: Session) -> None:
+    """Admin can query audit logs using keyset cursor pagination with total and offset deprecated."""
+    admin = User(
+        uuid=uuid.uuid4(),
+        email="cursor.auditor@healthkicks.org",
+        name="Cursor Auditor",
+        role=UserRole.admin,
+        is_active=True,
+    )
+    patient = User(
+        uuid=uuid.uuid4(),
+        email="cursor.patient@healthkicks.org",
+        name="Cursor Patient",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add_all([admin, patient])
+    db_session.commit()
+    db_session.refresh(admin)
+    db_session.refresh(patient)
+
+    # Seed 5 audit entries with increasing timestamps
+    base_time = datetime.now(UTC) - timedelta(hours=5)
+    for i in range(5):
+        entry = AccessAuditLog(
+            actor_uuid=admin.uuid,
+            actor_role="admin",
+            actor_email=admin.email,
+            patient_uuid=patient.uuid,
+            patient_pseudonym="SUBJ-AUDIT-01",
+            action=AuditAction.READ,
+            resource=AuditResource.profile,
+            resource_id=f"rec-{i}",
+            created_at_utc=base_time + timedelta(minutes=i * 10),
+        )
+        db_session.add(entry)
+    db_session.commit()
+
+    headers = _auth_headers(admin)
+
+    # Page 1 without cursor (legacy/initial: has total and page)
+    res1 = client.get(
+        f"/api/v1/audit/access-logs?patient_uuid={patient.uuid}&page_size=2",
+        headers=headers,
+    )
+    assert res1.status_code == 200
+    data1 = res1.json()
+    assert len(data1["items"]) == 2
+    assert data1["total"] == 5
+    assert data1["page"] == 1
+    assert data1["next_cursor"] is not None
+    assert res1.headers.get("X-Next-Cursor") == data1["next_cursor"]
+
+    # Page 2 via cursor keyset pagination: COUNT(*) and page must be None
+    cursor1 = data1["next_cursor"]
+    res2 = client.get(
+        f"/api/v1/audit/access-logs?patient_uuid={patient.uuid}&cursor={cursor1}&page_size=2",
+        headers=headers,
+    )
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert len(data2["items"]) == 2
+    assert data2["total"] is None
+    assert data2["page"] is None
+    assert data2["next_cursor"] is not None
+    assert res2.headers.get("X-Next-Cursor") == data2["next_cursor"]
+
+    # Page 3 via cursor: last item, next_cursor should be None
+    cursor2 = data2["next_cursor"]
+    res3 = client.get(
+        f"/api/v1/audit/access-logs?patient_uuid={patient.uuid}&cursor={cursor2}&page_size=2",
+        headers=headers,
+    )
+    assert res3.status_code == 200
+    data3 = res3.json()
+    assert len(data3["items"]) == 1
+    assert data3["total"] is None
+    assert data3["page"] is None
+    assert data3["next_cursor"] is None
+    assert "X-Next-Cursor" not in res3.headers
+
+
+def test_audit_logs_invalid_cursor_400(client: TestClient, db_session: Session) -> None:
+    """Invalid cursor format must return HTTP 400 Bad Request."""
+    admin = User(
+        uuid=uuid.uuid4(),
+        email="cursor.invalid@healthkicks.org",
+        name="Cursor Invalid Auditor",
+        role=UserRole.admin,
+        is_active=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    db_session.refresh(admin)
+
+    headers = _auth_headers(admin)
+    res = client.get("/api/v1/audit/access-logs?cursor=not-a-valid-cursor", headers=headers)
+    assert res.status_code == 400
+    assert "Invalid pagination cursor format" in res.json()["detail"]

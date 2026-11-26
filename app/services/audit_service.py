@@ -4,10 +4,11 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from fastapi import Request
-from sqlalchemy import desc
+from fastapi import HTTPException, Request, status
+from sqlalchemy import and_, desc, or_
 from sqlalchemy.orm import Session
 
+from app.api.v1.utils import decode_cursor, encode_cursor
 from app.db.models import AccessAuditLog, User, UserRole
 from app.schemas.audit import (
     AccessAuditLogResponse,
@@ -118,6 +119,7 @@ def query_access_logs(
     db: Session,
     page: int = 1,
     page_size: int = 50,
+    cursor: str | None = None,
     actor_uuid: UUID | None = None,
     patient_uuid: UUID | None = None,
     action: str | None = None,
@@ -125,7 +127,7 @@ def query_access_logs(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> PaginatedAccessAuditLogsResponse:
-    """Query immutable access audit logs with filtering and pagination."""
+    """Query immutable access audit logs with filtering and keyset or offset pagination."""
     query = db.query(AccessAuditLog)
 
     if actor_uuid is not None:
@@ -141,12 +143,47 @@ def query_access_logs(
     if to_date is not None:
         query = query.filter(AccessAuditLog.created_at_utc <= to_date)
 
-    total = query.count()
+    next_cursor: str | None = None
+    if cursor is not None:
+        decoded = decode_cursor(cursor)
+        if decoded is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid pagination cursor format",
+            )
+        cur_ts, cur_id_str = decoded
+        try:
+            cur_id = int(cur_id_str)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid pagination cursor format",
+            )
+        query = query.filter(
+            or_(
+                AccessAuditLog.created_at_utc < cur_ts,
+                and_(
+                    AccessAuditLog.created_at_utc == cur_ts,
+                    AccessAuditLog.id < cur_id,
+                ),
+            )
+        )
+        total = None
+    else:
+        total = query.count()
 
-    offset = (page - 1) * page_size
-    records = (
-        query.order_by(desc(AccessAuditLog.created_at_utc)).offset(offset).limit(page_size).all()
-    )
+    query = query.order_by(desc(AccessAuditLog.created_at_utc), desc(AccessAuditLog.id))
+
+    if cursor is None and page > 1:
+        query = query.offset((page - 1) * page_size)
+
+    records_plus_one = query.limit(page_size + 1).all()
+    if len(records_plus_one) > page_size:
+        records = records_plus_one[:page_size]
+        next_cursor = encode_cursor(records[-1].created_at_utc, records[-1].id)
+    else:
+        records = records_plus_one
+        next_cursor = None
 
     items = [
         AccessAuditLogResponse(
@@ -168,7 +205,8 @@ def query_access_logs(
 
     return PaginatedAccessAuditLogsResponse(
         total=total,
-        page=page,
+        page=page if cursor is None else None,
         page_size=page_size,
         items=items,
+        next_cursor=next_cursor,
     )

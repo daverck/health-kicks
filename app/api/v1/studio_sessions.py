@@ -41,7 +41,12 @@ def create_studio_sessions_router(
     @router.get("", response_model=PaginatedSessionsResponse)
     def list_sessions(
         user: RequireTrainerOrAdmin,
-        page: int = Query(default=1, ge=1),
+        page: int = Query(
+            default=1,
+            ge=1,
+            deprecated=True,
+            description="Page number (deprecated in favor of keyset cursor)",
+        ),
         size: int = Query(default=20, ge=1, le=100),
         cursor: str | None = Query(default=None, description="Opaque cursor for keyset pagination"),
         label: str | None = Query(

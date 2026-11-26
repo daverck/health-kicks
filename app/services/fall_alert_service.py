@@ -6,9 +6,15 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.api.v1.utils import build_google_maps_url, validate_and_normalize_date_range
+from app.api.v1.utils import (
+    build_google_maps_url,
+    decode_cursor,
+    encode_cursor,
+    validate_and_normalize_date_range,
+)
 from app.core.config import Settings, get_settings
 from app.core.pseudonymization import get_subject_pseudonym, mask_email
 from app.db.models import (
@@ -586,6 +592,7 @@ def query_fall_alerts(
     user: User,
     page: int = 1,
     page_size: int = 20,
+    cursor: str | None = None,
     state: str | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
@@ -623,23 +630,60 @@ def query_fall_alerts(
     if norm_end is not None:
         query = query.filter(FallAlert.detected_at_utc <= norm_end)
 
-    total = query.count()
-    alerts = (
+    next_cursor: str | None = None
+    if cursor is not None:
+        decoded = decode_cursor(cursor)
+        if decoded is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid pagination cursor format",
+            )
+        cur_ts, cur_id_str = decoded
+        try:
+            cur_id = int(cur_id_str)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid pagination cursor format",
+            )
+        query = query.filter(
+            or_(
+                FallAlert.detected_at_utc < cur_ts,
+                and_(
+                    FallAlert.detected_at_utc == cur_ts,
+                    FallAlert.id < cur_id,
+                ),
+            )
+        )
+        total = None
+    else:
+        total = query.count()
+
+    ordered_query = (
         query.options(
             selectinload(FallAlert.notifications),
             joinedload(FallAlert.user),
         )
         .order_by(FallAlert.detected_at_utc.desc(), FallAlert.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
     )
+
+    if cursor is None and page > 1:
+        ordered_query = ordered_query.offset((page - 1) * page_size)
+
+    alerts_plus_one = ordered_query.limit(page_size + 1).all()
+    if len(alerts_plus_one) > page_size:
+        alerts = alerts_plus_one[:page_size]
+        next_cursor = encode_cursor(alerts[-1].detected_at_utc, alerts[-1].id)
+    else:
+        alerts = alerts_plus_one
+        next_cursor = None
 
     items = [to_fall_alert_summary(a, user) for a in alerts]
     return PaginatedFallAlertsResponse(
         items=items,
         total=total,
-        page=page,
+        page=page if cursor is None else None,
         page_size=page_size,
+        next_cursor=next_cursor,
     )
 

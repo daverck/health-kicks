@@ -332,9 +332,16 @@ class PaginatedFallAlertsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[FallAlertSummary]
-    total: int
-    page: int
-    page_size: int
+    total: int | None = Field(
+        default=None, description="Total matching fall alerts (omitted or null on cursor pagination)"
+    )
+    page: int | None = Field(
+        default=None, description="Current page number (deprecated in favor of keyset cursor)"
+    )
+    page_size: int = Field(default=20, description="Entries per page")
+    next_cursor: str | None = Field(
+        default=None, description="Opaque cursor for keyset pagination of next page"
+    )
 
 
 class FallAlertAckPayload(BaseModel):

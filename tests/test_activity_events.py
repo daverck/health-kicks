@@ -178,10 +178,12 @@ def test_list_activities_pagination_and_sorting(client, db_session, auth_headers
 
     assert data["items"][1]["event_type"] == "idle"
     assert data["items"][1]["confidence_score"] == 0.98
+    assert data["total"] == 5
+    assert data["page"] == 1
     assert data.get("next_cursor") is not None
     assert response.headers.get("X-Next-Cursor") == data["next_cursor"]
 
-    # Query page 2 via cursor keyset pagination
+    # Query page 2 via cursor keyset pagination: count(*) and page must be None
     cursor_res = client.get(
         f"/api/v1/devices/HK-1/events/activities?cursor={data['next_cursor']}&page_size=2",
         headers=auth_headers,
@@ -191,6 +193,8 @@ def test_list_activities_pagination_and_sorting(client, db_session, auth_headers
     assert len(cursor_data["items"]) == 2
     assert cursor_data["items"][0]["event_type"] == "walk"  # -10 min
     assert cursor_data["items"][1]["event_type"] == "stairs_up"  # -15 min
+    assert cursor_data["total"] is None
+    assert cursor_data["page"] is None
 
     # Query page 2 via legacy page=2
     response2 = client.get(
@@ -202,6 +206,8 @@ def test_list_activities_pagination_and_sorting(client, db_session, auth_headers
     assert len(data2["items"]) == 2
     assert data2["items"][0]["event_type"] == "walk"  # -10 min
     assert data2["items"][1]["event_type"] == "stairs_up"  # -15 min
+    assert data2["total"] == 5
+    assert data2["page"] == 2
 
     # Query device with no events
     response_empty = client.get(

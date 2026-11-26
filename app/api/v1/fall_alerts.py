@@ -233,8 +233,17 @@ def create_fall_alerts_router(
     )
     def list_fall_alerts(
         user: CurrentUser,
-        page: int = Query(default=1, ge=1),
+        page: int = Query(
+            default=1,
+            ge=1,
+            deprecated=True,
+            description="Page number (deprecated in favor of keyset cursor)",
+        ),
         page_size: int = Query(default=20, ge=1, le=100),
+        cursor: str | None = Query(
+            default=None,
+            description="Opaque cursor (detected_at_utc|id) for keyset pagination",
+        ),
         state: str | None = Query(
             default=None,
             description="Single state, comma-separated states (e.g. ACKNOWLEDGED,EXHAUSTED), or 'all'",
@@ -252,6 +261,7 @@ def create_fall_alerts_router(
         ),
         db: Session = Depends(get_db),
         request: Request = None,  # type: ignore[assignment]
+        response: Response = None,  # type: ignore[assignment]
     ) -> PaginatedFallAlertsResponse:
         """List fall alerts with pagination, state/date filtering, RBAC isolation, and GDPR pseudonymization."""
         raw_end = request.query_params.get("end_date") if request is not None else None
@@ -260,6 +270,7 @@ def create_fall_alerts_router(
             user=user,
             page=page,
             page_size=page_size,
+            cursor=cursor,
             state=state,
             start_date=start_date,
             end_date=end_date,
@@ -267,6 +278,8 @@ def create_fall_alerts_router(
             user_id=user_id,
             pseudonym=pseudonym,
         )
+        if response is not None and res.next_cursor:
+            response.headers["X-Next-Cursor"] = res.next_cursor
         if user.role == UserRole.admin and pseudonym:
             # Audit admin querying specific patient fall alert history
             patient = db.query(User).filter(User.pseudonym == pseudonym).first()

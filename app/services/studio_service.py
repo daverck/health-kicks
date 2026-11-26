@@ -154,7 +154,6 @@ def query_studio_sessions(
     if duration_sec_max is not None:
         query = query.filter(StudioSession.duration_sec <= duration_sec_max)
 
-    total = query.with_entities(func.count(StudioSession.uuid)).scalar() or 0
     next_cursor: str | None = None
 
     if cursor is not None:
@@ -174,6 +173,9 @@ def query_studio_sessions(
                 ),
             )
         )
+        total = None
+    else:
+        total = query.with_entities(func.count(StudioSession.uuid)).scalar() or 0
 
     ordered_query = query.options(joinedload(StudioSession.user)).order_by(
         StudioSession.created_at.desc(), StudioSession.uuid.desc()
@@ -195,7 +197,7 @@ def query_studio_sessions(
     return PaginatedSessionsResponse(
         items=items,
         total=total,
-        page=page,
+        page=page if cursor is None else None,
         size=size,
         next_cursor=next_cursor,
     )

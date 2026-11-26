@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import smtplib
+import uuid
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 
@@ -22,6 +23,7 @@ from app.db.models import (
     AlertContact,
     Base,
     FallAlert,
+    FallAlertDelivery,
     FallAlertNotification,
     FallAlertNotificationStatus,
     FallAlertState,
@@ -1607,4 +1609,76 @@ def test_fall_alert_user_relationship_avoids_default_join(db_session) -> None:
 
     plain_sql = str(db_session.query(FallAlert).statement)
     assert "JOIN users" not in plain_sql.upper()
+
+
+def test_fall_alerts_keyset_cursor_pagination(client: TestClient, db_session: Session) -> None:
+    """Fall alerts endpoint supports keyset cursor pagination and skips count(*) when cursor is provided."""
+    user = User(
+        uuid=uuid.uuid4(),
+        email="cursor.fall@healthkicks.org",
+        name="Cursor Fall Patient",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    # Seed 4 fall alerts with distinct timestamps
+    base_time = datetime.now(UTC) - timedelta(hours=4)
+    for i in range(4):
+        alert = FallAlert(
+            event_id=f"evt-cursor-{i}",
+            user_id=user.id,
+            device_id="HK-TEST-DEV",
+            event_type="fall_forward",
+            confidence_score=0.92,
+            delivery=FallAlertDelivery.live.value,
+            state=FallAlertState.ACKNOWLEDGED.value,
+            detected_at_utc=base_time + timedelta(minutes=i * 15),
+        )
+        db_session.add(alert)
+    db_session.commit()
+
+    headers = _auth_headers(user)
+
+    # Page 1 without cursor (legacy/initial: has total and page)
+    res1 = client.get("/api/v1/fall-alerts?page_size=2", headers=headers)
+    assert res1.status_code == 200
+    data1 = res1.json()
+    assert len(data1["items"]) == 2
+    assert data1["total"] == 4
+    assert data1["page"] == 1
+    assert data1["next_cursor"] is not None
+    assert res1.headers.get("X-Next-Cursor") == data1["next_cursor"]
+
+    # Page 2 via cursor: count(*) and page must be None
+    cursor1 = data1["next_cursor"]
+    res2 = client.get(f"/api/v1/fall-alerts?cursor={cursor1}&page_size=2", headers=headers)
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert len(data2["items"]) == 2
+    assert data2["total"] is None
+    assert data2["page"] is None
+    assert data2["next_cursor"] is None
+    assert "X-Next-Cursor" not in res2.headers
+
+
+def test_fall_alerts_invalid_cursor_400(client: TestClient, db_session: Session) -> None:
+    """Invalid cursor format must return HTTP 400 Bad Request."""
+    user = User(
+        uuid=uuid.uuid4(),
+        email="cursor.fall.invalid@healthkicks.org",
+        name="Invalid Cursor User",
+        role=UserRole.user,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    headers = _auth_headers(user)
+    res = client.get("/api/v1/fall-alerts?cursor=invalid-not-base64", headers=headers)
+    assert res.status_code == 400
+    assert "Invalid pagination cursor format" in res.json()["detail"]
 
