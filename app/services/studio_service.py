@@ -8,7 +8,7 @@ from uuid import UUID
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
 from sqlalchemy import and_, case, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.edge_ai import EDGE_AI_LABELS
 from app.core.pseudonymization import get_subject_pseudonym
@@ -175,7 +175,9 @@ def query_studio_sessions(
             )
         )
 
-    ordered_query = query.order_by(StudioSession.created_at.desc(), StudioSession.uuid.desc())
+    ordered_query = query.options(joinedload(StudioSession.user)).order_by(
+        StudioSession.created_at.desc(), StudioSession.uuid.desc()
+    )
     if cursor is None and page > 1:
         ordered_query = ordered_query.offset((page - 1) * size)
 
@@ -217,7 +219,12 @@ def get_authorized_session(
         )
 
     sess_uuid = parse_session_uuid(session_id)
-    session = db.query(StudioSession).filter(StudioSession.uuid == sess_uuid).one_or_none()
+    session = (
+        db.query(StudioSession)
+        .options(joinedload(StudioSession.user))
+        .filter(StudioSession.uuid == sess_uuid)
+        .one_or_none()
+    )
     if session is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

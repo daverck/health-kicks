@@ -217,7 +217,7 @@ class StudioSession(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
-    user: Mapped["User"] = relationship("User", lazy="joined")
+    user: Mapped["User"] = relationship("User", lazy="select")
 
 
 class DailyActivityStep(Base):

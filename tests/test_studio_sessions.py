@@ -1357,3 +1357,12 @@ def test_delete_session_dynamodb_failure_returns_502_and_preserves_db_session(
     assert res.status_code == 502
     assert "Failed to purge studio session readings" in res.json()["detail"]
     assert db_session.query(StudioSession).filter_by(uuid=sess_id).one_or_none() is not None
+
+
+def test_studio_session_user_relationship_avoids_default_join(db_session) -> None:
+    """StudioSession.user uses lazy='select' so plain queries do not emit a LEFT OUTER JOIN users."""
+    assert StudioSession.__mapper__.relationships["user"].lazy == "select"
+
+    plain_sql = str(db_session.query(StudioSession).statement)
+    assert "JOIN users" not in plain_sql.upper()
+
