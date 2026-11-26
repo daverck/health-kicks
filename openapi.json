@@ -132,23 +132,37 @@
             "title": "Next Cursor"
           },
           "page": {
-            "title": "Page",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current page number (deprecated in favor of keyset cursor)",
+            "title": "Page"
           },
           "page_size": {
             "title": "Page Size",
             "type": "integer"
           },
           "total": {
-            "title": "Total",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching items (omitted or null on cursor pagination)",
+            "title": "Total"
           }
         },
         "required": [
           "items",
-          "page",
-          "page_size",
-          "total"
+          "page_size"
         ],
         "title": "ActivityEventPage",
         "type": "object"
@@ -1932,23 +1946,37 @@
             "title": "Next Cursor"
           },
           "page": {
-            "title": "Page",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current page number (deprecated in favor of keyset cursor)",
+            "title": "Page"
           },
           "page_size": {
             "title": "Page Size",
             "type": "integer"
           },
           "total": {
-            "title": "Total",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching items (omitted or null on cursor pagination)",
+            "title": "Total"
           }
         },
         "required": [
           "items",
-          "page",
-          "page_size",
-          "total"
+          "page_size"
         ],
         "title": "HapticLogPage",
         "type": "object"
@@ -2688,13 +2716,33 @@
             "title": "Items",
             "type": "array"
           },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for keyset pagination of next page",
+            "title": "Next Cursor"
+          },
           "page": {
-            "description": "Current page number",
-            "minimum": 1.0,
-            "title": "Page",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current page number (deprecated in favor of keyset cursor)",
+            "title": "Page"
           },
           "page_size": {
+            "default": 50,
             "description": "Entries per page",
             "maximum": 100.0,
             "minimum": 1.0,
@@ -2702,16 +2750,20 @@
             "type": "integer"
           },
           "total": {
-            "description": "Total matching audit records",
-            "minimum": 0.0,
-            "title": "Total",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching audit records (omitted or null on cursor pagination)",
+            "title": "Total"
           }
         },
         "required": [
-          "total",
-          "page",
-          "page_size",
           "items"
         ],
         "title": "PaginatedAccessAuditLogsResponse",
@@ -2728,24 +2780,51 @@
             "title": "Items",
             "type": "array"
           },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for keyset pagination of next page",
+            "title": "Next Cursor"
+          },
           "page": {
-            "title": "Page",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current page number (deprecated in favor of keyset cursor)",
+            "title": "Page"
           },
           "page_size": {
+            "default": 20,
+            "description": "Entries per page",
             "title": "Page Size",
             "type": "integer"
           },
           "total": {
-            "title": "Total",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching fall alerts (omitted or null on cursor pagination)",
+            "title": "Total"
           }
         },
         "required": [
-          "items",
-          "total",
-          "page",
-          "page_size"
+          "items"
         ],
         "title": "PaginatedFallAlertsResponse",
         "type": "object"
@@ -2774,8 +2853,16 @@
             "title": "Next Cursor"
           },
           "page": {
-            "title": "Page",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current page number (deprecated in favor of keyset cursor)",
+            "title": "Page"
           },
           "prev_cursor": {
             "anyOf": [
@@ -2794,14 +2881,20 @@
             "type": "integer"
           },
           "total": {
-            "title": "Total",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching sessions (omitted or null on cursor pagination)",
+            "title": "Total"
           }
         },
         "required": [
           "items",
-          "total",
-          "page",
           "size"
         ],
         "title": "PaginatedSessionsResponse",
@@ -4096,13 +4189,15 @@
         "operationId": "list_access_logs_api_v1_audit_access_logs_get",
         "parameters": [
           {
-            "description": "Page number",
+            "deprecated": true,
+            "description": "Page number (deprecated in favor of keyset cursor)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "Page number",
+              "deprecated": true,
+              "description": "Page number (deprecated in favor of keyset cursor)",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -4120,6 +4215,24 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor (created_at_utc|id) for keyset pagination",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor (created_at_utc|id) for keyset pagination",
+              "title": "Cursor"
             }
           },
           {
@@ -4945,11 +5058,15 @@
             }
           },
           {
+            "deprecated": true,
+            "description": "Offset skip (deprecated in favor of keyset cursor)",
             "in": "query",
             "name": "skip",
             "required": false,
             "schema": {
               "default": 0,
+              "deprecated": true,
+              "description": "Offset skip (deprecated in favor of keyset cursor)",
               "minimum": 0,
               "title": "Skip",
               "type": "integer"
@@ -5196,11 +5313,15 @@
             }
           },
           {
+            "deprecated": true,
+            "description": "Page number (deprecated in favor of keyset cursor)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "deprecated": true,
+              "description": "Page number (deprecated in favor of keyset cursor)",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -5323,11 +5444,15 @@
             }
           },
           {
+            "deprecated": true,
+            "description": "Page number (deprecated in favor of keyset cursor)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "deprecated": true,
+              "description": "Page number (deprecated in favor of keyset cursor)",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -5450,11 +5575,15 @@
             }
           },
           {
+            "deprecated": true,
+            "description": "Page number (deprecated in favor of keyset cursor)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "deprecated": true,
+              "description": "Page number (deprecated in favor of keyset cursor)",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -5841,11 +5970,15 @@
         "operationId": "list_fall_alerts_api_v1_fall_alerts_get",
         "parameters": [
           {
+            "deprecated": true,
+            "description": "Page number (deprecated in favor of keyset cursor)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "deprecated": true,
+              "description": "Page number (deprecated in favor of keyset cursor)",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -5861,6 +5994,24 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor (detected_at_utc|id) for keyset pagination",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor (detected_at_utc|id) for keyset pagination",
+              "title": "Cursor"
             }
           },
           {
@@ -7086,11 +7237,15 @@
         "operationId": "list_sessions_api_v1_studio_sessions_get",
         "parameters": [
           {
+            "deprecated": true,
+            "description": "Page number (deprecated in favor of keyset cursor)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "deprecated": true,
+              "description": "Page number (deprecated in favor of keyset cursor)",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
