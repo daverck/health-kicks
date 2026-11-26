@@ -230,6 +230,15 @@ def test_http_access_log_middleware_emits_structured_metadata(caplog) -> None:
         health_resp = client.get("/health")
         assert health_resp.status_code == 200
 
+        v1_health_resp = client.get("/api/v1/health")
+        assert v1_health_resp.status_code == 200
+
+        liveness_resp = client.get("/api/v1/health/liveness")
+        assert liveness_resp.status_code == 200
+
+        readiness_resp = client.get("/api/v1/health/readiness")
+        assert readiness_resp.status_code == 200
+
         not_found_resp = client.get("/api/v1/non-existent-route-xyz")
         assert not_found_resp.status_code == 404
 
@@ -247,6 +256,11 @@ def test_http_access_log_middleware_emits_structured_metadata(caplog) -> None:
     health_records = [r for r in access_records if getattr(r, "http", {}).get("path") == "/health"]
     assert len(health_records) >= 1
     assert health_records[-1].levelno == logging.DEBUG
+
+    for v1_path in ("/api/v1/health", "/api/v1/health/liveness", "/api/v1/health/readiness"):
+        v1_records = [r for r in access_records if getattr(r, "http", {}).get("path") == v1_path]
+        assert len(v1_records) >= 1
+        assert v1_records[-1].levelno == logging.DEBUG
 
     not_found_records = [
         r for r in access_records if getattr(r, "http", {}).get("path") == "/api/v1/non-existent-route-xyz"

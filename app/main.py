@@ -347,6 +347,18 @@ async def unhandled_exception_middleware(request: Request, call_next: Any) -> Re
         )
 
 
+_QUIET_ACCESS_LOG_PATHS = frozenset(
+    {
+        "/",
+        "/health",
+        "/metrics",
+        "/api/v1/health",
+        "/api/v1/health/liveness",
+        "/api/v1/health/readiness",
+    }
+)
+
+
 @app.middleware("http")
 async def metrics_and_access_log_middleware(request: Request, call_next: Any) -> Response:
     start_time = time.monotonic()
@@ -362,7 +374,7 @@ async def metrics_and_access_log_middleware(request: Request, call_next: Any) ->
     metrics_collector.record_request(request.method, metric_path, status_code, duration_ms)
 
     client_ip = _resolve_client_ip(request)
-    if path in ("/", "/health", "/metrics") and status_code < 400:
+    if path in _QUIET_ACCESS_LOG_PATHS and status_code < 400:
         log_level = logging.DEBUG
     elif status_code >= 500:
         log_level = logging.ERROR
