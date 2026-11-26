@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.deps import CurrentUser
 from app.core.rate_limit import rate_limiter
@@ -298,7 +298,10 @@ def create_fall_alerts_router(
             parsed_uuid = uuid.UUID(raw)
             alert = (
                 db.query(FallAlert)
-                .options(selectinload(FallAlert.notifications))
+                .options(
+                    selectinload(FallAlert.notifications),
+                    joinedload(FallAlert.user),
+                )
                 .filter(FallAlert.uuid == parsed_uuid)
                 .one_or_none()
             )
@@ -308,7 +311,10 @@ def create_fall_alerts_router(
         if alert is None and raw.isdigit():
             alert = (
                 db.query(FallAlert)
-                .options(selectinload(FallAlert.notifications))
+                .options(
+                    selectinload(FallAlert.notifications),
+                    joinedload(FallAlert.user),
+                )
                 .filter(FallAlert.id == int(raw))
                 .one_or_none()
             )

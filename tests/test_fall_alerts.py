@@ -1599,3 +1599,12 @@ def test_to_fall_alert_ack_result_unit(patient_user) -> None:
     assert res.state == FallAlertState.ACKNOWLEDGED.value
     assert res.acknowledged_by == "Jean Valjean"
     assert "Prise en charge enregistrée avec succès par Jean Valjean." in res.message
+
+
+def test_fall_alert_user_relationship_avoids_default_join(db_session) -> None:
+    """FallAlert.user uses lazy='select' so plain queries do not emit a LEFT OUTER JOIN users."""
+    assert FallAlert.__mapper__.relationships["user"].lazy == "select"
+
+    plain_sql = str(db_session.query(FallAlert).statement)
+    assert "JOIN users" not in plain_sql.upper()
+

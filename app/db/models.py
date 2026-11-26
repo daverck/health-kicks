@@ -415,7 +415,7 @@ class FallAlert(Base):
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship("User", lazy="joined")
+    user: Mapped["User"] = relationship("User", lazy="select")
     notifications: Mapped[list["FallAlertNotification"]] = relationship(
         "FallAlertNotification",
         back_populates="alert",

@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import Settings, get_settings
 from app.db.models import (
@@ -228,7 +228,12 @@ def get_alert_and_notification_for_token(
 ) -> tuple[FallAlert, FallAlertNotification]:
     """Validate token and load the corresponding FallAlert and FallAlertNotification."""
     alert_id, notification_id = verify_ack_token(token, config=config)
-    alert = db.query(FallAlert).filter(FallAlert.id == alert_id).one_or_none()
+    alert = (
+        db.query(FallAlert)
+        .options(joinedload(FallAlert.user))
+        .filter(FallAlert.id == alert_id)
+        .one_or_none()
+    )
     if alert is None:
         raise AckTokenError("Alerte de chute introuvable.", expired=False)
     notif = (
