@@ -435,8 +435,57 @@ def test_api_get_telemetry_temporal_isolation(db_session, telemetry_service, moc
         )
 
 
-def test_get_session_readings_bounded_sort_key_and_fallback(telemetry_service, mock_table) -> None:
-    """Verify bounded sort-key query is used first and falls back to partition query if empty."""
+def test_get_session_readings_uses_sparse_gsi(telemetry_service, mock_table) -> None:
+    """Verify session readings query the sparse GSI directly in a single call."""
+    sample_item = {
+        "device_id": "HK-1",
+        "timestamp": 1700000000000000,
+        "ax": Decimal("0.1"),
+        "ay": Decimal("0.2"),
+        "az": Decimal("9.8"),
+        "gx": Decimal("0.0"),
+        "gy": Decimal("0.0"),
+        "gz": Decimal("0.0"),
+        "session_id": "sess-gsi",
+        "label": "walk",
+    }
+    mock_table.query.return_value = {"Items": [sample_item]}
+
+    res = telemetry_service.get_session_readings(
+        "HK-1",
+        "sess-gsi",
+        start_epoch_us=1600000000000000,
+        end_epoch_us=1600000005000000,
+    )
+    assert res is not None
+    assert res.sample_count == 1
+    assert mock_table.query.call_count == 1
+    assert mock_table.query.call_args.kwargs["IndexName"] == "gsi_session_timestamp"
+
+
+def test_get_dataset_stats_global_uses_sparse_gsi(telemetry_service, mock_table) -> None:
+    """Verify global dataset stats scan the sparse GSI instead of the full table."""
+    mock_table.scan.return_value = {
+        "Items": [
+            {"session_id": "sess-1", "label": "walk"},
+            {"session_id": "sess-2", "label": "run"},
+        ]
+    }
+
+    stats = telemetry_service.get_dataset_stats(device_id=None)
+    assert stats.total_sessions == 2
+    assert stats.by_label == {"walk": 1, "run": 1}
+    assert mock_table.scan.call_args.kwargs["IndexName"] == "gsi_session_timestamp"
+
+
+def test_get_session_readings_bounded_sort_key_and_fallback(mock_table) -> None:
+    """Verify bounded sort-key query is used first and falls back to partition query when GSI is disabled."""
+    from types import SimpleNamespace
+
+    legacy_service = TelemetryService(
+        table=mock_table,
+        config=SimpleNamespace(dynamodb_telemetry_session_gsi=""),
+    )
     sample_item = {
         "device_id": "HK-1",
         "timestamp": 1700000000000000,
@@ -452,7 +501,7 @@ def test_get_session_readings_bounded_sort_key_and_fallback(telemetry_service, m
     # First call (bounded) returns empty -> falls back to second call (unbounded)
     mock_table.query.side_effect = [{"Items": []}, {"Items": [sample_item]}]
 
-    res = telemetry_service.get_session_readings(
+    res = legacy_service.get_session_readings(
         "HK-1",
         "sess-bounded",
         start_epoch_us=1600000000000000,

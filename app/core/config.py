@@ -53,6 +53,7 @@ class Settings:
     frontend_url: str = "https://app.healthkicks.eu"
     # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting, Idempotency)
     dynamodb_telemetry_table: str = "healthkicks_telemetry"
+    dynamodb_telemetry_session_gsi: str = "gsi_session_timestamp"
     dynamodb_oauth_tickets_table: str = "healthkicks_oauth_tickets"
     dynamodb_rate_limits_table: str = "healthkicks_rate_limits"
     dynamodb_idempotency_table: str = "healthkicks_rate_limits"
@@ -405,6 +406,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         # DynamoDB Telemetry & Distributed State (Studio mode, OAuth tickets, Rate limiting)
         "dynamodb_telemetry_table": (
             ("HEALTHKICKS_DYNAMODB_TELEMETRY_TABLE", "DYNAMODB_TELEMETRY_TABLE"),
+            str,
+        ),
+        "dynamodb_telemetry_session_gsi": (
+            ("HEALTHKICKS_DYNAMODB_TELEMETRY_SESSION_GSI", "DYNAMODB_TELEMETRY_SESSION_GSI"),
             str,
         ),
         "dynamodb_oauth_tickets_table": (

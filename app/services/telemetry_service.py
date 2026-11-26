@@ -144,7 +144,18 @@ class TelemetryService:
         start_epoch_us: int | None = None,
         end_epoch_us: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Query session items with optional sort-key timestamp bounds and automatic partition fallback."""
+        """Query session items via the sparse session GSI, falling back to base-table bounds if unconfigured."""
+        gsi_name = getattr(self._config, "dynamodb_telemetry_session_gsi", "")
+        if gsi_name:
+            gsi_kwargs: dict[str, Any] = {
+                "IndexName": gsi_name,
+                "KeyConditionExpression": Key("session_id").eq(session_id),
+                "FilterExpression": Attr("device_id").eq(device_id),
+                "ProjectionExpression": projection_expression,
+                "ExpressionAttributeNames": dict(expression_attr_names),
+            }
+            return self._query_all_items(gsi_kwargs, error_context)
+
         base_kwargs: dict[str, Any] = {
             "FilterExpression": Attr("session_id").eq(session_id),
             "ProjectionExpression": projection_expression,
@@ -367,6 +378,9 @@ class TelemetryService:
                 "ProjectionExpression": proj_expr,
                 "ExpressionAttributeNames": attr_names,
             }
+            gsi_name = getattr(self._config, "dynamodb_telemetry_session_gsi", "")
+            if gsi_name:
+                query_kwargs["IndexName"] = gsi_name
             fetch_fn = table.scan
 
         items = self._execute_paginated_fetch(

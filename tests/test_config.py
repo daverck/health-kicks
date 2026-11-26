@@ -66,6 +66,7 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert settings.google_mobile_redirect_uri == "https://api.healthkicks.eu/api/v1/auth/google/callback"
     assert settings.refresh_token_expire_days == 7
     assert settings.dynamodb_telemetry_table == "healthkicks_telemetry"
+    assert settings.dynamodb_telemetry_session_gsi == "gsi_session_timestamp"
     assert settings.aws_iot_studio_start_topic == "healthkicks/v1/{device_id}/commands/studio/start"
     assert settings.database_pool_size == 5
     assert settings.database_max_overflow == 10
