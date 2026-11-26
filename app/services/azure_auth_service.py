@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 AZURE_JWKS_CACHE_LIFESPAN = 3600  # 1 hour in-memory JWKS caching
 AZURE_CLOCK_SKEW_LEEWAY_SECONDS = 10  # 10s tolerance for clock drift
+AZURE_AUTHORITY_BASE = "https://login.microsoftonline.com"
+AZURE_GRAPH_ME_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
 
 _azure_jwks_clients: dict[str, jwt.PyJWKClient] = {}
 _ORIG_HTTPX_GET = httpx.get
@@ -51,7 +53,7 @@ class AzureAuthError(Exception):
 def get_azure_jwks_client() -> jwt.PyJWKClient:
     """Retrieve or initialize the cached PyJWKClient for Azure AD."""
     tenant_id = settings.azure_tenant_id or "common"
-    jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
+    jwks_uri = f"{AZURE_AUTHORITY_BASE}/{tenant_id}/discovery/v2.0/keys"
     client = _azure_jwks_clients.get(jwks_uri)
     if client is None:
         client = jwt.PyJWKClient(
@@ -94,12 +96,12 @@ def verify_azure_id_token(
     iss = unverified_claims.get("iss", "")
     tenant_id = settings.azure_tenant_id or "common"
     if tenant_id not in ("common", "organizations", "consumers"):
-        expected_iss = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+        expected_iss = f"{AZURE_AUTHORITY_BASE}/{tenant_id}/v2.0"
         if iss != expected_iss:
             raise AzureAuthError(f"Unexpected Azure token issuer: {iss}")
     else:
         tid = unverified_claims.get("tid")
-        if not tid or iss != f"https://login.microsoftonline.com/{tid}/v2.0":
+        if not tid or iss != f"{AZURE_AUTHORITY_BASE}/{tid}/v2.0":
             raise AzureAuthError(f"Invalid Azure token issuer or tenant: {iss}")
 
     if unverified_claims.get("aud") != settings.azure_client_id:
@@ -139,7 +141,7 @@ def azure_authorization_url(
     if not settings.azure_client_id or not settings.azure_client_secret:
         raise AzureAuthError("Microsoft Azure OAuth credentials are not configured")
     tenant_id = settings.azure_tenant_id or "common"
-    base_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+    base_url = f"{AZURE_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/authorize"
     target_redirect_uri = redirect_uri or (
         settings.azure_mobile_redirect_uri
         if is_mobile and settings.azure_mobile_redirect_uri
@@ -167,7 +169,7 @@ def exchange_code_for_azure_user(
     if not settings.azure_client_id or not settings.azure_client_secret:
         raise AzureAuthError("Microsoft Azure OAuth credentials are not configured")
     tenant_id = settings.azure_tenant_id or "common"
-    token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    token_endpoint = f"{AZURE_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/token"
     target_redirect_uri = redirect_uri or (
         settings.azure_mobile_redirect_uri
         if is_mobile and settings.azure_mobile_redirect_uri
@@ -205,7 +207,7 @@ def exchange_code_for_azure_user(
     if access_token:
         try:
             graph_res = _http_get(
-                "https://graph.microsoft.com/v1.0/me",
+                AZURE_GRAPH_ME_ENDPOINT,
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             if graph_res.status_code == 200:

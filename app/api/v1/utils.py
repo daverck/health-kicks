@@ -73,3 +73,10 @@ def decode_cursor(cursor_str: str | None) -> tuple[datetime, str] | None:
         return datetime.fromisoformat(ts_part), id_part
     except Exception:
         return None
+
+
+def build_google_maps_url(lat: float | None, lon: float | None) -> str | None:
+    """Build a Google Maps URL for optional GPS coordinates."""
+    if lat is None or lon is None:
+        return None
+    return f"https://www.google.com/maps?q={lat:.6f},{lon:.6f}"

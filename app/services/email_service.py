@@ -11,6 +11,7 @@ from email.utils import formataddr
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.api.v1.utils import build_google_maps_url
 from app.core.config import Settings, get_settings
 
 logger = logging.getLogger("healthkicks.email")
@@ -139,9 +140,7 @@ class SmtpEmailChannel:
         fall_label = FALL_TYPE_LABELS_FR.get(event_type, event_type)
         confidence_pct = int(round(confidence_score * 100))
 
-        maps_url: str | None = None
-        if lat is not None and lon is not None:
-            maps_url = f"https://www.google.com/maps?q={lat:.6f},{lon:.6f}"
+        maps_url = build_google_maps_url(lat, lon)
 
         subject = (
             f"[URGENCE HealthKicks] Chute détectée pour {patient_name} "

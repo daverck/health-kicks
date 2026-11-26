@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.api.v1.utils import validate_and_normalize_date_range
+from app.api.v1.utils import build_google_maps_url, validate_and_normalize_date_range
 from app.core.config import Settings, get_settings
 from app.core.pseudonymization import get_subject_pseudonym, mask_email
 from app.db.models import (
@@ -542,11 +542,7 @@ def to_fall_alert_ack_info(
     paris_dt = format_paris_datetime(alert.detected_at_utc)
     fall_label = FALL_TYPE_LABELS_FR.get(alert.event_type, alert.event_type)
     confidence_pct = int(round(alert.confidence_score * 100))
-    maps_url = (
-        f"https://www.google.com/maps?q={alert.lat:.6f},{alert.lon:.6f}"
-        if alert.lat is not None and alert.lon is not None
-        else None
-    )
+    maps_url = build_google_maps_url(alert.lat, alert.lon)
     ack_person = (
         f"{alert.acknowledged_by_first_name or ''} {alert.acknowledged_by_last_name or ''}".strip()
         if (alert.acknowledged_by_first_name or alert.acknowledged_by_last_name)

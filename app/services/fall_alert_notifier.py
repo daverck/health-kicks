@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.v1.utils import build_google_maps_url
 from app.core.config import Settings, get_settings
 from app.db.models import (
     AlertContact,
@@ -127,11 +128,7 @@ def build_sms_notification_command(
     db.flush()
 
     sms_ack_url = build_ack_url(alert.id, sms_notif.id, config=cfg)
-    maps_url = (
-        f"https://www.google.com/maps?q={alert.lat:.6f},{alert.lon:.6f}"
-        if (alert.lat is not None and alert.lon is not None)
-        else None
-    )
+    maps_url = build_google_maps_url(alert.lat, alert.lon)
     detected_at_str = format_paris_datetime(_ensure_utc(alert.detected_at_utc) or now_utc)
     sms_body = build_fall_alert_sms_body(
         patient_name=patient_name,
