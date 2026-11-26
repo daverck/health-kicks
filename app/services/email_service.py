@@ -97,8 +97,10 @@ class SmtpEmailChannel:
             try:
                 with self._create_smtp(cfg.smtp_host, cfg.smtp_port, 5.0) as server:
                     server.ehlo()
-                    server.starttls()
-                    server.ehlo()
+                    has_starttls = server.has_extn("starttls") if hasattr(server, "has_extn") else True
+                    if has_starttls or cfg.environment == "production":
+                        server.starttls()
+                        server.ehlo()
                     if cfg.smtp_user and cfg.smtp_password:
                         server.login(cfg.smtp_user, cfg.smtp_password)
                     server.send_message(message)

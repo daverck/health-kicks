@@ -312,3 +312,23 @@ class TestIoTCredentialsEndpoint:
         pub_stmt = next(s for s in policy["Statement"] if s["Action"] == ["iot:Publish", "iot:Receive"])
         expected_user_topic = f"arn:aws:iot:eu-west-1:123456789012:topic/healthkicks/v1/users/{standard_user.uuid}/*"
         assert expected_user_topic in pub_stmt["Resource"]
+
+
+def test_sts_service_uses_custom_endpoint_url(monkeypatch):
+    """Verify AWSSTSService passes sts_endpoint_url to boto3.client when configured."""
+    captured: dict = {}
+
+    def fake_boto_client(service_name, **kwargs):
+        captured["service_name"] = service_name
+        captured["kwargs"] = kwargs
+        return MagicMock()
+
+    monkeypatch.setattr("app.services.aws_sts_service.boto3.client", fake_boto_client)
+    cfg = Settings(aws_region="eu-west-1", sts_endpoint_url="http://localstack:4566")
+    svc = AWSSTSService(config=cfg)
+    svc._get_client()
+
+    assert captured["service_name"] == "sts"
+    assert captured["kwargs"]["endpoint_url"] == "http://localstack:4566"
+    assert captured["kwargs"]["region_name"] == "eu-west-1"
+

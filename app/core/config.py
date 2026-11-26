@@ -59,6 +59,7 @@ class Settings:
     dynamodb_idempotency_table: str = "healthkicks_rate_limits"
     idempotency_ttl_seconds: int = 86400
     dynamodb_endpoint_url: str | None = None
+    sts_endpoint_url: str | None = None
     # Database pool resilience & configuration
     database_pool_size: int = 5
     database_max_overflow: int = 10
@@ -211,6 +212,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "dynamodb_endpoint_url": yaml_values.get(
             "dynamodb_endpoint_url",
             _nested_value(yaml_values, "aws", "dynamodb_endpoint_url", defaults.dynamodb_endpoint_url),
+        ),
+        "sts_endpoint_url": yaml_values.get(
+            "sts_endpoint_url",
+            _nested_value(yaml_values, "aws", "sts_endpoint_url", defaults.sts_endpoint_url),
         ),
         # Database pool resilience
         "database_pool_size": int(
@@ -430,6 +435,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         ),
         "dynamodb_endpoint_url": (
             ("HEALTHKICKS_DYNAMODB_ENDPOINT_URL", "DYNAMODB_ENDPOINT_URL"),
+            str,
+        ),
+        "sts_endpoint_url": (
+            ("HEALTHKICKS_STS_ENDPOINT_URL", "STS_ENDPOINT_URL"),
             str,
         ),
         # Database pool resilience

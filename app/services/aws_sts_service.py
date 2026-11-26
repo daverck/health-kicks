@@ -29,11 +29,14 @@ class AWSSTSService:
                 read_timeout=5,
                 retries={"max_attempts": 2, "mode": "standard"},
             )
-            self._client = boto3.client(
-                "sts",
-                region_name=self._config.aws_region,
-                config=boto_cfg,
-            )
+            client_kwargs: dict[str, Any] = {
+                "region_name": self._config.aws_region,
+                "config": boto_cfg,
+            }
+            sts_endpoint = getattr(self._config, "sts_endpoint_url", None)
+            if sts_endpoint:
+                client_kwargs["endpoint_url"] = sts_endpoint
+            self._client = boto3.client("sts", **client_kwargs)
         return self._client
 
     def build_session_policy(self, user_id: str | int, device_ids: list[str]) -> str:
